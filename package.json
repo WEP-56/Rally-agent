@@ -1,0 +1,51 @@
+{
+	"name": "rally",
+	"productName": "Rally",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"main": "./out/main/index.js",
+	"workspaces": [
+		"packages/*"
+	],
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"scripts": {
+		"dev": "electron-vite dev",
+		"build:packages": "npm run build -w @rally/telemetry && npm run build -w @rally/schema && npm run build -w @rally/tui && npm run build -w @rally/codemode && npm run build -w @rally/mcp && npm run build:offline -w @rally/ai && npm run build -w @rally/agent-core && npm run build:unbundled -w @rally/coding-agent",
+		"build": "npm run build:packages && electron-vite build",
+		"preview": "electron-vite preview",
+		"typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+		"hydrate:model-data": "npm --prefix packages/ai run hydrate-model-data",
+		"dist": "npm run build && electron-builder --win"
+	},
+	"dependencies": {
+		"@rally/agent-core": "1.5.0",
+		"@rally/ai": "1.5.0",
+		"@rally/coding-agent": "1.5.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.3.5",
+		"@tailwindcss/vite": "4.3.5",
+		"@types/node": "22.19.19",
+		"@types/react": "19.3.0",
+		"@types/react-dom": "19.3.0",
+		"@vitejs/plugin-react": "6.2.1",
+		"clsx": "2.1.1",
+		"electron": "45.2.3",
+		"electron-builder": "26.18.0",
+		"electron-vite": "6.0.0",
+		"lucide-react": "1.70.0",
+		"react": "19.3.1",
+		"react-dom": "19.3.1",
+		"tailwind-merge": "3.7.0",
+		"tailwindcss": "4.3.5",
+		"typescript": "7.0.2",
+		"vite": "8.3.6",
+		"vitest": "4.1.12"
+	},
+	"overrides": {
+		"protobufjs": "7.6.6"
+	}
+}

@@ -1,0 +1,17 @@
+.DS_Store
+Thumbs.db
+node_modules/
+dist/
+dist-electron/
+out/
+build/
+release/
+coverage/
+.vite/
+.turbo/
+.env
+.env.*
+*.log
+example/
+packages/ai/src/providers/data/
+.artifacts/

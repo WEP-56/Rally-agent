@@ -1,0 +1,17 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"outDir": "./dist",
+		"paths": {
+			"@rally/agent-core": ["../agent/dist/index.d.ts"],
+			"@rally/agent-core/*": ["../agent/dist/*.d.ts"],
+			"@rally/ai": ["../ai/dist/index.d.ts"],
+			"@rally/ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"],
+			"@rally/tui": ["../tui/dist/index.d.ts"],
+			"@rally/tui/*": ["../tui/dist/*.d.ts", "../tui/dist/components/*.d.ts"]
+		},
+		"rootDir": "./src"
+	},
+	"include": ["src/**/*.ts", "src/**/*.d.ts"],
+	"exclude": ["node_modules", "dist", "src/experimental"]
+}
