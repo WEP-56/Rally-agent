@@ -1,13 +1,18 @@
+import { ArrowDownWideNarrow, ArrowUpNarrowWide, Brain, ChevronRight, Cpu, Sparkles, Workflow } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
-import { ArrowDownWideNarrow, ArrowUpNarrowWide, Brain, Cpu, Workflow, ChevronRight, Sparkles } from "lucide-react";
 import type { Task, TaskStatus } from "../data";
-import { modelLabel, useApp } from "../store";
+import { useApp } from "../store";
+import { useModels } from "../models";
 import { cn } from "../utils/cn";
+import { clock, StatusBadge, StatusIcon, timeAgo } from "./status";
 import { RallyLogo, Segmented } from "./ui";
-import { StatusIcon, StatusBadge, timeAgo, clock } from "./status";
 
 function BusinessCard({ tasks }: { tasks: Task[] }) {
   const { config } = useApp();
+  const { state: models } = useModels();
+  const activeModel =
+    models?.active && models.available.find((m) => m.provider === models.active?.provider && m.id === models.active?.model);
+  const workerModel = models?.worker && models.available.find((m) => m.provider === models.worker?.provider && m.id === models.worker?.model);
   const ref = useRef<HTMLDivElement>(null);
   const [tilt, setTilt] = useState({ x: 0, y: 0, mx: 50, my: 50, on: false });
 
@@ -57,7 +62,7 @@ function BusinessCard({ tasks }: { tasks: Task[] }) {
           <div className="mt-auto flex items-end justify-between gap-4 pt-3">
             <div className="min-w-0 space-y-1 text-[10.5px] text-muted">
               <div className="flex items-center gap-1.5"><Brain size={11} className="shrink-0 text-faint" /><span className="truncate font-mono">{config.memoryPath}</span></div>
-              <div className="flex items-center gap-1.5"><Cpu size={11} className="shrink-0 text-faint" /><span className="truncate">{modelLabel(config.rallyModel, "gpt-5")} · 工位 {modelLabel(config.taskModel, "gpt-5-mini")}</span></div>
+              <div className="flex items-center gap-1.5"><Cpu size={11} className="shrink-0 text-faint" /><span className="truncate" title={`主 agent：${activeModel?.name ?? "未选择"}；任务 agent：${workerModel?.name ?? "未选择"}`}>主：{activeModel?.name ?? "未选择模型"} · 任务：{workerModel?.name ?? "未选择模型"}</span></div>
               <div className="flex items-center gap-1.5"><Workflow size={11} className="shrink-0 text-faint" /><span className="truncate">{config.workstyle}</span></div>
             </div>
             {/* seal */}
@@ -79,21 +84,23 @@ function BusinessCard({ tasks }: { tasks: Task[] }) {
   );
 }
 
-const FILTERS: { v: "all" | TaskStatus; l: string }[] = [
+type Filter = "all" | "running" | "queued" | "attention" | "done";
+const NEEDS_ATTENTION: TaskStatus[] = ["failed", "blocked", "interrupted", "needs_answer", "needs_gate", "pending_approval"];
+const FILTERS: { v: Filter; l: string }[] = [
   { v: "all", l: "全部" },
   { v: "running", l: "进行中" },
   { v: "queued", l: "排队" },
-  { v: "failed", l: "需处理" },
+  { v: "attention", l: "需处理" },
   { v: "done", l: "已完成" },
 ];
 
 export function Workstation({ tasks }: { tasks: Task[] }) {
   const { openTask } = useApp();
   const [order, setOrder] = useState<"desc" | "asc">("desc");
-  const [filter, setFilter] = useState<"all" | TaskStatus>("all");
+  const [filter, setFilter] = useState<Filter>("all");
 
   const list = useMemo(() => {
-    const l = tasks.filter((t) => filter === "all" || t.status === filter);
+    const l = tasks.filter((t) => filter === "all" || (filter === "attention" ? NEEDS_ATTENTION.includes(t.status) : t.status === filter));
     return [...l].sort((a, b) => (order === "desc" ? b.createdAt - a.createdAt : a.createdAt - b.createdAt));
   }, [tasks, order, filter]);
 
@@ -106,9 +113,9 @@ export function Workstation({ tasks }: { tasks: Task[] }) {
 
         <div className="mt-5 grid grid-cols-4 gap-2">
           {[
-            { k: "今日任务", v: tasks.length },
+            { k: "可见任务", v: tasks.length },
             { k: "进行中", v: stat("running") },
-            { k: "需处理", v: stat("failed") },
+            { k: "需处理", v: tasks.filter((task) => NEEDS_ATTENTION.includes(task.status)).length },
             { k: "已完成", v: stat("done") },
           ].map((s) => (
             <div key={s.k} className="rounded-xl bg-sunken px-3 py-2.5">
@@ -146,40 +153,33 @@ export function Workstation({ tasks }: { tasks: Task[] }) {
 
         <div className="mt-3 flex flex-col gap-1">
           {list.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => openTask(t.id)}
-              className="group animate-fade flex items-start gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-hover"
-            >
-              <div className="pt-0.5">
-                <StatusIcon status={t.status} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-medium">{t.title}</span>
-                  <StatusBadge status={t.status} className="shrink-0" />
+            <div key={t.id} className="group animate-fade rounded-xl transition-colors hover:bg-hover">
+              <button type="button" onClick={() => openTask(t.id)} className="flex w-full items-start gap-3 px-3 pt-3 pb-3 text-left">
+                <div className="pt-0.5">
+                  <StatusIcon status={t.status} />
                 </div>
-                <div className="mt-0.5 truncate text-xs text-muted">{t.summary}</div>
-                {t.status === "running" && (
-                  <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-sunken">
-                    <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${t.progress}%` }} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium">{t.title}</span>
+                    <StatusBadge status={t.status} className="shrink-0" />
                   </div>
-                )}
-                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-faint">
-                  <span className="font-mono">{t.id.toUpperCase()}</span>
-                  <span>·</span>
-                  <span>{t.duration}</span>
-                  {t.tags.map((g) => (
-                    <span key={g} className="rounded bg-sunken px-1.5 py-px">{g}</span>
-                  ))}
+                  <div className="mt-0.5 truncate text-xs text-muted">{t.summary}</div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-faint">
+                    <span className="font-mono">{t.id.toUpperCase()}</span>
+                    <span>·</span>
+                    <span>{t.duration}</span>
+                    {t.tags.map((g) => (
+                      <span key={g} className="rounded bg-sunken px-1.5 py-px">{g}</span>
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <div className="flex shrink-0 flex-col items-end gap-1 pt-0.5">
-                <span className="text-xs tabular-nums text-muted">{clock(t.createdAt)}</span>
-                <span className="text-[11px] text-faint">{timeAgo(t.createdAt)}</span>
-                <ChevronRight size={14} className="mt-1 text-faint opacity-0 transition-opacity group-hover:opacity-100" />
-              </div>
-            </button>
+                <div className="flex shrink-0 flex-col items-end gap-1 pt-0.5">
+                  <span className="text-xs tabular-nums text-muted">{clock(t.createdAt)}</span>
+                  <span className="text-[11px] text-faint">{timeAgo(t.createdAt)}</span>
+                  <ChevronRight size={14} className="mt-1 text-faint opacity-0 transition-opacity group-hover:opacity-100" />
+                </div>
+              </button>
+            </div>
           ))}
           {list.length === 0 && <div className="py-10 text-center text-sm text-faint">没有符合条件的任务</div>}
         </div>

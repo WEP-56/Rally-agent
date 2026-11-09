@@ -5,7 +5,14 @@ import { cn } from "../utils/cn";
 export const STATUS_META: Record<TaskStatus, { label: string; cls: string; dot: string }> = {
   running: { label: "进行中", cls: "bg-accent-soft text-accent", dot: "bg-accent" },
   done: { label: "已完成", cls: "bg-sunken text-muted", dot: "bg-faint" },
-  failed: { label: "需处理", cls: "bg-amber-500/12 text-amber-600 dark:text-amber-400", dot: "bg-amber-500" },
+  failed: { label: "失败", cls: "bg-amber-500/12 text-amber-600 dark:text-amber-400", dot: "bg-amber-500" },
+  cancelled: { label: "已取消", cls: "bg-sunken text-faint", dot: "bg-press" },
+  dropped: { label: "无需处理", cls: "bg-sunken text-faint", dot: "bg-press" },
+  pending_approval: { label: "待批准", cls: "bg-amber-500/12 text-amber-600 dark:text-amber-400", dot: "bg-amber-500" },
+  needs_answer: { label: "待回答", cls: "bg-amber-500/12 text-amber-600 dark:text-amber-400", dot: "bg-amber-500" },
+  needs_gate: { label: "待确认", cls: "bg-amber-500/12 text-amber-600 dark:text-amber-400", dot: "bg-amber-500" },
+  blocked: { label: "受阻", cls: "bg-amber-500/12 text-amber-600 dark:text-amber-400", dot: "bg-amber-500" },
+  interrupted: { label: "已中断", cls: "bg-amber-500/12 text-amber-600 dark:text-amber-400", dot: "bg-amber-500" },
   queued: { label: "排队中", cls: "bg-sunken text-faint", dot: "bg-press" },
 };
 

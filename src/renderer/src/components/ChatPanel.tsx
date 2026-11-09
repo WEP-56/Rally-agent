@@ -1,9 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowUp, PanelRightClose, PanelRightOpen, Paperclip, SquarePen, ShieldCheck, ChevronRight, Square, AtSign } from "lucide-react";
+import type { ModelSummary, ThinkingLevelName } from "../../../shared/models";
 import type { ChatMsg, Task } from "../data";
-import { allModels, useApp } from "../store";
+import { useApp } from "../store";
 import { cn } from "../utils/cn";
-import { IconButton, RallyLogo, Select } from "./ui";
+import { IconButton, RallyLogo } from "./ui";
+import { ModelPicker } from "./ModelPicker";
 import { RichText } from "./RichText";
 import { ToolSteps } from "./ToolSteps";
 import { StatusIcon, StatusBadge } from "./status";
@@ -53,33 +55,45 @@ function TaskCard({ task }: { task: Task }) {
 }
 
 export function ChatPanel({
-  messages,
-  tasks,
-  busy,
-  onSend,
-  onStop,
-  onNewChat,
-  rightOpen,
-  onToggleRight,
-  inject,
+	messages,
+	tasks,
+	busy,
+	onSend,
+	onStop,
+	onNewChat,
+	rightOpen,
+	onToggleRight,
+	inject,
+	models,
+	model,
+	thinkingLevel,
+	onSelectModel,
+	autoApprove,
+	onAutoApprove,
 }: {
-  messages: ChatMsg[];
-  tasks: Task[];
-  busy: boolean;
-  onSend: (t: string) => void;
-  onStop: () => void;
-  onNewChat: () => void;
-  rightOpen: boolean;
-  onToggleRight: () => void;
-  inject?: { text: string; n: number };
+	messages: ChatMsg[];
+	tasks: Task[];
+	busy: boolean;
+	onSend: (t: string) => void;
+	onStop: () => void;
+	onNewChat: () => void;
+	rightOpen: boolean;
+	onToggleRight: () => void;
+	inject?: { text: string; n: number };
+	models: ModelSummary[];
+	model: string | null;
+	thinkingLevel: string | null;
+	onSelectModel: (provider: string, model: string, level?: ThinkingLevelName) => void;
+	autoApprove: boolean;
+	onAutoApprove: (enabled: boolean) => Promise<void>;
 }) {
-  const { config, setConfig } = useApp();
-  const [draft, setDraft] = useState("");
-  const scroller = useRef<HTMLDivElement>(null);
-  const ta = useRef<HTMLTextAreaElement>(null);
-  const running = tasks.filter((t) => t.status === "running").length;
-  const models = allModels(config);
-  const model = config.rallyModel || models[0]?.value || "";
+	const { config } = useApp();
+	const [actionError, setActionError] = useState<string | null>(null);
+	const action = (operation: Promise<unknown>) => { setActionError(null); void operation.catch((error: unknown) => setActionError(error instanceof Error ? error.message : String(error))); };
+	const [draft, setDraft] = useState("");
+	const scroller = useRef<HTMLDivElement>(null);
+	const ta = useRef<HTMLTextAreaElement>(null);
+	const running = tasks.filter((t) => t.status === "running").length;
 
   useEffect(() => {
     if (inject?.n) {
@@ -100,9 +114,8 @@ export function ChatPanel({
   }, [draft]);
 
   const send = () => {
-    const t = draft.trim();
-    if (!t || busy) return;
-    onSend(t);
+    if (!draft.trim()) return;
+    onSend(draft);
     setDraft("");
   };
 
@@ -119,7 +132,7 @@ export function ChatPanel({
           </div>
         </div>
         <div className="flex-1" />
-        <IconButton title="新对话 (Ctrl+N)" onClick={onNewChat}>
+        <IconButton title="整理上下文 (Ctrl+N)" onClick={onNewChat}>
           <SquarePen size={15} strokeWidth={1.8} />
         </IconButton>
         <IconButton title={rightOpen ? "收起右侧栏 (Ctrl+B)" : "展开右侧栏 (Ctrl+B)"} onClick={onToggleRight} active={!rightOpen}>
@@ -145,7 +158,11 @@ export function ChatPanel({
             </div>
           )}
           {messages.map((m) =>
-            m.role === "user" ? (
+            m.role === "system" ? (
+              <div key={m.id} className="animate-rise whitespace-pre-wrap text-center text-[12px] leading-relaxed text-faint">
+                {m.text}
+              </div>
+            ) : m.role === "user" ? (
               <div key={m.id} className="animate-rise">
                 <UserBubble text={m.text} />
               </div>
@@ -168,6 +185,22 @@ export function ChatPanel({
               </div>
             ),
           )}
+          {tasks.filter((task) => task.approval === "pending" && task.status === "pending_approval").map((task) => (
+            <div key={`approval-${task.id}`} className="rounded-xl bg-sunken px-3.5 py-3 text-sm">
+              <div className="font-medium">{task.id} · {task.title} · 待批准</div>
+              <div className="mt-1 break-all text-xs text-muted">{task.mode === "readonly" ? "只读" : "改写"} · {task.cwd}</div>
+              <div className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-muted">
+                {task.quotes?.map((quote) => <div key={quote.messageId} className="mb-1">{quote.messageId} · {quote.text}</div>)}
+                {task.note && <div>备注：{task.note}</div>}
+                {!!task.dependsOn?.length && <div>依赖：{task.dependsOn.join("、")}</div>}
+              </div>
+              <div className="mt-2 flex gap-2">
+                <button onClick={() => action(window.rally.tasks.approve(task.id))} className="h-7 rounded-md bg-accent px-3 text-xs text-accent-fg">批准派发</button>
+                <button onClick={() => action(window.rally.tasks.cancel(task.id))} className="h-7 rounded-md bg-raised px-3 text-xs text-muted">取消</button>
+              </div>
+            </div>
+          ))}
+          {actionError && <div role="alert" className="text-xs text-red-500">{actionError}</div>}
         </div>
       </div>
 
@@ -195,13 +228,13 @@ export function ChatPanel({
             <IconButton title="引用任务" onClick={() => setDraft((d) => d + "@")}>
               <AtSign size={15} strokeWidth={1.8} />
             </IconButton>
-            <Select ghost up value={model} options={models} onChange={(v) => setConfig({ rallyModel: v })} />
+            <ModelPicker models={models} model={model} thinkingLevel={thinkingLevel} onSelect={onSelectModel} />
             <button
-              onClick={() => setConfig({ autoApprove: !config.autoApprove })}
-              className={cn("flex h-7 items-center gap-1 rounded-md px-2 text-xs transition-colors", config.autoApprove ? "bg-accent-soft text-accent" : "text-muted hover:bg-hover hover:text-fg")}
+              onClick={() => action(onAutoApprove(!autoApprove))}
+              className={cn("flex h-7 items-center gap-1 rounded-md px-2 text-xs transition-colors", autoApprove ? "bg-accent-soft text-accent" : "text-muted hover:bg-hover hover:text-fg")}
             >
               <ShieldCheck size={13} />
-              {config.autoApprove ? "自动批准" : "需要批准"}
+              {autoApprove ? "自动批准" : "需要批准"}
             </button>
             <div className="flex-1" />
             {busy ? (

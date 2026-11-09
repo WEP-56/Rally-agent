@@ -41,7 +41,6 @@ export interface Config {
   density: "compact" | "cozy";
   mcp: McpServer[];
   skills: Skill[];
-  autoApprove: boolean;
 }
 
 export const ACCENTS = [
@@ -65,7 +64,6 @@ export const DEFAULT_CONFIG: Config = {
   accent: "#10a37f",
   fontSize: "md",
   density: "cozy",
-  autoApprove: false,
   mcp: [
     { id: "m1", name: "filesystem", transport: "stdio", command: "npx -y @modelcontextprotocol/server-filesystem ~/projects", enabled: true, tools: 11 },
     { id: "m2", name: "github", transport: "stdio", command: "npx -y @modelcontextprotocol/server-github", enabled: true, tools: 26 },
@@ -117,48 +115,6 @@ export function saveOnboarded(v: boolean) {
 }
 
 export const uid = () => Math.random().toString(36).slice(2, 9);
-
-/** Known provider presets & sample models (used when live fetch is unavailable) */
-export const PROVIDER_PRESETS = [
-  { name: "OpenAI", baseUrl: "https://api.openai.com/v1", models: ["gpt-5", "gpt-5-mini", "gpt-4.1", "o4-mini"] },
-  { name: "Anthropic", baseUrl: "https://api.anthropic.com/v1", models: ["claude-opus-4-1", "claude-sonnet-4-5", "claude-haiku-4-5"] },
-  { name: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", models: ["deepseek-chat", "deepseek-reasoner"] },
-  { name: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", models: ["openai/gpt-5", "anthropic/claude-sonnet-4.5", "google/gemini-2.5-pro", "qwen/qwen3-coder"] },
-  { name: "Ollama", baseUrl: "http://localhost:11434/v1", models: ["qwen3:14b", "llama3.1:8b", "gpt-oss:20b"] },
-];
-
-export async function fetchModels(baseUrl: string, apiKey: string): Promise<{ models: string[]; live: boolean }> {
-  const url = baseUrl.replace(/\/+$/, "") + "/models";
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 4000);
-    const res = await fetch(url, { headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {}, signal: ctrl.signal });
-    clearTimeout(t);
-    if (res.ok) {
-      const j = await res.json();
-      const list: string[] = (j.data || j.models || []).map((m: { id?: string; name?: string }) => m.id || m.name).filter(Boolean);
-      if (list.length) return { models: list.slice(0, 40), live: true };
-    }
-  } catch {
-    /* fall through to preset */
-  }
-  await new Promise((r) => setTimeout(r, 700));
-  const preset = PROVIDER_PRESETS.find((p) => baseUrl.includes(new URL(p.baseUrl).hostname));
-  return { models: preset ? preset.models : ["default-chat", "default-reasoner", "default-mini"], live: false };
-}
-
-export function allModels(c: Config) {
-  const out: { value: string; label: string; group: string }[] = [];
-  c.providers.forEach((p) => p.models.forEach((m) => out.push({ value: `${p.name}/${m}`, label: m, group: p.name })));
-  if (!out.length) {
-    out.push(
-      { value: "OpenAI/gpt-5", label: "gpt-5", group: "示例" },
-      { value: "Anthropic/claude-sonnet-4-5", label: "claude-sonnet-4-5", group: "示例" },
-      { value: "DeepSeek/deepseek-chat", label: "deepseek-chat", group: "示例" },
-    );
-  }
-  return out;
-}
 
 export const modelLabel = (v: string, fallback = "未设置模型") => (v ? v.split("/").slice(1).join("/") || v : fallback);
 

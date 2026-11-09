@@ -21,6 +21,7 @@ export default mergeConfig(
 		},
 		resolve: {
 			alias: [
+				{ find: /^@rally\/coding-agent$/, replacement: workspaceSourcePaths.codingAgentIndex },
 				{ find: /^@rally\/ai$/, replacement: workspaceSourcePaths.aiIndex },
 				{ find: /^@rally\/agent-core$/, replacement: workspaceSourcePaths.agentIndex },
 				{ find: /^@mariozechner\/pi-ai$/, replacement: workspaceSourcePaths.aiIndex },

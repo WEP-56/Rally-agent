@@ -1,22 +1,31 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, Sparkles, Rocket, Brain, Server, Cpu, UserRound } from "lucide-react";
-import { modelLabel, useApp } from "../store";
+import type { ModelsState } from "../../../shared/models";
+import { useApp } from "../store";
+import { useModels } from "../models";
 import { cn } from "../utils/cn";
 import { Button, RallyLogo } from "./ui";
-import { IdentityForm, MemoryForm, ModelUsageForm, ProvidersForm } from "./forms";
+import { IdentityForm, MemoryForm, ProvidersForm } from "./forms";
 import { WindowControls } from "./TitleBar";
 
 const STEPS = [
   { key: "welcome" },
   { key: "identity", title: "认识一下你的 Agent", desc: "给它起个名字，设定性格和工作方式。这些都可以稍后在设置中修改。", skippable: true },
   { key: "memory", title: "记忆存放在哪里", desc: "Rally 会把长期记忆保存在本地目录，完全由你掌控。", skippable: true },
-  { key: "providers", title: "添加模型供应商", desc: "填写 Base URL 与 API Key，获取可用模型。支持添加多个供应商。", skippable: true },
-  { key: "models", title: "设置模型用途", desc: "主代理与工位任务可以使用不同的模型，兼顾能力与成本。", skippable: false },
+  { key: "providers", title: "添加模型供应商", desc: "填写 Base URL 与 API Key，获取可用模型。支持添加多个供应商；模型可在对话框底部切换。", skippable: true },
   { key: "done" },
 ];
 
+function activeModelName(state: ModelsState | null): string {
+  const active = state?.active;
+  if (!active) return state?.available.length ? "未选择" : "未添加";
+  const found = state?.available.find((model) => model.provider === active.provider && model.id === active.model);
+  return found ? found.name : "未选择";
+}
+
 export function Onboarding({ onDone, maximized, onMin, onMax, onClose }: { onDone: () => void; maximized: boolean; onMin: () => void; onMax: () => void; onClose: () => void }) {
   const { config } = useApp();
+  const models = useModels();
   const [step, setStep] = useState(0);
   const last = STEPS.length - 1;
   const next = () => setStep((s) => Math.min(last, s + 1));
@@ -83,7 +92,6 @@ export function Onboarding({ onDone, maximized, onMin, onMax, onClose }: { onDon
                       {st.key === "identity" && <IdentityForm />}
                       {st.key === "memory" && <MemoryForm />}
                       {st.key === "providers" && <ProvidersForm />}
-                      {st.key === "models" && <ModelUsageForm />}
                     </div>
                   </div>
                 )}
@@ -99,8 +107,8 @@ export function Onboarding({ onDone, maximized, onMin, onMax, onClose }: { onDon
                       {[
                         { icon: UserRound, k: "名称", v: config.name || "Rally" },
                         { icon: Brain, k: "记忆", v: config.memoryPath },
-                        { icon: Server, k: "供应商", v: config.providers.length ? config.providers.map((p) => p.name || "未命名").join("、") : "未添加" },
-                        { icon: Cpu, k: "模型", v: `${modelLabel(config.rallyModel, "默认")} / ${modelLabel(config.taskModel, "默认")}` },
+                        { icon: Server, k: "供应商", v: models.state?.providers.length ? models.state.providers.map((p) => p.name || "未命名").join("、") : "未添加" },
+                        { icon: Cpu, k: "模型", v: activeModelName(models.state) },
                       ].map((r) => (
                         <div key={r.k} className="rounded-2xl bg-panel px-4 py-3 shadow-soft">
                           <div className="flex items-center gap-1.5 text-[11px] text-faint"><r.icon size={12} />{r.k}</div>

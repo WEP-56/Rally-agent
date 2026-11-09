@@ -1,3 +1,5 @@
+> **Rally 开发说明**：本包是 Rally 内嵌的 Pi SDK。下面保留上游介绍供 SDK/CLI 参考，不代表 Rally 桌面端已实现的能力。Rally 产品与开发现状见 [仓库 README](../../README.md)、[开发实施 TODO](../../docs/开发实施TODO.md) 和 [问答记录](../../docs/superagent/00-问答记录.md)。本仓库未搬入上游 docs/examples，相关链接指向基准版本的在线源码。
+
 <p align="center">
   <a href="https://pi.dev">
     <img alt="Pi logo" src="https://pi.dev/logo-auto.svg" width="128">
@@ -14,11 +16,11 @@
 
 Pi is a minimal, extensible agent harness that you can make your own.
 
-Adapt Pi to your workflows, not the other way around. Customize Pi with [extensions](docs/extensions.md), [skills](docs/skills.md), [prompt templates](docs/prompt-templates.md), and [themes](docs/themes.md). Bundle them as [Pi packages](docs/packages.md) and share via npm or git.
+Adapt Pi to your workflows, not the other way around. Customize Pi with [extensions](https://github.com/earendil-works/pi/blob/085c84e/packages/coding-agent/docs/extensions.md), [skills](https://github.com/earendil-works/pi/blob/085c84e/packages/coding-agent/docs/skills.md), [prompt templates](https://github.com/earendil-works/pi/blob/085c84e/packages/coding-agent/docs/prompt-templates.md), and [themes](https://github.com/earendil-works/pi/blob/085c84e/packages/coding-agent/docs/themes.md). Bundle them as [Pi packages](https://github.com/earendil-works/pi/blob/085c84e/packages/coding-agent/docs/packages.md) and share via npm or git.
 
 Pi ships with powerful defaults but skips features like sub-agents and plan mode. Ask Pi to build what you want, or install a package that does it your way.
 
-Use Pi [interactively](docs/usage.md), automate it in [print or JSON mode](docs/cli.md), control it over [RPC](docs/rpc.md), or build apps with the [Pi TypeScript SDK](docs/sdk.md). See [OpenClaw](https://github.com/OpenClaw/OpenClaw) for a real-world integration.
+Use Pi [interactively](https://github.com/earendil-works/pi/blob/085c84e/packages/coding-agent/docs/usage.md), automate it in [print or JSON mode](https://github.com/earendil-works/pi/blob/085c84e/packages/coding-agent/docs/cli.md), control it over [RPC](https://github.com/earendil-works/pi/blob/085c84e/packages/coding-agent/docs/rpc.md), or build apps with the [Pi TypeScript SDK](https://github.com/earendil-works/pi/blob/085c84e/packages/coding-agent/docs/sdk.md). See [OpenClaw](https://github.com/OpenClaw/OpenClaw) for a real-world integration.
 
 ## Getting started
 
@@ -42,7 +44,7 @@ npm install -g --ignore-scripts @rally/coding-agent
 
 Pi requires Node.js 22.19 or newer. The macOS, Linux, and Windows installers can install it if needed. Pi does not require dependency lifecycle scripts for a normal npm installation.
 
-On macOS and Linux, Nix users can install the latest release with `nix profile add github:earendil-works/pi/stable`. See the [quickstart](docs/quickstart.md#1-install-pi) for updating and pinning releases.
+On macOS and Linux, Nix users can install the latest release with `nix profile add github:earendil-works/pi/stable`. See the [quickstart](https://github.com/earendil-works/pi/blob/085c84e/packages/coding-agent/docs/quickstart.md#1-install-pi) for updating and pinning releases.
 
 Start Pi in the directory where you want it to work:
 
@@ -53,7 +55,7 @@ pi
 
 For a built-in AI provider, run `/login` inside Pi to connect a subscription or API key. Then give Pi a task.
 
-See the [documentation](docs/index.md) for full setup and usage instructions.
+See the [documentation](https://github.com/earendil-works/pi/blob/085c84e/packages/coding-agent/docs/index.md) for full setup and usage instructions.
 
 ## Share your OSS coding agent sessions
 

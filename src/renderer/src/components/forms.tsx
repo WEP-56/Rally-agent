@@ -1,8 +1,18 @@
-import { useState } from "react";
-import { Eye, EyeOff, Loader2, Plus, Trash2, Download, FolderOpen, Bot, Boxes, CheckCircle2, Info } from "lucide-react";
-import { PROVIDER_PRESETS, allModels, fetchModels, uid, useApp, type Provider } from "../store";
-import { Button, Input, Select, Textarea } from "./ui";
+import { useEffect, useRef, useState } from "react";
+import { Download, Eye, EyeOff, FolderOpen, Info, Loader2, Plus, Trash2 } from "lucide-react";
+import {
+	type ModelEntry,
+	type ProviderEntry,
+	type ProviderProtocol,
+	THINKING_LEVELS,
+	type ThinkingLevelName,
+	defaultModel,
+} from "../../../shared/models";
+import { useModels } from "../models";
+import { uid, useApp } from "../store";
+import { Button, Input, Segmented, Textarea, Toggle } from "./ui";
 import { cn } from "../utils/cn";
+import { ModelPicker } from "./ModelPicker";
 
 export function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -65,127 +75,349 @@ export function MemoryForm() {
   );
 }
 
-function ProviderCard({ p, onChange, onRemove }: { p: Provider; onChange: (p: Partial<Provider>) => void; onRemove: () => void }) {
-  const [show, setShow] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
+const PROTOCOLS: { value: ProviderProtocol; label: string }[] = [
+	{ value: "messages", label: "messages" },
+	{ value: "responses", label: "Responses" },
+];
 
-  const get = async () => {
-    if (!p.baseUrl) {
-      setNote("请先填写 Base URL");
-      return;
-    }
-    setLoading(true);
-    setNote(null);
-    const r = await fetchModels(p.baseUrl, p.apiKey);
-    setLoading(false);
-    onChange({ models: r.models });
-    setNote(r.live ? `已从接口获取 ${r.models.length} 个模型` : `预览环境无法直连，已载入 ${r.models.length} 个常用模型`);
-  };
+const LEVEL_LABEL: Record<ThinkingLevelName, string> = {
+	off: "关闭",
+	minimal: "极低",
+	low: "低",
+	medium: "中",
+	high: "高",
+	xhigh: "很高",
+	max: "最高",
+};
 
-  return (
-    <div className="animate-rise rounded-2xl bg-sunken p-4">
-      <div className="flex items-center gap-2">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-raised text-sm font-semibold text-muted shadow-soft">{(p.name || "?")[0]}</div>
-        <input
-          value={p.name}
-          onChange={(e) => onChange({ name: e.target.value })}
-          placeholder="供应商名称"
-          className="h-8 flex-1 rounded-md bg-transparent px-1.5 text-sm font-medium hover:bg-hover focus:bg-panel"
-        />
-        <button onClick={onRemove} className="rounded-md p-1.5 text-faint hover:bg-red-500/10 hover:text-red-500">
-          <Trash2 size={14} />
-        </button>
-      </div>
-      <div className="mt-2 flex flex-wrap gap-1">
-        {PROVIDER_PRESETS.map((pr) => (
-          <button
-            key={pr.name}
-            onClick={() => onChange({ name: pr.name, baseUrl: pr.baseUrl, models: [] })}
-            className={cn("h-6 rounded-full px-2.5 text-[11px] transition-colors", p.baseUrl === pr.baseUrl ? "bg-accent-soft text-accent" : "bg-panel text-muted hover:text-fg dark:bg-raised")}
-          >
-            {pr.name}
-          </button>
-        ))}
-      </div>
-      <div className="mt-3 grid gap-2">
-        <Input className="bg-panel font-mono text-[12.5px] dark:bg-raised" placeholder="Base URL，例如 https://api.openai.com/v1" value={p.baseUrl} onChange={(e) => onChange({ baseUrl: e.target.value })} />
-        <div className="relative">
-          <Input
-            className="bg-panel pr-9 font-mono text-[12.5px] dark:bg-raised"
-            type={show ? "text" : "password"}
-            placeholder="API Key（sk-…）"
-            value={p.apiKey}
-            onChange={(e) => onChange({ apiKey: e.target.value })}
-          />
-          <button onClick={() => setShow((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-faint hover:text-fg">
-            {show ? <EyeOff size={14} /> : <Eye size={14} />}
-          </button>
-        </div>
-      </div>
-      <div className="mt-3 flex items-center gap-2">
-        <Button size="sm" onClick={get} className="bg-panel shadow-soft dark:bg-raised">
-          {loading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}获取模型
-        </Button>
-        {note && <span className="text-[11px] text-faint">{note}</span>}
-      </div>
-      {p.models.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {p.models.map((m) => (
-            <span key={m} className="inline-flex items-center gap-1 rounded-md bg-panel px-2 py-1 font-mono text-[11px] text-muted shadow-soft dark:bg-raised">
-              <CheckCircle2 size={11} className="text-accent" />
-              {m}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+function NumField({
+	label,
+	value,
+	onChange,
+	min,
+	max,
+	step,
+}: {
+	label: string;
+	value: number;
+	onChange: (value: number) => void;
+	min?: number;
+	max?: number;
+	step?: number;
+}) {
+	return (
+		<label className="block">
+			<span className="mb-0.5 block text-[11px] text-faint">{label}</span>
+			<Input
+				type="number"
+				min={min}
+				max={max}
+				step={step}
+				value={value}
+				onChange={(e) => onChange(Number(e.target.value))}
+				className="h-7 bg-panel px-2 text-[12px] dark:bg-raised"
+			/>
+		</label>
+	);
+}
+
+function ModelRow({
+	model,
+	onChange,
+	onRemove,
+}: {
+	model: ModelEntry;
+	onChange: (patch: Partial<ModelEntry>) => void;
+	onRemove: () => void;
+}) {
+	const [open, setOpen] = useState(false);
+	const toggleLevel = (level: ThinkingLevelName) => {
+		const has = model.thinkingLevels.includes(level);
+		onChange({ thinkingLevels: has ? model.thinkingLevels.filter((l) => l !== level) : [...model.thinkingLevels, level] });
+	};
+	return (
+		<div className="rounded-lg bg-panel px-2.5 py-2 dark:bg-raised">
+			<div className="flex items-center gap-2">
+				<input
+					value={model.id}
+					onChange={(e) => onChange({ id: e.target.value })}
+					placeholder="模型名"
+					className="h-6 min-w-0 flex-1 rounded bg-transparent px-1 font-mono text-[12px] hover:bg-hover focus:bg-sunken"
+				/>
+				<button onClick={() => setOpen((v) => !v)} className="rounded px-1.5 py-0.5 text-[11px] text-muted hover:bg-hover hover:text-fg">
+					{open ? "收起" : "元数据"}
+				</button>
+				<button onClick={onRemove} className="rounded p-1 text-faint hover:bg-red-500/10 hover:text-red-500">
+					<Trash2 size={13} />
+				</button>
+			</div>
+			{!open && (
+				<div className="mt-1 px-1 text-[11px] text-faint">
+					{model.contextWindow} ctx · {model.maxTokens} 输出 · 压缩 {model.compactionThreshold}
+					{model.vision ? " · 视觉" : ""}
+					{model.reasoning ? " · 思考" : ""}
+				</div>
+			)}
+			{open && (
+				<div className="mt-2 grid grid-cols-3 gap-2">
+					<NumField label="上下文长度" value={model.contextWindow} min={1} onChange={(v) => onChange({ contextWindow: v })} />
+					<NumField label="压缩阈值（0-1）" value={model.compactionThreshold} min={0} max={1} step={0.05} onChange={(v) => onChange({ compactionThreshold: v })} />
+					<NumField label="最大输出" value={model.maxTokens} min={1} onChange={(v) => onChange({ maxTokens: v })} />
+					<div className="flex items-center justify-between rounded-lg bg-panel px-2 py-1 text-[11px] text-muted dark:bg-raised">
+						<span>支持视觉</span>
+						<Toggle checked={model.vision} onChange={(v) => onChange({ vision: v })} />
+					</div>
+					<div className="flex items-center justify-between rounded-lg bg-panel px-2 py-1 text-[11px] text-muted dark:bg-raised">
+						<span>支持思考</span>
+						<Toggle checked={model.reasoning} onChange={(v) => onChange({ reasoning: v })} />
+					</div>
+					<div className="col-span-3">
+						{model.reasoning ? (
+							<div className="flex flex-wrap items-center gap-1">
+								<span className="mr-1 text-[11px] text-faint">档位</span>
+								{THINKING_LEVELS.filter((level) => level !== "off").map((level) => (
+									<button
+										key={level}
+										onClick={() => toggleLevel(level)}
+										className={cn(
+											"h-6 rounded-md px-2 text-[11px] transition-colors",
+											model.thinkingLevels.includes(level) ? "bg-accent-soft text-accent" : "bg-panel text-muted hover:text-fg dark:bg-raised",
+										)}
+									>
+										{LEVEL_LABEL[level]}
+									</button>
+								))}
+								<span className="text-[11px] text-faint">不选 = Pi 默认档位</span>
+							</div>
+						) : (
+							<span className="text-[11px] text-faint">该模型未声明思考能力，选择器中不会出现思考档位。</span>
+						)}
+					</div>
+				</div>
+			)}
+		</div>
+	);
+}
+
+function ProviderCard({
+	provider,
+	onChange,
+	onRemove,
+}: {
+	provider: ProviderEntry;
+	onChange: (patch: Partial<ProviderEntry>) => void;
+	onRemove: () => void;
+}) {
+	const { fetchModels } = useModels();
+	const [show, setShow] = useState(false);
+	const [loading, setLoading] = useState(false);
+	const [note, setNote] = useState<string | null>(null);
+	const [manual, setManual] = useState("");
+
+	const pull = async () => {
+		if (!provider.baseUrl.trim()) {
+			setNote("请先填写 Base URL");
+			return;
+		}
+		setLoading(true);
+		setNote(null);
+		const result = await fetchModels({ protocol: provider.protocol, baseUrl: provider.baseUrl, apiKey: provider.apiKey });
+		setLoading(false);
+		if (!result.ok) {
+			setNote(`拉取失败：${result.error}。可在下方手工填写模型名。`);
+			return;
+		}
+		const existing = new Set(provider.models.map((m) => m.id));
+		const added = result.models.filter((id) => !existing.has(id)).map(defaultModel);
+		onChange({ models: [...provider.models, ...added] });
+		setNote(added.length ? `接口返回 ${result.models.length} 个模型，新增 ${added.length} 个` : `接口返回 ${result.models.length} 个模型，均已存在`);
+	};
+
+	const addManual = () => {
+		const id = manual.trim();
+		if (!id) return;
+		if (provider.models.some((m) => m.id === id)) {
+			setNote(`模型 ${id} 已在列表中`);
+			return;
+		}
+		onChange({ models: [...provider.models, defaultModel(id)] });
+		setManual("");
+		setNote(null);
+	};
+
+	return (
+		<div className="animate-rise rounded-2xl bg-sunken p-4">
+			<div className="flex items-center gap-2">
+				<div className="flex h-8 w-8 items-center justify-center rounded-lg bg-raised text-sm font-semibold text-muted shadow-soft">
+					{(provider.name || "?")[0]}
+				</div>
+				<input
+					value={provider.name}
+					onChange={(e) => onChange({ name: e.target.value })}
+					placeholder="供应商名称（选择器里的浅色小字）"
+					className="h-8 flex-1 rounded-md bg-transparent px-1.5 text-sm font-medium hover:bg-hover focus:bg-panel"
+				/>
+				<button onClick={onRemove} className="rounded-md p-1.5 text-faint hover:bg-red-500/10 hover:text-red-500">
+					<Trash2 size={14} />
+				</button>
+			</div>
+			<div className="mt-2 flex items-center gap-2">
+				<span className="text-[11px] text-faint">协议</span>
+				<Segmented value={provider.protocol} options={PROTOCOLS} onChange={(protocol) => onChange({ protocol })} />
+			</div>
+			<div className="mt-2 grid gap-2">
+				<Input
+					className="bg-panel font-mono text-[12.5px] dark:bg-raised"
+					placeholder="Base URL，例如 https://api.anthropic.com"
+					value={provider.baseUrl}
+					onChange={(e) => onChange({ baseUrl: e.target.value })}
+				/>
+				<div className="relative">
+					<Input
+						className="bg-panel pr-9 font-mono text-[12.5px] dark:bg-raised"
+						type={show ? "text" : "password"}
+						placeholder="API Key（本地服务可留空）"
+						value={provider.apiKey}
+						onChange={(e) => onChange({ apiKey: e.target.value })}
+					/>
+					<button onClick={() => setShow((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-faint hover:text-fg">
+						{show ? <EyeOff size={14} /> : <Eye size={14} />}
+					</button>
+				</div>
+			</div>
+			<div className="mt-3 flex flex-wrap items-center gap-2">
+				<Button size="sm" onClick={() => void pull()} className="bg-panel shadow-soft dark:bg-raised">
+					{loading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}拉取模型
+				</Button>
+				<div className="flex flex-1 items-center gap-1.5">
+					<Input
+						value={manual}
+						onChange={(e) => setManual(e.target.value)}
+						onKeyDown={(e) => {
+							if (e.key === "Enter") addManual();
+						}}
+						placeholder="拉取失败时手工填写模型名"
+						className="h-7 bg-panel font-mono text-[12px] dark:bg-raised"
+					/>
+					<Button size="sm" onClick={addManual} className="bg-panel shadow-soft dark:bg-raised">
+						<Plus size={12} />添加
+					</Button>
+				</div>
+			</div>
+			{note && <div className="mt-2 text-[11px] text-faint">{note}</div>}
+			{provider.models.length > 0 && (
+				<div className="mt-3 flex flex-col gap-1.5">
+					{provider.models.map((model, index) => (
+						<ModelRow
+							key={index}
+							model={model}
+							onChange={(patch) => onChange({ models: provider.models.map((m, i) => (i === index ? { ...m, ...patch } : m)) })}
+							onRemove={() => onChange({ models: provider.models.filter((_, i) => i !== index) })}
+						/>
+					))}
+				</div>
+			)}
+		</div>
+	);
 }
 
 export function ProvidersForm() {
-  const { config, setConfig } = useApp();
-  const update = (id: string, patch: Partial<Provider>) => setConfig({ providers: config.providers.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
-  return (
-    <div className="flex flex-col gap-3">
-      {config.providers.map((p) => (
-        <ProviderCard key={p.id} p={p} onChange={(patch) => update(p.id, patch)} onRemove={() => setConfig({ providers: config.providers.filter((x) => x.id !== p.id) })} />
-      ))}
-      <button
-        onClick={() => setConfig({ providers: [...config.providers, { id: uid(), name: config.providers.length ? "" : "OpenAI", baseUrl: config.providers.length ? "" : "https://api.openai.com/v1", apiKey: "", models: [] }] })}
-        className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-sunken text-sm text-muted transition-all hover:bg-deep hover:text-fg dark:hover:bg-raised"
-      >
-        <Plus size={15} />
-        添加供应商
-      </button>
-    </div>
-  );
-}
+	const { state, save, select, selectWorker } = useModels();
+	const [draft, setDraft] = useState<ProviderEntry[]>(state?.providers ?? []);
+	const [dirty, setDirty] = useState(false);
+	const [saving, setSaving] = useState(false);
+	const [message, setMessage] = useState<string | null>(null);
+	const dirtyRef = useRef(false);
 
-export function ModelUsageForm() {
-  const { config, setConfig } = useApp();
-  const opts = allModels(config);
-  const noProviders = config.providers.every((p) => !p.models.length);
-  return (
-    <div className="flex flex-col gap-3">
-      {[
-        { key: "rallyModel" as const, icon: Bot, title: `${config.name || "Rally"} 使用的模型`, desc: "主对话：理解需求、规划、派发与汇总，建议选择能力最强的模型" },
-        { key: "taskModel" as const, icon: Boxes, title: "任务使用的模型", desc: "工位执行：读写文件、执行命令、调用工具，可选更快更经济的模型" },
-      ].map((r) => (
-        <div key={r.key} className="rounded-2xl bg-sunken p-4">
-          <div className="flex items-start gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
-              <r.icon size={17} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium">{r.title}</div>
-              <div className="mt-0.5 text-xs text-faint">{r.desc}</div>
-              <Select className="mt-3 [&>button]:bg-panel dark:[&>button]:bg-raised" value={config[r.key]} options={opts} onChange={(v) => setConfig({ [r.key]: v })} placeholder="选择模型" />
-            </div>
-          </div>
-        </div>
-      ))}
-      {noProviders && <div className="px-1 text-[11px] text-faint">尚未获取任何供应商模型，当前显示示例模型。</div>}
-    </div>
-  );
+	useEffect(() => {
+		// Don't overwrite in-progress edits when another window saves.
+		if (!dirtyRef.current && state) setDraft(state.providers);
+	}, [state]);
+
+	const edit = (next: ProviderEntry[]) => {
+		dirtyRef.current = true;
+		setDirty(true);
+		setDraft(next);
+	};
+	const update = (id: string, patch: Partial<ProviderEntry>) => edit(draft.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+
+	const commit = async () => {
+		setSaving(true);
+		setMessage(null);
+		try {
+			const result = await save(draft);
+			dirtyRef.current = false;
+			setDirty(false);
+			setDraft(result.providers);
+			setMessage(result.errors.length ? `已保存；${result.errors.length} 条问题：${result.errors.join("；")}` : "已保存");
+		} catch (error) {
+			setMessage(`保存失败：${error instanceof Error ? error.message : String(error)}`);
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	const errors = state?.errors ?? [];
+
+	return (
+		<div className="flex flex-col gap-3">
+			<div className="flex flex-wrap items-center gap-2 rounded-xl bg-sunken px-3 py-2">
+				<span className="min-w-0 break-all text-[11px] text-faint">
+					配置文件 <span className="font-mono text-muted">{state?.file ?? "~/.rally/agent/rally-models.json"}</span>
+				</span>
+				<div className="flex-1" />
+				{dirty && <span className="text-[11px] text-amber-600">未保存</span>}
+				<Button size="sm" variant="primary" onClick={() => void commit()} disabled={saving}>
+					{saving && <Loader2 size={13} className="animate-spin" />}保存配置
+				</Button>
+			</div>
+			{message && <div className="px-1 text-[11px] text-muted">{message}</div>}
+			{errors.length > 0 && (
+				<div className="flex gap-2 rounded-xl bg-red-500/5 px-3 py-2 text-[11px] leading-relaxed text-red-500">
+					<Info size={13} className="mt-0.5 shrink-0" />
+					<div>{errors.join("；")}</div>
+				</div>
+			)}
+			<div className="flex min-h-12 flex-wrap items-center justify-between gap-2 rounded-xl bg-sunken px-3.5 py-3">
+				<div className="text-xs font-medium text-fg">主 agent 模型</div>
+				<ModelPicker direction="down" models={state?.available ?? []} model={state?.active ? `${state.active.provider}/${state.active.model}` : null} thinkingLevel={state?.active?.thinkingLevel ?? null}
+					onSelect={(provider, model, thinkingLevel) => void select({ provider, model, thinkingLevel }).catch((error: unknown) => setMessage(`选择失败：${error instanceof Error ? error.message : String(error)}`))} />
+			</div>
+			<div className="flex min-h-12 flex-wrap items-center justify-between gap-2 rounded-xl bg-sunken px-3.5 py-3">
+				<div className="text-xs text-muted">
+					<div className="font-medium text-fg">任务 agent 模型</div>
+					<div className="mt-1 text-[11px] text-faint">保存供应商后选择；用于之后启动和续接的任务。主 agent 模型在对话框底部选择。</div>
+				</div>
+				<ModelPicker direction="down" models={state?.available ?? []} model={state?.worker ? `${state.worker.provider}/${state.worker.model}` : null} thinkingLevel={state?.worker?.thinkingLevel ?? null}
+					onSelect={(provider, model, thinkingLevel) => void selectWorker({ provider, model, thinkingLevel }).catch((error: unknown) => setMessage(`选择失败：${error instanceof Error ? error.message : String(error)}`))} />
+			</div>
+			{draft.map((provider) => (
+				<ProviderCard
+					key={provider.id}
+					provider={provider}
+					onChange={(patch) => update(provider.id, patch)}
+					onRemove={() => edit(draft.filter((p) => p.id !== provider.id))}
+				/>
+			))}
+			<button
+				onClick={() =>
+					edit([
+						...draft,
+						{ id: `rp_${uid()}`, name: "", protocol: "messages", baseUrl: "", apiKey: "", models: [] },
+					])
+				}
+				className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-sunken text-sm text-muted transition-all hover:bg-deep hover:text-fg dark:hover:bg-raised"
+			>
+				<Plus size={15} />
+				添加供应商
+			</button>
+			<div className="flex gap-2.5 rounded-xl bg-sunken px-3.5 py-3 text-xs leading-relaxed text-muted">
+				<Info size={14} className="mt-0.5 shrink-0 text-faint" />
+				<div>
+					配置按明文 JSON 保存在上面这个路径，不与 Pi 自身的 models.json 冲突。协议只有两种：messages（Anthropic Messages）与
+					Responses（OpenAI Responses），实际请求由 Pi 实现。
+				</div>
+			</div>
+		</div>
+	);
 }

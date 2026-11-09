@@ -2,9 +2,10 @@
 
 import { join } from "node:path";
 import { app, BrowserWindow, nativeTheme, shell } from "electron";
-import { forwardWindowState, registerIpc } from "./ipc";
+import { broadcastChat, broadcastTask, forwardWindowState, registerIpc } from "./ipc";
 import { ensureRallyDirs, resolveRallyPaths } from "./paths";
 import { runSmoke } from "./smoke";
+import { Supervisor } from "./supervisor";
 
 const paths = resolveRallyPaths();
 
@@ -25,7 +26,10 @@ if (process.env.RALLY_SMOKE === "1") {
 	app.on("window-all-closed", () => app.quit());
 	void app.whenReady().then(() => {
 		ensureRallyDirs(paths);
-		registerIpc(paths);
+		const supervisor = new Supervisor(paths, { emitChat: broadcastChat, emitTask: broadcastTask });
+		registerIpc(paths, supervisor);
+		app.on("before-quit", () => supervisor.dispose());
+		void supervisor.start();
 		createMainWindow();
 	});
 }

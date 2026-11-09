@@ -10,11 +10,17 @@ export interface ToolStep {
   exit?: number;
 }
 
-export type ChatMsg =
-  | { id: string; role: "user"; text: string }
-  | { id: string; role: "assistant"; text: string; steps?: ToolStep[]; taskRef?: string; streaming?: boolean };
+export interface ChatMsg {
+  id: string;
+  role: "user" | "assistant" | "system";
+  text: string;
+  steps?: ToolStep[];
+  taskRef?: string;
+  streaming?: boolean;
+  at?: number;
+}
 
-export type TaskStatus = "running" | "done" | "failed" | "queued";
+export type TaskStatus = "running" | "done" | "failed" | "queued" | "cancelled" | "dropped" | "needs_gate" | "needs_answer" | "interrupted" | "blocked" | "pending_approval";
 
 export type TaskMsg =
   | { role: "rally"; text: string }
@@ -31,6 +37,14 @@ export interface Task {
   progress: number;
   tags: string[];
   messages: TaskMsg[];
+  /** Present when the card came from the supervisor (not mock data). */
+  approval?: "pending" | "approved" | "cancelled";
+  mode?: "write" | "readonly";
+  scope?: string[];
+  cwd?: string;
+  quotes?: { messageId: string; text: string }[];
+  note?: string;
+  dependsOn?: string[];
 }
 
 const now = Date.now();

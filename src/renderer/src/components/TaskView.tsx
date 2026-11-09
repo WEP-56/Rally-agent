@@ -1,6 +1,6 @@
-import { Lock, AtSign, Clock, Cpu, Hash, Bot } from "lucide-react";
+import { Lock, AtSign, Clock, Hash, Bot } from "lucide-react";
 import type { Task } from "../data";
-import { modelLabel, useApp } from "../store";
+import { useApp } from "../store";
 import { RichText } from "./RichText";
 import { ToolSteps } from "./ToolSteps";
 import { StatusBadge, clock } from "./status";
@@ -26,14 +26,8 @@ export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task)
             <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-faint">
               <span className="flex items-center gap-1"><Hash size={11} />{task.id.toUpperCase()}</span>
               <span className="flex items-center gap-1"><Bot size={11} />由 {config.name || "Rally"} 派发 · {clock(task.createdAt)}</span>
-              <span className="flex items-center gap-1"><Cpu size={11} />{modelLabel(config.taskModel, "gpt-5-mini")}</span>
               <span className="flex items-center gap-1"><Clock size={11} />{task.duration}</span>
             </div>
-            {task.status !== "done" && (
-              <div className="mt-3 h-1 overflow-hidden rounded-full bg-press/60">
-                <div className={task.status === "failed" ? "h-full rounded-full bg-amber-500" : "h-full rounded-full bg-accent"} style={{ width: `${task.progress}%` }} />
-              </div>
-            )}
           </div>
 
           {/* transcript */}
@@ -72,7 +66,7 @@ export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task)
                 工位正在执行…
               </div>
             )}
-            {task.status === "queued" && <div className="text-sm text-faint">任务排队中，等待前序任务完成后开始。</div>}
+            {task.status === "queued" && <div className="text-sm text-faint">{task.duration}</div>}
           </div>
         </div>
       </div>

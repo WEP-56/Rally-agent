@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { ArrowLeft, UserRound, Brain, Server, Cpu, Plug, Wand2, Palette, Info, Plus, Trash2, RefreshCw, CheckCircle2, Search, FolderInput, Sun, Moon, Monitor, Loader2, RotateCcw, ExternalLink } from "lucide-react";
+import { ArrowLeft, UserRound, Brain, Server, Plug, Wand2, Palette, Info, Plus, Trash2, RefreshCw, CheckCircle2, Search, FolderInput, Sun, Moon, Monitor, Loader2, RotateCcw, ExternalLink } from "lucide-react";
 import { ACCENTS, uid, useApp, type McpServer } from "../store";
 import { cn } from "../utils/cn";
 import { Button, Input, RallyLogo, Segmented, Toggle } from "./ui";
-import { IdentityForm, MemoryForm, ModelUsageForm, ProvidersForm } from "./forms";
+import { IdentityForm, MemoryForm, ProvidersForm } from "./forms";
 
 function Github({ size = 14 }: { size?: number }) {
   return (
@@ -16,8 +16,7 @@ function Github({ size = 14 }: { size?: number }) {
 export const SECTIONS = [
   { id: "general", label: "身份", icon: UserRound, desc: "名称、性格与工作方式" },
   { id: "memory", label: "记忆", icon: Brain, desc: "长期记忆的存储位置与管理" },
-  { id: "providers", label: "供应商", icon: Server, desc: "模型供应商与 API 密钥" },
-  { id: "models", label: "模型", icon: Cpu, desc: "主代理与工位任务的模型分配" },
+  { id: "providers", label: "供应商", icon: Server, desc: "供应商、协议、模型与元数据（明文存于 ~/.rally）" },
   { id: "mcp", label: "MCP 服务器", icon: Plug, desc: "通过 Model Context Protocol 扩展工具" },
   { id: "skills", label: "Skills", icon: Wand2, desc: "可复用的能力包，按需加载" },
   { id: "appearance", label: "外观", icon: Palette, desc: "主题、强调色与字号" },
@@ -267,7 +266,7 @@ export function Settings({ section, setSection, onBack }: { section: string; set
             </button>
           ))}
         </div>
-        <div className="mt-auto px-2.5 pb-3 text-[11px] text-faint">更改会自动保存</div>
+        <div className="mt-auto px-2.5 pb-3 text-[11px] text-faint">供应商配置需手动保存</div>
       </nav>
       <main className="min-w-0 flex-1 overflow-y-auto rounded-xl bg-panel shadow-card">
         <div key={cur.id} className="animate-rise mx-auto max-w-[720px] px-10 pb-12 pt-9">
@@ -287,7 +286,6 @@ export function Settings({ section, setSection, onBack }: { section: string; set
             </>
           )}
           {cur.id === "providers" && <ProvidersForm />}
-          {cur.id === "models" && <ModelUsageForm />}
           {cur.id === "mcp" && <McpSection />}
           {cur.id === "skills" && <SkillsSection />}
           {cur.id === "appearance" && <AppearanceSection />}
