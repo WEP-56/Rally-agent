@@ -8,16 +8,17 @@ import type { WorkspacePatch, WorkspaceState } from "../shared/workspace.ts";
 import { SkillStore } from "./skill-store.ts";
 import { projectTrustState, setProjectTrust } from "./project-trust.ts";
 import { McpStore } from "./mcp-store.ts";
-import type { McpRiskTier } from "../shared/mcp.ts";
+import type { McpExposure, McpRiskTier } from "../shared/mcp.ts";
 import type { ServicesState } from "../shared/services.ts";
 import { BrowserManager } from "./browser.ts";
 import type { BrowserLayout, BrowserAction } from "../shared/browser.ts";
 import { httpAddress } from "../shared/browser.ts";
 import type { TerminalSize } from "../shared/terminal.ts";
 import { TerminalManager } from "./terminal.ts";
+import type { TaskNotifications } from "./notifications.ts";
 
 /** Register all IPC handlers. Call once after app ready. */
-export function registerIpc(paths: RallyPaths, supervisor: Supervisor): () => Promise<void> {
+export function registerIpc(paths: RallyPaths, supervisor: Supervisor, notifications?: TaskNotifications): () => Promise<void> {
 	const browser = new BrowserManager();
 	const terminals = new TerminalManager(taskId => {
 		if (!taskId) return supervisor.workspace.base();
@@ -56,6 +57,11 @@ export function registerIpc(paths: RallyPaths, supervisor: Supervisor): () => Pr
 		ipcMain.on(channel, listener); listeners.push({ channel, listener });
 	};
 	try {
+		if (notifications) {
+			handle(IpcChannel.notificationsState, event => { browser.owner(event); return notifications.state(); });
+			handle(IpcChannel.notificationsUpdate, (event, value: unknown) => { browser.owner(event); return notifications.update(value); });
+			handle(IpcChannel.notificationsTarget, event => { browser.owner(event); return notifications.takeTarget(); });
+		}
 		handle(IpcChannel.terminalCreate, (event, id: string, size: TerminalSize, taskId?: string) => terminals.create(browser.owner(event), id, size, taskId));
 		handle(IpcChannel.terminalWrite, (event, id: string, data: string) => terminals.write(browser.owner(event), id, data));
 		handle(IpcChannel.terminalResize, (event, id: string, size: TerminalSize) => terminals.resize(browser.owner(event), id, size));
@@ -89,8 +95,12 @@ export function registerIpc(paths: RallyPaths, supervisor: Supervisor): () => Pr
 		const mcp = new McpStore(paths.agentDir);
 		handle(IpcChannel.mcpState, () => mcp.state());
 		handle(IpcChannel.mcpSave, (_event, json: string) => mcp.save(json));
+		handle(IpcChannel.mcpSaveServer, (event, name: string, json: string, originalName?: string) => { browser.owner(event); return mcp.saveServer(name, json, originalName); });
 		handle(IpcChannel.mcpUpdate, (_event, name: string, enabled: boolean | null) => mcp.update(name, enabled));
 		handle(IpcChannel.mcpTier, (_event, name: string, tier: McpRiskTier) => mcp.setTier(name, tier));
+		handle(IpcChannel.mcpExposure, (event, name: string, exposure: McpExposure | null, tool?: string) => {
+			browser.owner(event); return mcp.setExposure(name, exposure, tool);
+		});
 		handle(IpcChannel.gateDecide, (_event, id: string, decision: "allow" | "deny") => {
 			supervisor.gates.decide(id, decision, "user", [], "用户点击确认卡片");
 			return supervisor.board();
@@ -158,6 +168,7 @@ export function registerIpc(paths: RallyPaths, supervisor: Supervisor): () => Pr
 		handle(IpcChannel.tasksState, () => supervisor.board());
 		handle(IpcChannel.tasksApprove, (_event, taskId: unknown) => supervisor.approve(String(taskId)));
 		handle(IpcChannel.tasksCancel, (_event, taskId: unknown) => supervisor.cancel(String(taskId)));
+		handle(IpcChannel.tasksArchive, (event, taskId: string, archived: boolean) => { browser.owner(event); return supervisor.archive(taskId, archived); });
 		handle(IpcChannel.tasksAnswerOption, (_event, taskId: unknown, questionId: unknown, option: unknown) => {
 			if (typeof taskId !== "string" || typeof questionId !== "string" || typeof option !== "string") throw new Error("ANSWER_INVALID: 回答参数无效");
 			return supervisor.answerOption(taskId, questionId, option);

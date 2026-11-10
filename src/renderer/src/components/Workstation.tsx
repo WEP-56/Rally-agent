@@ -7,6 +7,7 @@ import { cn } from "../utils/cn";
 import { clock, StatusBadge, StatusIcon, timeAgo } from "./status";
 import { RallyLogo, Segmented } from "./ui";
 import { LocalServices } from "./LocalServices";
+import { ArchiveTaskButton } from "./ArchiveTaskButton";
 
 function BusinessCard({ tasks }: { tasks: Task[] }) {
   const { config } = useApp();
@@ -85,7 +86,7 @@ function BusinessCard({ tasks }: { tasks: Task[] }) {
   );
 }
 
-type Filter = "all" | "running" | "queued" | "attention" | "done";
+type Filter = "all" | "running" | "queued" | "attention" | "done" | "archived";
 const NEEDS_ATTENTION: TaskStatus[] = ["failed", "blocked", "interrupted", "needs_answer", "needs_gate", "pending_approval"];
 const FILTERS: { v: Filter; l: string }[] = [
   { v: "all", l: "全部" },
@@ -93,6 +94,7 @@ const FILTERS: { v: Filter; l: string }[] = [
   { v: "queued", l: "排队" },
   { v: "attention", l: "需处理" },
   { v: "done", l: "已完成" },
+  { v: "archived", l: "已归档" },
 ];
 
 export function Workstation({ tasks }: { tasks: Task[] }) {
@@ -101,23 +103,24 @@ export function Workstation({ tasks }: { tasks: Task[] }) {
   const [filter, setFilter] = useState<Filter>("all");
 
   const list = useMemo(() => {
-    const l = tasks.filter((t) => filter === "all" || (filter === "attention" ? NEEDS_ATTENTION.includes(t.status) : t.status === filter));
+    const l = tasks.filter((t) => filter === "archived" ? t.archivedAt !== undefined : t.archivedAt === undefined && (filter === "all" || (filter === "attention" ? NEEDS_ATTENTION.includes(t.status) : t.status === filter)));
     return [...l].sort((a, b) => (order === "desc" ? b.createdAt - a.createdAt : a.createdAt - b.createdAt));
   }, [tasks, order, filter]);
 
-  const stat = (s: TaskStatus) => tasks.filter((t) => t.status === s).length;
+  const visible = tasks.filter(t => t.archivedAt === undefined);
+  const stat = (s: TaskStatus) => visible.filter((t) => t.status === s).length;
 
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-[640px] px-5 pb-8 pt-5">
-        <BusinessCard tasks={tasks} />
+        <BusinessCard tasks={visible} />
 		<div className="mt-5"><LocalServices onOpen={url => openTab("browser", { url })} /></div>
 
         <div className="mt-5 grid grid-cols-4 gap-2">
           {[
-            { k: "可见任务", v: tasks.length },
+            { k: "可见任务", v: visible.length },
             { k: "进行中", v: stat("running") },
-            { k: "需处理", v: tasks.filter((task) => NEEDS_ATTENTION.includes(task.status)).length },
+            { k: "需处理", v: visible.filter((task) => NEEDS_ATTENTION.includes(task.status)).length },
             { k: "已完成", v: stat("done") },
           ].map((s) => (
             <div key={s.k} className="rounded-xl bg-sunken px-3 py-2.5">
@@ -182,6 +185,7 @@ export function Workstation({ tasks }: { tasks: Task[] }) {
                   <ChevronRight size={14} className="mt-1 text-faint opacity-0 transition-opacity group-hover:opacity-100" />
                 </div>
               </button>
+              {t.ended && <div className="flex justify-end px-2 pb-1"><ArchiveTaskButton task={t} /></div>}
             </div>
           ))}
           {list.length === 0 && <div className="py-10 text-center text-sm text-faint">没有符合条件的任务</div>}

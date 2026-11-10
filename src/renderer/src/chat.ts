@@ -22,7 +22,7 @@ export interface ChatController {
 	notice: string | null;
 	send(text: string): void;
 	abort(): void;
-	reset(): void;
+	reset(): Promise<boolean>;
 	selectModel(provider: string, model: string, level?: ThinkingLevelName): void;
 }
 
@@ -51,7 +51,7 @@ export function useChat(): ChatController {
 		void window.rally.chat.abort().catch((error: unknown) => console.error("chat.abort failed", error));
 	}, []);
 	const reset = useCallback(() => {
-		void window.rally.chat.reset().catch((error: unknown) => console.error("chat.reset failed", error));
+		return window.rally.chat.reset();
 	}, []);
 	// Model switching is main-owned; the returned snapshot already reflects the new session state.
 	const selectModel = useCallback((provider: string, model: string, level?: ThinkingLevelName) => {

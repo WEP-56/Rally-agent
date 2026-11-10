@@ -30,6 +30,7 @@ export interface MainAgentOptions {
 	workspace?(): WorkspaceState;
 	memory?(): string;
 	taskState?(): string;
+	capabilities?(): Promise<string>;
 	segmentBytes?: number;
 	segmentCompactions?: number;
 	onSettled?(aborted: boolean): void;
@@ -60,6 +61,7 @@ export class MainAgent {
 	private readonly workspace?: () => WorkspaceState;
 	private readonly memory?: () => string;
 	private readonly taskState?: () => string;
+	private readonly capabilities?: () => Promise<string>;
 	private readonly segmentBytes: number;
 	private readonly segmentCompactions: number;
 	private readonly onSettled?: (aborted: boolean) => void;
@@ -77,6 +79,7 @@ export class MainAgent {
 		this.workspace = options.workspace;
 		this.memory = options.memory;
 		this.taskState = options.taskState;
+		this.capabilities = options.capabilities;
 		this.segmentBytes = options.segmentBytes ?? 20 * 1024 * 1024;
 		this.segmentCompactions = options.segmentCompactions ?? 10;
 		this.onSettled = options.onSettled;
@@ -233,17 +236,19 @@ export class MainAgent {
 	/**
 	 * Compact model context in place. UI history and quote IDs remain intact.
 	 */
-	async reset(): Promise<void> {
+	async reset(): Promise<boolean> {
 		await this.start();
-		if (!this.session || !this.model) { this.addSystemLine("请先选择主 agent 模型再整理上下文。"); return; }
-		if (this.busy) { this.addSystemLine("请等待当前回复结束后再整理上下文。"); return; }
+		if (!this.session || !this.model) { this.addSystemLine("请先选择主 agent 模型再整理上下文。"); return false; }
+		if (this.isBusy()) { this.addSystemLine("请等待当前回复结束后再整理上下文。"); return false; }
 		this.setBusy(true);
 		try {
 			await this.session.compact("Preserve user goals, quoted message IDs, task IDs, decisions and unresolved questions. Never invent user quotes.");
 			this.events.append("chat_compacted", {});
 			this.addSystemLine("上下文已整理，对话历史与原话引用保留。");
+			return true;
 		} catch (error) {
 			this.fail(error);
+			return false;
 		} finally {
 			this.setBusy(false);
 		}
@@ -294,6 +299,11 @@ export class MainAgent {
 			const transform = session.agent.transformContext;
 			session.agent.transformContext = async (messages, signal) => {
 				let context = transform ? await transform(messages, signal) : messages;
+				const capabilities = await this.capabilities?.().catch(() => "Rally capability catalog is unavailable. Ask the user to check Skills/MCP settings if needed; do not assume there are no configured capabilities.");
+				if (capabilities) {
+					const index = Math.max(0, context.findLastIndex(message => message.role === "user"));
+					context = [...context.slice(0, index), { role: "custom" as const, customType: "rally-capabilities", display: false, timestamp: Date.now(), content: capabilities }, ...context.slice(index)];
+				}
 				const state = this.taskState?.();
 				if (state) {
 					const index = Math.max(0, context.findLastIndex((message) => message.role === "user"));

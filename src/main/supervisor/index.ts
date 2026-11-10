@@ -1,3 +1,4 @@
+import { managedModelConfigValue } from "./model-config-value.ts";
 // Supervisor assembly: EventLog + task facts + scheduler + worker sessions + relay (docs 01 §4).
 // The single writer is this process; renderers only mirror what it broadcasts.
 
@@ -10,6 +11,7 @@ import { MemoryStore } from "../memory-store.ts";
 import { createMemoryTools } from "./memory-tools.ts";
 import { createChatSearchTool } from "./chat-search.ts";
 import { rallyState } from "./rally-state.ts";
+import { CapabilityCatalog } from "./capability-catalog.ts";
 import { createRouterReadTools } from "./router-tools.ts";
 import { EventLog } from "./event-log.ts";
 import { MainAgent } from "./main-agent.ts";
@@ -26,6 +28,10 @@ import { createGateTools } from "./gate-tools.ts";
 import { join } from "node:path";
 import { createGitInspectTool } from "./git-inspect.ts";
 import { managedGitRunner } from "./git-runner.ts";
+import { createGithubReadTool } from "./github-tool.ts";
+import { managedGithubRunner } from "./github-runner.ts";
+import { NetworkRunner } from "./network-runner.ts";
+import { createFetchPageTool } from "./network-tools.ts";
 import { ProcessRegistry } from "./process-registry.ts";
 import { JobManager } from "./jobs.ts";
 import { ServiceManager } from "./services.ts";
@@ -66,6 +72,7 @@ export class Supervisor {
 	readonly gates: GateService;
 	readonly audit: AuditLog;
 	readonly processes: ProcessRegistry;
+	readonly network = new NetworkRunner();
 	readonly jobs: JobManager;
 	readonly services: ServiceManager;
 
@@ -90,6 +97,7 @@ export class Supervisor {
 			this.audit = new AuditLog(paths.auditFile, this.events);
 			this.memory = new MemoryStore(paths.home, paths.memoryFile, this.events, this.audit);
 			this.workspace = new WorkspaceStore(paths.home, paths.workspaceDir);
+			const catalog = new CapabilityCatalog(paths.agentDir, () => [paths.mainCwd, this.workspace.base(), ...this.workspace.state().recentProjects]);
 			const approval = this.events.ofKind("approval_mode").at(-1);
 			this.autoApprove = approval?.data.enabled === true;
 			this.snapshot = snapshot = new TaskSnapshot(paths.snapshotFile, this.events, (message) => this.main?.addSystemLine(message));
@@ -109,7 +117,7 @@ export class Supervisor {
 				onUserStop: service => { if (!this.disposed) this.main.addSystemLine(`已停止本地服务 ${service.name}（${service.id}，${service.taskId}）。`); },
 				onError: error => console.error("Rally service lifecycle failed", error),
 			});
-			this.models = new ModelStore(paths.modelsFile);
+			this.models = new ModelStore(paths.modelsFile, managedModelConfigValue(this.processes, paths.agentDir));
 			this.gates = new GateService({ store: this.store, audit: this.audit, events: this.events,
 				quote: (ref) => this.main.quote(ref), requested: () => this.relay.captureSources(),
 				notice: () => this.relay.captureSources() });
@@ -118,7 +126,8 @@ export class Supervisor {
 				segmentBytes: options.mainSegmentBytes,
 				segmentCompactions: options.mainSegmentCompactions,
 				taskState: () => rallyState(this.store, this.workers.streamingCount(), this.scheduler.limit, this.autoApprove),
-				customTools: [createChatSearchTool((params) => this.main.search(params)), ...createMemoryTools(this.memory, (ref) => this.main.quote(ref), () => !this.disposed), ...createRouterReadTools(() => this.workspace.base(), this.processes), createGitInspectTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGitRunner(this.processes)), ...createMainTaskTools(this.host()), ...createGateTools(this.gates, this.store)],
+				capabilities: () => catalog.context(),
+				customTools: [createChatSearchTool((params) => this.main.search(params)), ...createMemoryTools(this.memory, (ref) => this.main.quote(ref), () => !this.disposed), ...createRouterReadTools(() => this.workspace.base(), this.processes, () => catalog.skillPaths), createGitInspectTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGitRunner(this.processes)), createGithubReadTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGithubRunner(this.processes)), createFetchPageTool(this.network), ...createMainTaskTools(this.host()), ...createGateTools(this.gates, this.store)],
 				memory: () => this.memory.context(),
 				workspace: () => this.workspace.state(),
 				onRelayRead: (ids) => this.relay.consumed(ids),
@@ -132,6 +141,7 @@ export class Supervisor {
 			});
 			this.relay = new Relay(this.main, this.events, this.store);
 			this.workers = new WorkerManager({
+				network: this.network,
 				paths,
 				store: this.store,
 				models: this.models,
@@ -205,6 +215,7 @@ export class Supervisor {
 			Promise.resolve().then(() => this.jobs.dispose()),
 			Promise.resolve().then(() => this.services.dispose()),
 			Promise.resolve().then(() => this.processes.dispose()),
+			Promise.resolve().then(() => this.network.dispose()),
 			Promise.resolve().then(() => this.workers.dispose()),
 			Promise.resolve().then(() => this.main.dispose()),
 		]);
@@ -218,6 +229,14 @@ export class Supervisor {
 
 	board(): TaskBoard {
 		return { ...this.store.board(this.workers.streamingCount(), this.scheduler.limit), autoApprove: this.autoApprove };
+	}
+
+	archive(taskId: string, archived: boolean): TaskBoard {
+		if (typeof archived !== "boolean") throw new Error("无效的归档操作");
+		this.store.archive(taskId, archived);
+		const board = this.board();
+		this.options.emitTask({ type: "snapshot", board });
+		return board;
 	}
 
 	setAutoApprove(enabled: boolean): TaskBoard {

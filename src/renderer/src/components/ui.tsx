@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode, type ButtonHTMLAttributes,
 import { Check, ChevronDown } from "lucide-react";
 import { cn } from "../utils/cn";
 import { useBrowserOverlay } from "../browser-overlays";
+import rallyIcon from "../../../../icon.png";
 
 type BtnProps = ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "ghost" | "danger"; size?: "sm" | "md" | "lg" };
 
@@ -138,9 +139,10 @@ export function Select({ value, options, onChange, placeholder = "请选择", cl
   );
 }
 
-export function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+export function Toggle({ checked, onChange, disabled, label }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label?: string }) {
   return (
     <button
+      role="switch" aria-checked={checked} aria-label={label} disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors", checked ? "bg-accent" : "bg-press")}
     >
@@ -173,15 +175,5 @@ export function Kbd({ children }: { children: ReactNode }) {
 }
 
 export function RallyLogo({ size = 28, className }: { size?: number; className?: string }) {
-  return (
-    <div
-      className={cn("relative flex shrink-0 items-center justify-center rounded-[28%] bg-accent text-accent-fg shadow-soft", className)}
-      style={{ width: size, height: size, background: "linear-gradient(140deg, color-mix(in srgb, var(--c-accent) 75%, white), var(--c-accent) 55%, color-mix(in srgb, var(--c-accent) 70%, black))" }}
-    >
-      <svg viewBox="0 0 24 24" width={size * 0.58} height={size * 0.58} fill="none">
-        <path d="M6 19V5h6.2a4.3 4.3 0 0 1 1.2 8.43L18 19" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx="18" cy="5.5" r="1.8" fill="currentColor" />
-      </svg>
-    </div>
-  );
+  return <img src={rallyIcon} alt="Rally" width={size} height={size} draggable={false} className={cn("shrink-0 object-contain", className)} style={{ width: size, height: size }} />;
 }

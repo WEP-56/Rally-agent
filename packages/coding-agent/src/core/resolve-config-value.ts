@@ -285,3 +285,28 @@ export function resolveHeadersOrThrow(
 export function clearConfigValueCache(): void {
 	commandResultCache.clear();
 }
+
+/** Host-owned request-time resolution. Non-command interpolation remains compatible with Pi. */
+export type ConfigValueResolver = (
+	value: string,
+	description: string,
+	env?: Record<string, string>,
+	signal?: AbortSignal,
+) => Promise<string>;
+
+export async function resolveHeadersAsync(
+	headers: Record<string, string> | undefined,
+	description: string,
+	env?: Record<string, string>,
+	resolver: ConfigValueResolver = async (value, label, values) => resolveConfigValueOrThrow(value, label, values),
+	signal?: AbortSignal,
+): Promise<Record<string, string> | undefined> {
+	if (!headers) return undefined;
+	const resolved: Record<string, string> = {};
+	for (const [key, value] of Object.entries(headers)) {
+		signal?.throwIfAborted();
+		resolved[key] = await resolver(value, `${description} header "${key}"`, env, signal);
+	}
+	signal?.throwIfAborted();
+	return Object.keys(resolved).length ? resolved : undefined;
+}

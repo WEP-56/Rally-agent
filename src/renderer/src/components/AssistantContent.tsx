@@ -11,14 +11,14 @@ export function AssistantContent({ blocks, calls = [], streaming }: { blocks: As
 	const byId = new Map(calls.map((call) => [call.id, call]));
 	const display: DisplayBlock[] = [];
 	for (const block of blocks) {
-		if (block.type !== "tool") { display.push(block); continue; }
+		if (block.type !== "tool") { if (block.text.trim()) display.push(block); continue; }
 		const call = byId.get(block.toolCallId);
 		if (!call) continue;
 		const last = display.at(-1);
 		if (last?.type === "tools") last.calls.push(call);
 		else display.push({ type: "tools", calls: [call] });
 	}
-	return <div className="flex min-w-0 flex-col gap-2">
+	return <div className="flex min-w-0 flex-col gap-3">
 		{display.map((block, index) => block.type === "tools" ? <ToolActivity key={index} calls={block.calls} />
 			: block.type === "text" ? block.text.trim() && <RichText key={index} text={block.text} className="break-words text-fg" />
 			: <details key={index} className="group/thinking my-1.5 min-w-0 text-muted">

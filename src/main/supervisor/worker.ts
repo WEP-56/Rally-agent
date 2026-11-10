@@ -30,6 +30,10 @@ import { resolveToolPath as resolveWritePath, withinOutput } from "./file-paths.
 import { createFileDeleteTool } from "./file-delete.ts";
 import { createGitTool } from "./git-tool.ts";
 import { managedGitRunner } from "./git-runner.ts";
+import { createGithubTool } from "./github-tool.ts";
+import { managedGithubRunner } from "./github-runner.ts";
+import type { NetworkRunner } from "./network-runner.ts";
+import { createFetchPageTool, createHttpRequestTool } from "./network-tools.ts";
 import type { ProcessRegistry } from "./process-registry.ts";
 import type { JobManager } from "./jobs.ts";
 import type { ServiceManager } from "./services.ts";
@@ -52,6 +56,7 @@ export interface WorkerManagerOptions {
 	gates: GateService;
 	audit: AuditLog;
 	processes: ProcessRegistry;
+	network: NetworkRunner;
 	jobs: JobManager;
 	services: ServiceManager;
 	/** Injectable monotonic clock for inactivity tests; real thresholds remain ten minutes. */
@@ -186,6 +191,9 @@ export class WorkerManager {
 				...createServiceTools(this.options.services, task, run),
 				headless(createFileDeleteTool({ task, run, store, versions, gates: this.options.gates, isActive: () => !this.disposed && !task.ended && !run.endedAt })),
 				createGitTool({ task, run, store, gates: this.options.gates, audit: this.options.audit, isActive: () => !this.disposed && !task.ended && !run.endedAt }, managedGitRunner(this.options.processes, task.id)),
+				createGithubTool({ task, run, store, audit: this.options.audit, isActive: () => !this.disposed && !task.ended && !run.endedAt }, managedGithubRunner(this.options.processes, task.id)),
+				createFetchPageTool(this.options.network, { task, run, store, isActive: () => !this.disposed && !task.ended && !run.endedAt }),
+				createHttpRequestTool(this.options.network, { task, run, store, isActive: () => !this.disposed && !task.ended && !run.endedAt }),
 			].map((tool) => this.guardTool(task, run, tool)),
 		});
 		if (this.disposed || task.ended || run.endedAt) {

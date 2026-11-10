@@ -21,7 +21,7 @@ type NewKind = keyof typeof KIND_META;
 
 function Launcher({ onPick, tasks, compact }: { onPick: (k: NewKind) => void; tasks: Task[]; compact?: boolean }) {
   const { openTask } = useApp();
-  const recent = [...tasks].sort((a, b) => b.createdAt - a.createdAt).slice(0, 3);
+  const recent = tasks.filter(task => task.archivedAt === undefined).sort((a, b) => b.createdAt - a.createdAt).slice(0, 3);
   return (
     <div>
       <div className={cn("grid gap-2", compact ? "grid-cols-3" : "grid-cols-1 sm:grid-cols-3")}>

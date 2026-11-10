@@ -1,21 +1,32 @@
 appId: dev.rally.app
 productName: Rally
+# Windows x64 node-pty ships prebuilt binaries; do not run dependency lifecycle scripts.
+npmRebuild: false
 directories:
   output: release
   buildResources: build
 files:
   - out/**/*
   - package.json
+  - LICENSE
   - THIRD_PARTY_NOTICES/**/*
+extraResources:
+  - from: build/icon.ico
+    to: icon.ico
+  - from: icon.png
+    to: icon.png
 asarUnpack:
   - "node_modules/node-pty/**/*"
   - "**/*.node"
   - "**/*.wasm"
 win:
+  icon: build/icon.ico
   target:
     - target: nsis
       arch: [x64]
 nsis:
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true

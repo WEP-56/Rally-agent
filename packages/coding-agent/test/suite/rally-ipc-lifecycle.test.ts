@@ -1,18 +1,23 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { IpcChannel } from "../../../../src/shared/ipc.ts";
+import { IpcChannel, IpcEvent, type TaskEvent } from "../../../../src/shared/ipc.ts";
+import type { BrowserWindow } from "electron";
 import { registerIpc } from "../../../../src/main/ipc.ts";
 import { ensureRallyDirs, resolveRallyPaths } from "../../../../src/main/paths.ts";
 import { Supervisor } from "../../../../src/main/supervisor/index.ts";
 import { createHarness, type Harness } from "./harness.ts";
 import { BrowserManager } from "../../../../src/main/browser.ts";
 import { TerminalManager } from "../../../../src/main/terminal.ts";
+import { TaskNotifications } from "../../../../src/main/notifications.ts";
+import { McpStore } from "../../../../src/main/mcp-store.ts";
 
 const transport = vi.hoisted(() => ({
 	handlers: new Map<string, (...args: unknown[]) => unknown>(),
 	listeners: new Map<string, unknown>(),
 	rejectChannel: "",
+	owner: vi.fn(),
+	notices: [] as { title: string; click?: () => void; close: ReturnType<typeof vi.fn> }[],
 }));
 vi.mock("electron", () => ({
 	ipcMain: {
@@ -24,25 +29,100 @@ vi.mock("electron", () => ({
 		on: (channel: string, listener: unknown) => transport.listeners.set(channel, listener),
 		removeListener: (channel: string) => transport.listeners.delete(channel),
 	},
-	app: {}, BrowserWindow: { getAllWindows: () => [] }, dialog: {}, shell: {},
+	app: { getAppPath: () => process.cwd() }, BrowserWindow: { getAllWindows: () => [], fromWebContents: transport.owner }, dialog: {}, shell: {},
+	Notification: class {
+		title: string; click?: () => void; close = vi.fn();
+		static isSupported() { return true; }
+		constructor(options: { title: string }) { this.title = options.title; transport.notices.push(this); }
+		on(event: string, callback: () => void) { if (event === "click") this.click = callback; }
+		show() {}
+	},
 }));
 
 describe("Rally IPC shutdown boundary (no Electron UI)", () => {
 	const harnesses: Harness[] = [];
 	const supervisors: Supervisor[] = [];
 	const stops: Array<() => Promise<void>> = [];
+	const notifications: TaskNotifications[] = [];
 	afterEach(async () => {
+		for (const manager of notifications.splice(0)) manager.dispose();
 		await Promise.all(stops.splice(0).map(stop => stop()));
 		await Promise.all(supervisors.splice(0).map(supervisor => supervisor.dispose()));
-		vi.restoreAllMocks(); transport.handlers.clear(); transport.listeners.clear(); transport.rejectChannel = "";
+		vi.restoreAllMocks(); transport.handlers.clear(); transport.listeners.clear(); transport.rejectChannel = ""; transport.owner.mockReset(); transport.notices = [];
 		for (const harness of harnesses.splice(0)) harness.cleanup();
 	});
-	async function setup() {
+	async function setup(emitTask: (event: TaskEvent) => void = () => {}) {
 		const harness = await createHarness(); harnesses.push(harness);
 		const paths = resolveRallyPaths(join(harness.tempDir, "home")); ensureRallyDirs(paths);
-		const supervisor = new Supervisor(paths, { emitChat: () => {}, emitTask: () => {} }); supervisors.push(supervisor);
+		const supervisor = new Supervisor(paths, { emitChat: () => {}, emitTask }); supervisors.push(supervisor);
 		return { paths, supervisor };
 	}
+	it("saves MCP search disclosure through owned-frame IPC without starting a connection", async () => {
+		const { paths, supervisor } = await setup();
+		const mcp = new McpStore(paths.agentDir); mcp.save(JSON.stringify({ mcpServers: { fixture: { command: "never-execute" } } }));
+		stops.push(registerIpc(paths, supervisor));
+		const sender = { mainFrame: {} }; transport.owner.mockReturnValue({ webContents: sender, isDestroyed: () => false });
+		const event = { sender, senderFrame: sender.mainFrame }; const set = transport.handlers.get(IpcChannel.mcpExposure)!;
+		await expect(set({ sender, senderFrame: {} }, "fixture", "deferred")).rejects.toThrow("BROWSER_NOT_ALLOWED");
+		await expect(set(event, "fixture", "bad-mode")).rejects.toThrow("无效的 MCP 披露设置");
+		expect(await set(event, "fixture", "deferred")).toMatchObject({ servers: [{ exposure: "deferred" }] });
+		expect(await set(event, "fixture", "hidden", "delete_*")).toMatchObject({ servers: [{ toolExposure: { "delete_*": "hidden" } }] });
+		expect(await set(event, "fixture", null, "delete_*")).toMatchObject({ servers: [{ toolExposure: {} }] });
+		expect(mcp.state().servers[0].exposure).toBe("deferred");
+		expect(supervisor.events.ofKind("process_stopped")).toHaveLength(0);
+	});
+	it("limits server editing and task archiving to the owning frame", async () => {
+		const { paths, supervisor } = await setup();
+		stops.push(registerIpc(paths, supervisor));
+		const sender = { mainFrame: {} }; transport.owner.mockReturnValue({ webContents: sender, isDestroyed: () => false });
+		const event = { sender, senderFrame: sender.mainFrame };
+		const save = transport.handlers.get(IpcChannel.mcpSaveServer)!;
+		await expect(save({ sender, senderFrame: {} }, "one", '{"command":"never-run"}')).rejects.toThrow("BROWSER_NOT_ALLOWED");
+		await save(event, "one", '{"command":"never-run"}');
+		await save(event, "two", '{"url":"https://example.invalid/mcp"}');
+		expect(new McpStore(paths.agentDir).state().servers.map(server => server.name)).toEqual(["one", "two"]);
+		const task = supervisor.store.create({ title: "Archive fixture", cwd: paths.workspaceDir, mode: "readonly", scope: [], quotes: [], dependsOn: [], autoApprove: false }).task;
+		const archive = transport.handlers.get(IpcChannel.tasksArchive)!;
+		await expect(archive({ sender, senderFrame: {} }, task.id, true)).rejects.toThrow("BROWSER_NOT_ALLOWED");
+		await expect(archive(event, task.id, true)).rejects.toThrow("请先在主对话中结束任务");
+		supervisor.cancel(task.id);
+		await archive(event, task.id, true);
+		expect(supervisor.store.get(task.id)?.archivedAt).toBeTypeOf("number");
+		await archive(event, task.id, false);
+		expect(supervisor.store.get(task.id)?.archivedAt).toBeUndefined();
+	});
+	it("projects real task escalation/completion and restricts notification settings and click targets to the main frame", async () => {
+		let manager: TaskNotifications | undefined;
+		const { paths, supervisor } = await setup(event => manager?.observe(event));
+		const sender = { mainFrame: {}, isDestroyed: () => false, send: vi.fn() };
+		const window = { webContents: sender, isDestroyed: () => false, isFocused: () => false, isVisible: () => true, isMinimized: () => false, show: vi.fn(), focus: vi.fn() };
+		transport.owner.mockReturnValue(window);
+		manager = new TaskNotifications(join(paths.home, "notifications.json"), () => window as unknown as BrowserWindow);
+		notifications.push(manager); manager.start([]);
+		stops.push(registerIpc(paths, supervisor, manager));
+		const event = { sender, senderFrame: sender.mainFrame };
+		const state = transport.handlers.get(IpcChannel.notificationsState)!;
+		const update = transport.handlers.get(IpcChannel.notificationsUpdate)!;
+		const target = transport.handlers.get(IpcChannel.notificationsTarget)!;
+		expect(await state(event)).toEqual({ completed: true });
+		await expect(update({ sender, senderFrame: {} }, { completed: false })).rejects.toThrow("BROWSER_NOT_ALLOWED");
+		await expect(update(event, { completed: "false" })).rejects.toThrow("通知设置无效");
+		const task = supervisor.store.create({ title: "通知接线", quotes: [], cwd: paths.workspaceDir, scope: [], mode: "write", dependsOn: [], autoApprove: false }).task;
+		const run = supervisor.store.startRun(task.id, "dispatch", "fixture");
+		const report = supervisor.store.report(task.id, run.id, "progress", "等待选项", "保留哪一个？", ["甲", "乙"]);
+		expect(transport.notices).toHaveLength(0);
+		supervisor.store.escalateAttention(task.id, report.attention!.id);
+		expect(transport.notices).toHaveLength(1); transport.notices[0].click!();
+		expect(sender.send).toHaveBeenCalledWith(IpcEvent.notification, undefined);
+		await expect(target({ sender: { mainFrame: {} }, senderFrame: {} })).rejects.toThrow("BROWSER_NOT_ALLOWED");
+		expect(await target(event)).toEqual({ taskId: task.id, cardId: `question-${report.attention!.id}` });
+		expect(await target(event)).toBeNull(); expect(window.focus).toHaveBeenCalledOnce();
+		supervisor.store.report(task.id, run.id, "ready", "完成");
+		expect(transport.notices.map(item => item.title)).toEqual(["Rally · 需要回答", "Rally · 任务完成"]);
+		expect(await update(event, { completed: false })).toEqual({ completed: false });
+		expect(transport.notices[1].close).toHaveBeenCalledOnce();
+		expect(JSON.parse(readFileSync(join(paths.home, "notifications.json"), "utf8"))).toEqual({ completed: false });
+	});
 	it("lists real services and directly stops one through declared IPC without changing its task", async () => {
 		const { paths, supervisor } = await setup(); mkdirSync(paths.workspaceDir, { recursive: true });
 		const stop = registerIpc(paths, supervisor); stops.push(stop);

@@ -19,8 +19,8 @@ export function GateCard({ taskId, gate, decide }: { taskId: string; gate: TaskG
 		setBusy(true); setError("");
 		try { await decide(value); } catch (reason) { setError(String(reason)); } finally { setBusy(false); }
 	}
-	if (gate.decision) return <div className="rounded-xl bg-sunken px-3.5 py-2 text-xs text-muted">{taskId} · {gate.id} · 已{gate.decision.value === "allow" ? "允许" : "拒绝"}（{gate.decision.actor === "user" ? "你" : gate.decision.actor === "main" ? "主 agent" : "系统"}{gate.decision.basis.length ? `，依据 ${gate.decision.basis.join("、")}` : ""}） · {gate.decision.reason}</div>;
-	return <div className="rounded-xl bg-sunken px-3.5 py-3 text-sm">
+	if (gate.decision) return <div id={`gate-${gate.id}`} tabIndex={-1} className="rounded-xl bg-sunken px-3.5 py-2 text-xs text-muted">{taskId} · {gate.id} · 已{gate.decision.value === "allow" ? "允许" : "拒绝"}（{gate.decision.actor === "user" ? "你" : gate.decision.actor === "main" ? "主 agent" : "系统"}{gate.decision.basis.length ? `，依据 ${gate.decision.basis.join("、")}` : ""}） · {gate.decision.reason}</div>;
+	return <div id={`gate-${gate.id}`} tabIndex={-1} className="rounded-xl bg-sunken px-3.5 py-3 text-sm">
 		<div className="flex flex-wrap items-center justify-between gap-2 font-medium"><span>{taskId} · {gate.id} 请求不可逆操作</span><span className="text-xs tabular-nums text-muted">剩余 {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</span></div>
 		<div className="mt-2 whitespace-pre-wrap break-words">{gate.action}</div>
 		<div className="mt-1 break-all font-mono text-xs text-muted">{gate.tool} · {gate.cwd}</div>

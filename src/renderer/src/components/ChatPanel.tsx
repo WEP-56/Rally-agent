@@ -1,3 +1,4 @@
+import type { NotificationTarget } from "../../../shared/notifications";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowUp, PanelRightClose, PanelRightOpen, Paperclip, SquarePen, ShieldCheck, ChevronRight, Square, AtSign } from "lucide-react";
 import type { ModelSummary, ThinkingLevelName } from "../../../shared/models";
@@ -14,6 +15,7 @@ import { AssistantContent } from "./AssistantContent";
 import { GateCard } from "./GateCard";
 import { QuestionCard } from "./QuestionCard";
 import { StatusIcon, StatusBadge } from "./status";
+import { conversationItems } from "../conversation";
 
 function UserBubble({ text }: { text: string }) {
   const [expanded, setExpanded] = useState(false);
@@ -60,6 +62,9 @@ function TaskCard({ task }: { task: Task }) {
 }
 
 export function ChatPanel({
+	onShowHistory,
+	historyBefore,
+	notificationFocus,
 	messages,
 	tasks,
 	questions = [],
@@ -77,6 +82,9 @@ export function ChatPanel({
 	autoApprove,
 	onAutoApprove,
 }: {
+	onShowHistory?: () => void;
+	historyBefore?: number;
+	notificationFocus?: { target: NotificationTarget; n: number };
 	messages: ChatMsg[];
 	questions?: TaskQuestionView[];
 	tasks: Task[];
@@ -99,8 +107,9 @@ export function ChatPanel({
 	const action = (operation: Promise<unknown>) => { setActionError(null); void operation.catch((error: unknown) => setActionError(error instanceof Error ? error.message : String(error))); };
 	const [draft, setDraft] = useState("");
 	const scroller = useRef<HTMLDivElement>(null);
+	const followTail = useRef(true);
+	const focusedNotice = useRef<number | undefined>(undefined);
 	const ta = useRef<HTMLTextAreaElement>(null);
-	const running = tasks.filter((t) => t.status === "running").length;
 	const visibleMessages = messages.filter((message) => message.text.trim() || message.blocks?.length || message.steps?.length || message.toolCalls?.length || message.taskRef || (message.role === "assistant" && message.streaming));
 
   useEffect(() => {
@@ -111,7 +120,18 @@ export function ChatPanel({
   }, [inject?.n, inject?.text]);
 
   useEffect(() => {
-    scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
+    if (!notificationFocus || focusedNotice.current === notificationFocus.n || !notificationFocus.target.cardId) return;
+    followTail.current = false;
+    const card = document.getElementById(notificationFocus.target.cardId);
+    if (card) {
+      card.scrollIntoView({ block: "center", behavior: "instant" });
+      card.focus({ preventScroll: true });
+      focusedNotice.current = notificationFocus.n;
+    }
+  }, [notificationFocus, tasks, questions]);
+
+  useEffect(() => {
+    if (followTail.current) scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
   }, [messages, questions.length]);
 
   useLayoutEffect(() => {
@@ -123,6 +143,7 @@ export function ChatPanel({
 
   const send = () => {
     if (!draft.trim()) return;
+    followTail.current = true;
     onSend(draft);
     setDraft("");
   };
@@ -131,14 +152,7 @@ export function ChatPanel({
     <div className="flex h-full min-w-0 flex-col">
       {/* header */}
       <div className="flex h-12 shrink-0 items-center gap-2.5 px-4">
-        <RallyLogo size={24} />
-        <div className="min-w-0">
-          <div className="text-sm font-semibold leading-tight">{config.name || "Rally"}</div>
-          <div className="flex items-center gap-1.5 text-[11px] text-faint">
-            <span className={cn("h-1.5 w-1.5 rounded-full", busy ? "animate-pulse bg-amber-500" : "bg-accent")} />
-            {busy ? "思考中" : "在线"} · {running} 个任务进行中
-          </div>
-        </div>
+        {onShowHistory && <button onClick={onShowHistory} className="text-xs text-muted hover:text-fg">显示旧会话</button>}
         <div className="flex-1" />
         <IconButton title="整理上下文 (Ctrl+N)" onClick={onNewChat}>
           <SquarePen size={15} strokeWidth={1.8} />
@@ -149,8 +163,11 @@ export function ChatPanel({
       </div>
 
       {/* messages */}
-      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-[760px] flex-col gap-6 px-6 pb-6 pt-4">
+      <div ref={scroller} onScroll={event => {
+        const node = event.currentTarget;
+        followTail.current = node.scrollHeight - node.scrollTop - node.clientHeight < 48;
+      }} className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <div className="mx-auto flex min-w-0 max-w-[760px] flex-col gap-4 px-6 pb-6 pt-4">
           {visibleMessages.length === 0 && (
             <div className="animate-rise flex flex-col items-center pt-[14vh] text-center">
               <RallyLogo size={52} />
@@ -165,9 +182,9 @@ export function ChatPanel({
               </div>
             </div>
           )}
-          {visibleMessages.map((m) =>
-            m.role === "system" ? (
-              <div key={m.id} className="animate-rise whitespace-pre-wrap text-center text-[12px] leading-relaxed text-faint">
+          {conversationItems(visibleMessages, questions).map((m) =>
+            m.role === "question" ? <QuestionCard key={m.id} {...m.record} answer={(option) => window.rally.tasks.answerOption(m.record.taskId, m.record.question.id, option)} /> : m.role === "system" ? (
+              <div key={m.id} className="animate-rise whitespace-pre-wrap break-words text-center text-[12px] leading-relaxed text-faint">
                 {m.text}
               </div>
             ) : m.role === "user" ? (
@@ -175,7 +192,7 @@ export function ChatPanel({
                 <UserBubble text={m.text} />
               </div>
             ) : (
-              <div key={m.id} className="animate-rise text-sm leading-relaxed">
+              <div key={m.id} className="animate-rise min-w-0 text-sm leading-relaxed">
                 {m.blocks?.length ? <AssistantContent blocks={m.blocks} calls={m.toolCalls} streaming={m.streaming} /> : <>
                   {m.steps && m.steps.length > 0 && <ToolSteps steps={m.steps} />}
                   {m.toolCalls && m.toolCalls.length > 0 && <ToolActivity calls={m.toolCalls} />}
@@ -210,8 +227,8 @@ export function ChatPanel({
               </div>
             </div>
           ))}
-          {tasks.flatMap((task) => (task.gates ?? []).filter((gate) => gate.escalatedAt || gate.decision).map((gate) => <GateCard key={gate.id} taskId={task.id} gate={gate} decide={(value) => window.rally.gates.decide(gate.id, value)} />))}
-          {[...questions].sort((a, b) => a.question.askedAt - b.question.askedAt || Number(a.question.id.slice(2)) - Number(b.question.id.slice(2))).map(({ taskId, title, question }) => <QuestionCard key={question.id} taskId={taskId} title={title} question={question} answer={(option) => window.rally.tasks.answerOption(taskId, question.id, option)} />)}
+          {tasks.flatMap((task) => (task.gates ?? []).filter((gate) => (gate.escalatedAt || gate.decision) && (!historyBefore || !gate.decision || gate.decision.at > historyBefore)).map((gate) => <GateCard key={gate.id} taskId={task.id} gate={gate} decide={(value) => window.rally.gates.decide(gate.id, value)} />))}
+          {questions.filter(({ question }) => !question.answer && !question.closed).sort((a, b) => a.question.askedAt - b.question.askedAt).map(({ taskId, title, question }) => <QuestionCard key={question.id} taskId={taskId} title={title} question={question} answer={(option) => window.rally.tasks.answerOption(taskId, question.id, option)} />)}
           {actionError && <div role="alert" className="text-xs text-red-500">{actionError}</div>}
         </div>
       </div>
@@ -233,7 +250,7 @@ export function ChatPanel({
             placeholder={`给 ${config.name || "Rally"} 发消息，复杂工作会自动派发到工位…`}
             className="block max-h-[200px] w-full resize-none bg-transparent px-2.5 pb-1 pt-1.5 text-sm leading-relaxed text-fg placeholder:text-faint"
           />
-          <div className="mt-1 flex items-center gap-0.5">
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-0.5">
             <IconButton title="添加附件">
               <Paperclip size={15} strokeWidth={1.8} />
             </IconButton>

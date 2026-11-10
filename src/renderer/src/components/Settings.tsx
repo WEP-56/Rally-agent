@@ -1,8 +1,8 @@
-import { useState } from "react";
-import { ArrowLeft, UserRound, Brain, Server, Plug, Wand2, Palette, Info, RefreshCw, CheckCircle2, FolderInput, Sun, Moon, Monitor, Loader2, RotateCcw, ExternalLink } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Bell, ArrowLeft, UserRound, Brain, Server, Plug, Wand2, Palette, Info, RefreshCw, CheckCircle2, FolderInput, Sun, Moon, Monitor, Loader2, RotateCcw, ExternalLink } from "lucide-react";
 import { ACCENTS, useApp } from "../store";
 import { cn } from "../utils/cn";
-import { Button, RallyLogo, Segmented } from "./ui";
+import { Button, RallyLogo, Segmented, Toggle } from "./ui";
 import { IdentityForm, MemoryForm, ProvidersForm } from "./forms";
 import { WorkspaceForm } from "./WorkspaceForm";
 import { SkillsSection } from "./SkillsSection";
@@ -26,6 +26,7 @@ export const SECTIONS = [
   { id: "skills", label: "Skills", icon: Wand2, desc: "可复用的能力包，按需加载" },
   { id: "trust", label: "项目信任", icon: FolderInput, desc: "管理项目资源的加载权限" },
   { id: "appearance", label: "外观", icon: Palette, desc: "主题、强调色与字号" },
+  { id: "notifications", label: "通知", icon: Bell, desc: "窗口在后台时的任务提醒" },
   { id: "about", label: "关于", icon: Info, desc: "版本信息与更新" },
 ];
 
@@ -53,6 +54,25 @@ function Row({ title, desc, children }: { title: React.ReactNode; desc?: React.R
       {children}
     </div>
   );
+}
+
+function NotificationsSection() {
+ const [completed, setCompleted] = useState<boolean | null>(null);
+ const [saving, setSaving] = useState(false);
+ const [error, setError] = useState("");
+ useEffect(() => { let alive = true; void window.rally.notifications.getState().then(state => { if (alive) setCompleted(state.completed); }).catch(reason => { if (alive) setError(String(reason)); }); return () => { alive = false; }; }, []);
+ const update = async (value: boolean) => {
+  setSaving(true); setError("");
+  try { const state = await window.rally.notifications.update({ completed: value }); setCompleted(state.completed); }
+  catch (reason) { setError(String(reason)); } finally { setSaving(false); }
+ };
+ return <Group title="系统通知">
+  <Row title="需要处理" desc="问题或不可逆操作上升给你，以及任务失败或受阻时提醒。"><span className="text-xs text-muted">默认开启</span></Row>
+  <Row title="任务完成" desc="仅在 Rally 窗口不在前台时通知。">
+   <Toggle label="任务完成通知" checked={completed ?? true} disabled={completed === null || saving} onChange={value => void update(value)} />
+  </Row>
+  {error && <p role="alert" className="px-3 py-2 text-xs text-red-500">{error}</p>}
+ </Group>;
 }
 
 function AppearanceSection() {
@@ -180,6 +200,7 @@ export function Settings({ section, setSection, onBack }: { section: string; set
           {cur.id === "skills" && <SkillsSection />}
           {cur.id === "trust" && <ProjectTrustSection />}
           {cur.id === "appearance" && <AppearanceSection />}
+          {cur.id === "notifications" && <NotificationsSection />}
           {cur.id === "about" && <AboutSection />}
         </div>
       </main>

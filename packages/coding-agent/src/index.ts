@@ -13,7 +13,7 @@ export {
 	getReadmePath,
 	VERSION,
 } from "./config.ts";
-export { resolveConfigValueOrThrow } from "./core/resolve-config-value.ts";
+export { resolveConfigValueOrThrow, type ConfigValueResolver } from "./core/resolve-config-value.ts";
 export { ensureTool } from "./utils/tools-manager.ts";
 export type { SearchExecution, SearchProcess } from "./core/tools/search-process.ts";
 export {

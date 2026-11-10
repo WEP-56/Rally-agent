@@ -4,7 +4,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type Api, getSupportedThinkingLevels, type Model } from "@rally/ai";
-import { ModelRuntime } from "@rally/coding-agent";
+import { ModelRuntime, type ConfigValueResolver } from "@rally/coding-agent";
 import {
 	type ActiveSelection,
 	type FetchModelsInput,
@@ -89,8 +89,10 @@ export class ModelStore {
 	private loadErrors: string[] = [];
 	private runtime: ModelRuntime | null = null;
 	private initialized: Promise<void>;
+	private readonly resolveConfigValue?: ConfigValueResolver;
 
-	constructor(file: string) {
+	constructor(file: string, resolveConfigValue?: ConfigValueResolver) {
+		this.resolveConfigValue = resolveConfigValue;
 		this.file = file;
 		this.load();
 		this.initialized = this.init();
@@ -218,6 +220,7 @@ export class ModelStore {
 			this.runtime = await ModelRuntime.create({
 				// auth.json stays Pi's; models come from Rally's own file, never ~/.rally/agent/models.json.
 				authPath: join(dirname(this.file), "auth.json"),
+				resolveConfigValue: this.resolveConfigValue,
 				modelsPath: null,
 			});
 			this.registerAll();

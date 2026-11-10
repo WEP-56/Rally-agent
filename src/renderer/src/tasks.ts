@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { TaskBoard, TaskView } from "../../shared/task";
 import { questionViews } from "../../shared/task";
-import type { Task, TaskMsg } from "./data";
+import type { Task } from "./data";
+import { messagesOf } from "./task-messages";
 
 const api = window.rally.tasks;
 
@@ -31,9 +32,10 @@ export function useTasks(): TaskBoardState {
 					? current.tasks.map((task) => (task.id === event.task.id ? event.task : task))
 					: [...current.tasks, event.task];
 				const open = tasks.filter((task) => !task.ended);
-				const ended = tasks.filter((task) => task.ended).sort((a, b) => b.ended!.at - a.ended!.at || Number(b.id.slice(2)) - Number(a.id.slice(2))).slice(0, 20);
+				const ended = tasks.filter((task) => task.ended && task.archivedAt === undefined).sort((a, b) => b.updatedAt - a.updatedAt || Number(b.id.slice(2)) - Number(a.id.slice(2))).slice(0, 20);
+				const archived = tasks.filter(task => task.archivedAt !== undefined);
 				const questions = [...(current.questions ?? []).filter((item) => item.taskId !== event.task.id), ...questionViews(event.task)];
-				return { ...current, tasks: [...open, ...ended], questions };
+				return { ...current, tasks: [...open, ...ended, ...archived], questions };
 			});
 		});
 		return () => {
@@ -57,6 +59,8 @@ function toTask(view: TaskView): Task {
 	const status = view.status;
 	return {
 		id: view.id,
+		archivedAt: view.archivedAt,
+		ended: Boolean(view.ended),
 		toolCalls: view.toolCalls,
 		gates: view.gates,
 		lastExternalAction: view.lastExternalAction,
@@ -76,15 +80,4 @@ function toTask(view: TaskView): Task {
 		note: view.note,
 		dependsOn: view.dependsOn,
 	};
-}
-
-function messagesOf(view: TaskView): TaskMsg[] {
-	const messages: TaskMsg[] = view.quotes.map((quote) => ({ role: "rally", text: quote.text }));
-	if (view.note) messages.push({ role: "rally", text: `主 agent 备注：${view.note}` });
-	for (const message of view.assistantMessages ?? []) {
-		if (message.blocks.length || message.streaming) messages.push({ role: "assistant", message });
-	}
-	if (!view.assistantMessages?.length && view.lastReport) messages.push({ role: "agent", text: `${view.lastReport.state}：${view.lastReport.summary}` });
-	if (view.changedFiles?.length) messages.push({ role: "agent", text: `改动文件：${view.changedFiles.join(", ")}` });
-	return messages;
 }

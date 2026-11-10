@@ -1,13 +1,18 @@
+import { isCommandConfigValue, resolveConfigValue } from "./resolve-config-value.ts";
+import { AuthStorage } from "./auth-storage.ts";
 import type { AuthOperationOptions, Credential, CredentialInfo, CredentialStore } from "@rally/ai";
 
 /** Async credential store overlay for non-persistent runtime API keys. */
 export class RuntimeCredentials implements CredentialStore {
 	private readonly store: CredentialStore;
+	private readonly preserveCommands: boolean;
+	private readonly commandCredentials = new WeakSet<Credential>();
 	private readonly overrides = new Map<string, string>();
 	/** Modifications not yet written or failed, for example an OAuth refresh. */
 	private readonly pendingModifications = new Set<Promise<void>>();
 
-	constructor(store: CredentialStore) {
+	constructor(store: CredentialStore, preserveCommands = false) {
+		this.preserveCommands = preserveCommands;
 		this.store = store;
 	}
 
@@ -26,7 +31,25 @@ export class RuntimeCredentials implements CredentialStore {
 	async read(providerId: string, options?: AuthOperationOptions): Promise<Credential | undefined> {
 		options?.signal?.throwIfAborted();
 		const override = this.overrides.get(providerId);
-		return override ? { type: "api_key", key: override } : this.store.read(providerId, options);
+		const raw = override
+			? { type: "api_key" as const, key: override }
+			: this.store instanceof AuthStorage
+				? await this.store.read(providerId, options, this.preserveCommands)
+				: await this.store.read(providerId, options);
+		if (!this.preserveCommands || raw?.type !== "api_key" || !raw.key) return raw;
+		if (isCommandConfigValue(raw.key)) {
+			this.commandCredentials.add(raw);
+			return raw;
+		}
+		// Only file-backed Pi configuration needs interpolation. An interpolated literal
+		// beginning with ! must never become a second command evaluation.
+		return !override && this.store instanceof AuthStorage
+			? { ...raw, key: resolveConfigValue(raw.key, raw.env) }
+			: raw;
+	}
+
+	isCommandCredential(credential: Credential): boolean {
+		return this.commandCredentials.has(credential);
 	}
 
 	async list(options?: AuthOperationOptions): Promise<readonly CredentialInfo[]> {

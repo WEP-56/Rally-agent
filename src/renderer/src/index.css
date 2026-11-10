@@ -123,3 +123,30 @@ input, textarea { outline: none; }
 /* Frameless window: the title bar drags the window; anything clickable inside it opts out. */
 .drag { -webkit-app-region: drag; }
 .no-drag { -webkit-app-region: no-drag; }
+
+/* Conversation markdown uses the prototype's spacing, colors and typography. */
+.rally-markdown { overflow-wrap: anywhere; }
+.rally-markdown > * { margin-block: 0 0.625rem; }
+.rally-markdown > :last-child { margin-bottom: 0; }
+.rally-markdown p { white-space: pre-wrap; }
+.rally-markdown :is(h1, h2, h3, h4, h5, h6) { font-weight: 600; line-height: 1.4; margin-top: 1rem; }
+.rally-markdown > :first-child { margin-top: 0; }
+.rally-markdown h1 { font-size: 1.35em; }
+.rally-markdown h2 { font-size: 1.2em; }
+.rally-markdown h3 { font-size: 1.1em; }
+.rally-markdown :is(ul, ol) { padding-left: 1.5rem; }
+.rally-markdown ul { list-style: disc; }
+.rally-markdown ol { list-style: decimal; }
+.rally-markdown li { margin-block: 0.25rem; }
+.rally-markdown li > p { margin-block: 0.5rem; }
+.rally-markdown .task-list-item { list-style: none; }
+.rally-markdown input[type="checkbox"] { margin-right: 0.5rem; accent-color: var(--c-accent); }
+.rally-markdown blockquote { border-left: 3px solid var(--c-press); padding-left: 0.875rem; color: var(--c-muted); }
+.rally-markdown code { border-radius: 0.375rem; background: var(--c-sunken); padding: 0.125rem 0.375rem; font-family: var(--font-mono); font-size: 0.9em; }
+.rally-markdown pre { overflow-x: auto; border-radius: 0.75rem; background: var(--c-sunken); padding: 0.875rem 1rem; white-space: pre; overflow-wrap: normal; }
+.rally-markdown pre code { padding: 0; background: transparent; border-radius: 0; }
+.rally-markdown strong { font-weight: 600; }
+.rally-markdown hr { border: 0; border-top: 1px solid var(--c-press); margin-block: 1rem; }
+.rally-markdown table { border-collapse: collapse; width: 100%; font-size: 0.9em; }
+.rally-markdown :is(th, td) { border: 1px solid var(--c-press); padding: 0.5rem 0.75rem; min-width: 5rem; }
+.rally-markdown th { background: var(--c-sunken); font-weight: 600; }

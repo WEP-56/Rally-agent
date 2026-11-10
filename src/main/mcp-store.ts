@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadMcpConfig, validateMcpServerConfig, type LoadedMcpConfig } from "@rally/coding-agent";
-import type { McpConfigurationState, McpRiskTier } from "../shared/mcp.ts";
+import type { McpConfigurationState, McpExposure, McpRiskTier } from "../shared/mcp.ts";
 import { projectSettings } from "./project-trust.ts";
 
 /** Global configuration editor. Reading or saving never starts a transport. */
@@ -20,10 +20,48 @@ export class McpStore {
 		return { json, errors, tools: [...new Set([...names, ...Object.keys(tiers)])].sort().map((name) => ({ name, tier: tiers[name] ?? "reversible" })), servers: loaded.servers.map(({ name, config }) => ({ name,
 			enabled: config.enabled !== false, transport: "url" in config ? "http" : "stdio",
 			address: "url" in config ? config.url : [config.command, ...(config.args ?? [])].join(" "),
+			exposure: config.exposure ?? "direct", toolExposure: { ...config.toolExposure },
 		})) };
 	}
 	forProject(cwd: string): LoadedMcpConfig {
 		return loadMcpConfig({ agentDir: this.agentDir, cwd, projectTrusted: projectSettings(cwd, this.agentDir, true).isProjectTrusted() });
+	}
+	/** Edit one server while preserving the other entries and top-level settings. */
+	saveServer(name: string, json: string, originalName?: string): McpConfigurationState {
+		if (typeof name !== "string" || !name.trim() || typeof json !== "string" || (originalName !== undefined && typeof originalName !== "string")) throw new Error("请填写服务器名称与配置");
+		const state = this.state();
+		const parsed: unknown = JSON.parse(state.json.replace(/^\uFEFF/, ""));
+		if (!record(parsed) || !record(parsed.mcpServers)) throw new Error("请先在 JSON 中修复配置");
+		if (originalName !== undefined && !Object.hasOwn(parsed.mcpServers, originalName)) throw new Error("服务器已不存在，请刷新");
+		if (name !== originalName && Object.hasOwn(parsed.mcpServers, name)) throw new Error("该名称已存在，请使用列表中的编辑按钮");
+		const entry: unknown = JSON.parse(json);
+		const validated = validateMcpServerConfig(name, entry);
+		if (typeof validated === "string") throw new Error(validated);
+		if (originalName !== undefined && originalName !== name) delete parsed.mcpServers[originalName];
+		Object.defineProperty(parsed.mcpServers, name, { value: entry, enumerable: true, configurable: true, writable: true });
+		return this.save(JSON.stringify(parsed));
+	}
+	/** Global defaults and server-native tool names/patterns; existing worker sessions keep their config. */
+	setExposure(name: string, exposure: McpExposure | null, tool?: string): McpConfigurationState {
+		if (typeof name !== "string" || (exposure !== null && !["direct", "deferred", "codemode", "hidden"].includes(exposure)) ||
+			(tool !== undefined && (typeof tool !== "string" || !tool.trim()))) throw new Error("无效的 MCP 披露设置");
+		const state = this.state();
+		if (state.errors.length) throw new Error(state.errors.join("\n"));
+		const parsed: unknown = JSON.parse(state.json.replace(/^\uFEFF/, ""));
+		if (!record(parsed) || !record(parsed.mcpServers) || !Object.hasOwn(parsed.mcpServers, name)) throw new Error("服务器不存在，请刷新");
+		const entry = parsed.mcpServers[name];
+		if (!record(entry)) throw new Error("服务器配置无效");
+		if (tool === undefined) {
+			if (exposure === null) delete entry.exposure;
+			else entry.exposure = exposure;
+		} else {
+			const rules = record(entry.toolExposure) ? { ...entry.toolExposure } : {};
+			if (exposure === null) delete rules[tool];
+			else Object.defineProperty(rules, tool, { value: exposure, enumerable: true, configurable: true, writable: true });
+			if (Object.keys(rules).length) entry.toolExposure = rules;
+			else delete entry.toolExposure;
+		}
+		return this.save(JSON.stringify(parsed));
 	}
 	tier(name: string): McpRiskTier { return this.tiers()[name] ?? "reversible"; }
 	setTier(name: string, tier: McpRiskTier): McpConfigurationState {

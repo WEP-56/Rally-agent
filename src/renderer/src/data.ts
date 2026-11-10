@@ -1,4 +1,4 @@
-export type StepKind = "cmd" | "read" | "write" | "edit" | "delete" | "search" | "web" | "memory" | "think";
+export type StepKind = "cmd" | "read" | "write" | "edit" | "delete" | "search" | "web" | "memory" | "think" | "task" | "tool";
 import type { ToolCall } from "../../shared/tools";
 import type { AssistantBlock, AssistantMessageView } from "../../shared/conversation";
 import type { TaskGate } from "../../shared/gate";
@@ -15,6 +15,7 @@ export interface ToolStep {
 }
 
 export interface ChatMsg {
+	runId?: string;
 	blocks?: AssistantBlock[];
 	toolCalls?: ToolCall[];
   id: string;
@@ -30,11 +31,13 @@ export type TaskStatus = "running" | "done" | "failed" | "queued" | "cancelled" 
 
 export type TaskMsg =
 	| { role: "assistant"; message: AssistantMessageView }
-  | { role: "rally"; text: string }
+  | { role: "rally"; text: string; label?: string; id?: string }
   | { role: "agent"; text: string }
   | { role: "tools"; steps: ToolStep[] };
 
 export interface Task {
+	archivedAt?: number;
+	ended?: boolean;
 	gates?: TaskGate[];
 	lastExternalAction?: { tool: string; at: number };
 	toolCalls?: ToolCall[];

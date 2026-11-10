@@ -16,7 +16,7 @@ vi.mock("electron", () => ({
 	app: { requestSingleInstanceLock: () => true, whenReady: () => state.whenReady, on: (name: string, callback: (...args: unknown[]) => void) => state.listeners.set(name, callback), exit: state.exit },
 	BrowserWindow: state.windows, nativeTheme: { shouldUseDarkColors: false }, dialog: {}, shell: {},
 }));
-vi.mock("../../../../src/main/paths.ts", () => ({ ensureRallyDirs: () => {}, resolveRallyPaths: () => ({ agentDir: "fixture" }) }));
+vi.mock("../../../../src/main/paths.ts", () => ({ ensureRallyDirs: () => {}, resolveRallyPaths: () => ({ home: "fixture", agentDir: "fixture" }) }));
 vi.mock("../../../../src/main/smoke.ts", () => ({ runSmoke: vi.fn() }));
 vi.mock("../../../../src/main/supervisor/index.ts", () => ({ Supervisor: class { start() { return new Promise<void>(() => {}); } dispose(pending: Promise<void>) { return state.dispose(pending); } } }));
 vi.mock("../../../../src/main/shutdown-guard.ts", () => ({ ProcessShutdownGuard: class { arm() { state.order.push("arm"); return state.arm; } cancel() { return state.cancel(); } } }));

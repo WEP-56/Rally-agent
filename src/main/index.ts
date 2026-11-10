@@ -8,6 +8,8 @@ import { runSmoke } from "./smoke.ts";
 import { Supervisor } from "./supervisor/index.ts";
 import { StateDirectoryLock } from "./supervisor/state-lock.ts";
 import { ApplicationShutdown } from "./application-shutdown.ts";
+import { TaskNotifications } from "./notifications.ts";
+import { APP_ID, applicationIcon, createApplicationTray } from "./branding.ts";
 
 const paths = resolveRallyPaths();
 
@@ -33,11 +35,15 @@ async function startApplication(): Promise<void> {
 	let supervisor: Supervisor | undefined;
 	let stopIpc: (() => Promise<void>) | undefined;
 	let startupError: unknown;
+	let notifications: TaskNotifications | undefined;
+	let destroyTray: (() => void) | undefined;
 	const shutdown = new ApplicationShutdown({
 		close: async () => {
-			// Draining requests can depend on session cancellation, so start both together.
-			const pending = stopIpc?.();
-			if (supervisor) await supervisor.dispose(pending); else await pending;
+			try { notifications?.dispose(); destroyTray?.(); } finally {
+				// Draining requests can depend on session cancellation, so start both together.
+				const pending = stopIpc?.();
+				if (supervisor) await supervisor.dispose(pending); else await pending;
+			}
 		},
 		exit: code => {
 			if (startupError) dialog.showErrorBox("Rally 无法启动", startupError instanceof Error ? startupError.message : String(startupError));
@@ -48,13 +54,17 @@ async function startApplication(): Promise<void> {
 	app.on("before-quit", event => { event.preventDefault(); void shutdown.run(); });
 	try {
 		// Supervisor locks the state directory before any recovery or state writes.
-		supervisor = new Supervisor(paths, { emitChat: broadcastChat, emitTask: broadcastTask, emitWorkspace: broadcastWorkspace, emitServices: broadcastServices,
+		supervisor = new Supervisor(paths, { emitChat: broadcastChat, emitTask: event => { broadcastTask(event); notifications?.observe(event); }, emitWorkspace: broadcastWorkspace, emitServices: broadcastServices,
 			onStartupFailure: async error => { startupError = error; await shutdown.prepare(); void shutdown.run(true); },
 		});
 		ensureRallyDirs(paths);
-		stopIpc = registerIpc(paths, supervisor);
+		notifications = new TaskNotifications(join(paths.home, "notifications.json"), () => BrowserWindow.getAllWindows().find(window => !window.isDestroyed()));
+		stopIpc = registerIpc(paths, supervisor, notifications);
 		await supervisor.start();
-		if (!shutdown.started) createMainWindow();
+		if (!shutdown.started) {
+			destroyTray = createApplicationTray(createMainWindow());
+			notifications.start(supervisor.store.list().map(task => supervisor!.store.view(task)));
+		}
 	} catch (error) {
 		startupError = error;
 		await shutdown.run(true);
@@ -77,7 +87,8 @@ async function runSmokeAndExit(): Promise<void> {
 	app.exit(ok ? 0 : 1);
 }
 
-function createMainWindow(): void {
+function createMainWindow(): BrowserWindow {
+	if (process.platform === "win32") app.setAppUserModelId(APP_ID);
 	const dark = nativeTheme.shouldUseDarkColors;
 	// Frameless: the renderer draws the prototype's title bar and window controls (IPC in ipc.ts).
 	const win = new BrowserWindow({
@@ -88,6 +99,7 @@ function createMainWindow(): void {
 		show: false,
 		frame: false,
 		title: "Rally",
+		icon: applicationIcon(),
 		backgroundColor: dark ? "#1c1c1e" : "#f3f3f3",
 		webPreferences: {
 			preload: join(import.meta.dirname, "../preload/index.cjs"),
@@ -116,4 +128,5 @@ function createMainWindow(): void {
 	} else {
 		void win.loadFile(join(import.meta.dirname, "../renderer/index.html"));
 	}
+	return win;
 }

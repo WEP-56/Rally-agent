@@ -1,4 +1,4 @@
-import { Lock, AtSign, Clock, Hash, Bot, SquareTerminal } from "lucide-react";
+import { Lock, AtSign, Clock, Hash, SquareTerminal } from "lucide-react";
 import type { Task } from "../data";
 import { useApp } from "../store";
 import { RichText } from "./RichText";
@@ -7,12 +7,13 @@ import { ToolActivity } from "./ToolActivity";
 import { AssistantContent } from "./AssistantContent";
 import { StatusBadge, clock } from "./status";
 import { RallyLogo } from "./ui";
+import { ArchiveTaskButton } from "./ArchiveTaskButton";
 
 export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task) => void }) {
   const { config, openTab } = useApp();
   return (
-    <div className="flex h-full flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto">
+    <div className="flex h-full min-w-0 flex-col">
+      <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
         <div className="mx-auto max-w-[760px] px-6 pb-6 pt-5">
           {/* header */}
           <div className="rounded-2xl bg-sunken px-5 py-4">
@@ -21,13 +22,14 @@ export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task)
                 <div className="flex items-center gap-2">
                   <h2 className="truncate text-base font-semibold">{task.title}</h2>
                   <StatusBadge status={task.status} />
+                  <ArchiveTaskButton task={task} />
                 </div>
                 <p className="mt-1 text-xs text-muted">{task.summary}</p>
               </div>
             </div>
             <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-faint">
               <span className="flex items-center gap-1"><Hash size={11} />{task.id.toUpperCase()}</span>
-              <span className="flex items-center gap-1"><Bot size={11} />由 {config.name || "Rally"} 派发 · {clock(task.createdAt)}</span>
+              <span className="flex items-center gap-1"><RallyLogo size={11} />由 {config.name || "Rally"} 派发 · {clock(task.createdAt)}</span>
               <span className="flex items-center gap-1"><Clock size={11} />{task.duration}</span>
             </div>
           </div>
@@ -41,10 +43,10 @@ export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task)
               </div>;
               if (m.role === "rally")
                 return (
-                  <div key={i} className="animate-rise flex flex-col items-end">
+                  <div key={m.id ?? i} className="animate-rise flex flex-col items-end">
                     <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-faint">
                       <RallyLogo size={14} />
-                      {config.name || "Rally"} · 任务简报
+                      {config.name || "Rally"} · {m.label ?? "任务简报"}
                     </div>
                     <div className="max-w-[88%] rounded-2xl bg-bubble px-4 py-3 text-sm leading-relaxed">
                       <RichText text={m.text} />
@@ -59,7 +61,7 @@ export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task)
                 );
               return (
                 <div key={i} className="animate-rise">
-                  <ToolSteps steps={m.steps} rich defaultOpen />
+                  <ToolSteps steps={m.steps} rich />
                 </div>
               );
             })}

@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { Brain, ChevronRight, FilePen, FilePlus2, FileX2, Glasses, Globe, Search, Sparkles, SquareTerminal, Copy, Check } from "lucide-react";
+import { Brain, ChevronRight, FilePen, FilePlus2, FileX2, Glasses, Globe, Search, Sparkles, SquareTerminal, Copy, Check, ListTodo, Wrench } from "lucide-react";
 import type { StepKind, ToolStep } from "../data";
 import { cn } from "../utils/cn";
 
 const ICON: Record<StepKind, typeof Glasses> = {
+  task: ListTodo,
+  tool: Wrench,
   memory: Brain,
   cmd: SquareTerminal,
   read: Glasses,
@@ -16,6 +18,8 @@ const ICON: Record<StepKind, typeof Glasses> = {
 };
 
 const VERB: Record<StepKind, string> = {
+  task: "任务工具",
+  tool: "已调用工具",
   memory: "记忆工具",
   cmd: "命令已执行",
   read: "已读取",
@@ -28,11 +32,7 @@ const VERB: Record<StepKind, string> = {
 };
 
 export function summarize(steps: ToolStep[]) {
-	if (steps.some((step) => step.status)) {
-		const labels = { running: "执行中", ok: "已完成", error: "失败", interrupted: "已中断" };
-		return Object.entries(labels).map(([status, label]) => { const count = steps.filter((step) => step.status === status).length; return count ? `${label} ${count} 次工具调用` : ""; }).filter(Boolean).join("，");
-	}
-  const c = (k: StepKind) => steps.filter((s) => s.kind === k).length;
+  const c = (k: StepKind) => steps.filter((s) => s.kind === k && (!s.status || s.status === "ok")).length;
   const parts: string[] = [];
   if (c("write")) parts.push(`已创建 ${c("write")} 个文件`);
   if (c("edit")) parts.push(`编辑 ${c("edit")} 个文件`);
@@ -43,8 +43,14 @@ export function summarize(steps: ToolStep[]) {
   if (c("web")) parts.push(`调用 ${c("web")} 次工具`);
   if (c("memory")) parts.push(`调用 ${c("memory")} 次记忆工具`);
   if (c("think")) parts.push(`思考 ${c("think")} 次`);
-  const s = parts.join("，");
-  return s.startsWith("已") ? s : "已" + s;
+  if (c("task")) parts.push(`调用 ${c("task")} 次任务工具`);
+  if (c("tool")) parts.push(`调用 ${c("tool")} 次工具`);
+  if (parts.length && !parts[0].startsWith("已")) parts[0] = "已" + parts[0];
+  for (const [status, label] of Object.entries({ running: "执行中", error: "失败", interrupted: "已中断" })) {
+    const count = steps.filter(step => step.status === status).length;
+    if (count) parts.push(`${label} ${count} 次调用`);
+  }
+  return parts.join("，");
 }
 
 function StepLine({ s, rich, open, onClick }: { s: ToolStep; rich?: boolean; open?: boolean; onClick?: () => void }) {
@@ -60,7 +66,7 @@ function StepLine({ s, rich, open, onClick }: { s: ToolStep; rich?: boolean; ope
       )}
     >
       <Icon size={15} strokeWidth={1.7} className="shrink-0 text-faint" />
-      <span className="shrink-0 text-fg/80">{s.status ? s.title : s.kind === "cmd" ? VERB.cmd : s.title || VERB[s.kind]}</span>
+      <span className="max-w-[45%] shrink-0 truncate text-fg/80" title={s.title}>{s.status === "ok" && (isFile || s.kind === "cmd") ? VERB[s.kind] : s.status ? s.title : s.kind === "cmd" ? VERB.cmd : s.title || VERB[s.kind]}</span>
       {s.kind === "cmd" && !s.status ? (
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="truncate">{s.title}</span>
@@ -146,8 +152,8 @@ export function ToolSteps({ steps, rich, defaultOpen = false }: { steps: ToolSte
   const [open, setOpen] = useState(defaultOpen);
   const [detail, setDetail] = useState<number | null>(null);
   return (
-    <div className="my-1.5">
-      <button onClick={() => setOpen((v) => !v)} className="group flex items-center gap-1 rounded-md py-1 text-sm text-muted transition-colors hover:text-fg">
+    <div className="min-w-0">
+      <button aria-expanded={open} onClick={() => setOpen((v) => !v)} className="group flex max-w-full items-center gap-1 rounded-md py-1 text-left text-sm text-muted transition-colors hover:text-fg">
         <span>{summarize(steps)}</span>
         <ChevronRight size={14} className={cn("text-faint transition-transform group-hover:text-fg", open && "rotate-90")} />
       </button>

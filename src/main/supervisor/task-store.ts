@@ -89,11 +89,24 @@ export class TaskStore {
 
 	board(active: number, limit: number, now = Date.now()): TaskBoard {
 		const open = this.list().filter((task) => !task.ended);
+		const archived = this.list().filter(task => task.archivedAt !== undefined);
 		const ended = this.list()
-			.filter((task) => task.ended)
-			.sort((a, b) => b.ended!.at - a.ended!.at || Number(b.id.slice(2)) - Number(a.id.slice(2)))
+			.filter((task) => task.ended && task.archivedAt === undefined)
+			.sort((a, b) => b.updatedAt - a.updatedAt || Number(b.id.slice(2)) - Number(a.id.slice(2)))
 			.slice(0, 20);
-		return { tasks: [...open, ...ended].map((task) => this.view(task, now)), questions: this.list().flatMap(questionViews), active, limit, autoApprove: false };
+		return { tasks: [...open, ...ended, ...archived].map((task) => this.view(task, now)), questions: this.list().flatMap(questionViews), active, limit, autoApprove: false };
+	}
+
+	archive(taskId: string, archived: boolean): void {
+		this.events.assertWritable();
+		const task = this.require(taskId);
+		if (!task.ended) throw new TaskError("NOT_ENDED", "请先在主对话中结束任务，再归档");
+		if ((task.archivedAt !== undefined) === archived) return;
+		const updatedAt = Date.now();
+		const archivedAt = archived ? updatedAt : undefined;
+		this.events.append("task_archived", { task: { ...task, archivedAt, updatedAt }, archived, actor: "user" });
+		task.archivedAt = archivedAt; task.updatedAt = updatedAt;
+		this.onChange(task, "task_archived");
 	}
 
 	view(task: Task, now = Date.now()) {
@@ -154,7 +167,7 @@ export class TaskStore {
 	recordAccess(taskId: string, access: TaskAccess): void {
 		const task = this.require(taskId);
 		const entries = this.accesses.get(taskId) ?? [];
-		if (entries.some((item) => item.toolCallId === access.toolCallId && item.kind === access.kind && item.target === access.target)) return;
+		if (entries.some((item) => item.toolCallId === access.toolCallId && item.kind === access.kind && item.target === access.target && item.requestIndex === access.requestIndex)) return;
 		this.events.append("access_recorded", { taskId, access });
 		entries.push({ ...access });
 		this.accesses.set(taskId, entries);
@@ -238,6 +251,7 @@ export class TaskStore {
 		if (!task.ended && last?.endReason !== "interrupted" && last?.lastReport?.state !== "blocked") throw new TaskError("NOT_ENDED", "任务尚未结束，请用 task_steer");
 		if (last && !last.endedAt) this.endRun(task, last, "blocked");
 		task.ended = undefined;
+		task.archivedAt = undefined;
 		this.archiveAttention(task, "run_ended");
 		if (input.mode) task.mode = input.mode;
 		if (input.scope) task.scope = input.scope;

@@ -8,6 +8,12 @@ import type { BrowserEvent } from "../shared/browser";
 import type { TerminalEvent } from "../shared/terminal";
 
 const api: RallyApi = {
+	notifications: {
+		getState: () => ipcRenderer.invoke(IpcChannel.notificationsState),
+		update: value => ipcRenderer.invoke(IpcChannel.notificationsUpdate, value),
+		takeTarget: () => ipcRenderer.invoke(IpcChannel.notificationsTarget),
+		onClick: listener => { const handler = () => listener(); ipcRenderer.on(IpcEvent.notification, handler); return () => ipcRenderer.off(IpcEvent.notification, handler); },
+	},
 	terminal: {
 		create: (id, size, taskId) => ipcRenderer.invoke(IpcChannel.terminalCreate, id, size, taskId),
 		write: (id, data) => ipcRenderer.invoke(IpcChannel.terminalWrite, id, data),
@@ -51,8 +57,10 @@ const api: RallyApi = {
 	mcp: {
 		getState: () => ipcRenderer.invoke(IpcChannel.mcpState),
 		save: (json) => ipcRenderer.invoke(IpcChannel.mcpSave, json),
+		saveServer: (name, json, originalName) => ipcRenderer.invoke(IpcChannel.mcpSaveServer, name, json, originalName),
 		update: (name, enabled) => ipcRenderer.invoke(IpcChannel.mcpUpdate, name, enabled),
 		setTier: (name, tier) => ipcRenderer.invoke(IpcChannel.mcpTier, name, tier),
+		setExposure: (name, exposure, tool) => ipcRenderer.invoke(IpcChannel.mcpExposure, name, exposure, tool),
 	},
 	trust: {
 		getState: () => ipcRenderer.invoke(IpcChannel.trustState),
@@ -90,6 +98,7 @@ const api: RallyApi = {
 		getState: () => ipcRenderer.invoke(IpcChannel.tasksState),
 		approve: (taskId) => ipcRenderer.invoke(IpcChannel.tasksApprove, taskId),
 		cancel: (taskId) => ipcRenderer.invoke(IpcChannel.tasksCancel, taskId),
+		archive: (taskId, archived) => ipcRenderer.invoke(IpcChannel.tasksArchive, taskId, archived),
 		answerOption: (taskId, questionId, option) => ipcRenderer.invoke(IpcChannel.tasksAnswerOption, taskId, questionId, option),
 		setAutoApprove: (enabled) => ipcRenderer.invoke(IpcChannel.tasksApprovalMode, enabled),
 		onEvent: (listener) => {

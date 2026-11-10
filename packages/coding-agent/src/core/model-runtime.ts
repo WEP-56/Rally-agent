@@ -83,6 +83,7 @@ import {
 	validateExtensionProvider,
 } from "./provider-composer.ts";
 import { withPersonalizedCatalog, withRemoteCatalog } from "./remote-catalog-provider.ts";
+import { type ConfigValueResolver } from "./resolve-config-value.ts";
 import { RuntimeCredentials } from "./runtime-credentials.ts";
 import {
 	createVirtualModel,
@@ -108,6 +109,8 @@ interface ModelRuntimeSnapshot {
 }
 
 export interface CreateModelRuntimeOptions {
+	/** Optional host-owned configuration execution; never used by availability checks. */
+	resolveConfigValue?: ConfigValueResolver;
 	/** Credential storage. Defaults to the file at authPath. */
 	credentials?: CredentialStore;
 	authPath?: string;
@@ -183,6 +186,7 @@ export class ModelRuntime implements Models {
 	private readonly compositionErrors = new Map<string, string>();
 	private readonly modelsPath: string | undefined;
 	private readonly modelNetworkEnabled: boolean;
+	private readonly resolver?: ConfigValueResolver;
 	private config: ModelConfig;
 	private snapshot: ModelRuntimeSnapshot = {
 		all: [],
@@ -204,8 +208,10 @@ export class ModelRuntime implements Models {
 		modelsStore: ModelsStore,
 		providers: readonly Provider[],
 		modelNetworkEnabled: boolean,
+		resolver?: ConfigValueResolver,
 	) {
 		this.credentials = credentials;
+		this.resolver = resolver;
 		this.config = config;
 		this.modelsPath = modelsPath;
 		this.modelNetworkEnabled = modelNetworkEnabled;
@@ -216,7 +222,10 @@ export class ModelRuntime implements Models {
 	}
 
 	static async create(options: CreateModelRuntimeOptions = {}): Promise<ModelRuntime> {
-		const credentials = new RuntimeCredentials(options.credentials ?? DefaultAuthStorage.create(options.authPath));
+		const credentials = new RuntimeCredentials(
+			options.credentials ?? DefaultAuthStorage.create(options.authPath),
+			Boolean(options.resolveConfigValue),
+		);
 		const modelsPath =
 			options.modelsPath === null ? undefined : (options.modelsPath ?? join(getAgentDir(), "models.json"));
 		const config = await ModelConfig.load(modelsPath);
@@ -246,6 +255,7 @@ export class ModelRuntime implements Models {
 			modelsStore,
 			providers,
 			process.env.PI_OFFLINE === undefined,
+			options.resolveConfigValue,
 		);
 		runtime.configureRadiusProviders();
 		runtime.rebuildProviders();
@@ -297,7 +307,39 @@ export class ModelRuntime implements Models {
 
 	/** Returns the provider without virtual models, or undefined when only virtual models define it. */
 	private recomposeProvider(providerId: string): Provider | undefined {
-		const provider = this.composeProvider(providerId);
+		let provider = this.composeProvider(providerId);
+		const apiKey = provider?.auth.apiKey;
+		const resolver = this.resolver;
+		if (provider && apiKey && resolver)
+			provider = {
+				...provider,
+				auth: {
+					...provider.auth,
+					apiKey: {
+						...apiKey,
+						check: async (input) => {
+							if (input.credential?.key && this.credentials.isCommandCredential(input.credential))
+								return { type: "api_key", source: "stored command" };
+							if (apiKey.check) return apiKey.check(input);
+							const auth = await apiKey.resolve(input);
+							return auth ? { type: "api_key", source: auth.source } : undefined;
+						},
+						resolve: async (input) => {
+							const credential = input.credential;
+							if (!credential?.key || !this.credentials.isCommandCredential(credential))
+								return apiKey.resolve(input);
+							const key = await resolver(
+								credential.key,
+								`API key for provider "${providerId}"`,
+								credential.env,
+								input.signal,
+							);
+							input.signal.throwIfAborted();
+							return apiKey.resolve({ ...input, credential: { ...credential, key } });
+						},
+					},
+				},
+			};
 		const virtualModels = [...(this.virtualModels.get(providerId)?.values() ?? [])].map((entry) => entry.model);
 		if (virtualModels.length > 0) this.models.setProvider(withVirtualModels(providerId, provider, virtualModels));
 		else if (provider) this.models.setProvider(provider);
@@ -315,7 +357,7 @@ export class ModelRuntime implements Models {
 			return base;
 		}
 		try {
-			const provider = composeModelProvider(providerId, base, this.config, extension);
+			const provider = composeModelProvider(providerId, base, this.config, extension, this.resolver);
 			this.compositionErrors.delete(providerId);
 			return provider;
 		} catch (error) {
@@ -533,11 +575,12 @@ export class ModelRuntime implements Models {
 	}
 
 	/** @internal Compatibility fallback for ModelRegistry when provider auth is unconfigured. */
-	getCompatibilityRequestConfig(model: Model<Api>): CompatibilityRequestConfig {
+	getCompatibilityRequestConfig(model: Model<Api>): Promise<CompatibilityRequestConfig> {
 		return resolveCompatibilityRequestConfig(
 			model,
 			this.config.getProvider(model.provider),
 			this.extensionProviders.get(model.provider),
+			this.resolver,
 		);
 	}
 
@@ -562,11 +605,13 @@ export class ModelRuntime implements Models {
 		if (typeof providerOrModel === "string") return this.models.getAuth(providerOrModel, overrides);
 		const resolution = await this.models.getAuth(providerOrModel, overrides);
 		if (!resolution) return undefined;
-		const configuredHeaders = resolveConfiguredModelHeaders(
+		const configuredHeaders = await resolveConfiguredModelHeaders(
 			providerOrModel,
 			this.config.getProvider(providerOrModel.provider),
 			this.extensionProviders.get(providerOrModel.provider),
 			{ ...(resolution.env ?? {}), ...(overrides.env ?? {}) },
+			this.resolver,
+			overrides.signal,
 		);
 		return {
 			...resolution,

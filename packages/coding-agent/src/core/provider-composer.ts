@@ -35,7 +35,8 @@ import {
 	isCommandConfigValue,
 	isConfigValueConfigured,
 	resolveConfigValueOrThrow,
-	resolveHeadersOrThrow,
+	resolveHeadersAsync,
+	type ConfigValueResolver,
 } from "./resolve-config-value.ts";
 
 export interface ExtensionOAuthConfig {
@@ -424,6 +425,7 @@ function composeApiKeyAuth(
 	base: Provider | undefined,
 	config: ModelsJsonProvider | undefined,
 	extension: ProviderConfigInput | undefined,
+	resolver?: ConfigValueResolver,
 ): ApiKeyAuth | undefined {
 	const inherited = base?.auth.apiKey;
 	const rawKey = configuredApiKey(config, extension);
@@ -469,7 +471,9 @@ function composeApiKeyAuth(
 						: undefined;
 			} else if (rawKey !== undefined) {
 				const env = await configContextEnv([rawKey], input.ctx);
-				const key = resolveConfigValueOrThrow(rawKey, `API key for provider "${providerId}"`, env);
+				const key = resolver
+					? await resolver(rawKey, `API key for provider "${providerId}"`, env, input.signal)
+					: resolveConfigValueOrThrow(rawKey, `API key for provider "${providerId}"`, env);
 				result = inherited
 					? await inherited.resolve({ ...input, credential: { type: "api_key", key } })
 					: { auth: { apiKey: key }, source: "configured API key" };
@@ -479,7 +483,13 @@ function composeApiKeyAuth(
 			if (!result) return undefined;
 			const explicitEnv = { ...(input.credential?.env ?? {}), ...(result.env ?? {}) };
 			const headerEnv = await configContextEnv(Object.values(rawHeaders ?? {}), input.ctx, explicitEnv);
-			const headers = resolveHeadersOrThrow(rawHeaders, `provider "${providerId}"`, headerEnv);
+			const headers = await resolveHeadersAsync(
+				rawHeaders,
+				`provider "${providerId}"`,
+				headerEnv,
+				resolver,
+				input.signal,
+			);
 			return { ...result, auth: withConfiguredAuth(result.auth, headers, authHeader) };
 		},
 	};
@@ -490,6 +500,7 @@ function composeOAuthAuth(
 	base: Provider | undefined,
 	config: ModelsJsonProvider | undefined,
 	extension: ProviderConfigInput | undefined,
+	resolver?: ConfigValueResolver,
 ): OAuthAuth | undefined {
 	const oauth = extension?.oauth ? adaptOAuth(extension.oauth) : base?.auth.oauth;
 	if (!oauth) return undefined;
@@ -497,13 +508,15 @@ function composeOAuthAuth(
 	const authHeader = extension?.authHeader ?? config?.authHeader ?? false;
 	return {
 		...oauth,
-		toAuth: async (credential) => {
-			const auth = await oauth.toAuth(credential);
+		toAuth: async (credential, signal) => {
+			const auth = await oauth.toAuth(credential, signal);
 			const env = credential.env;
-			const headers = resolveHeadersOrThrow(
+			const headers = await resolveHeadersAsync(
 				rawHeaders,
 				`provider "${providerId}"`,
 				typeof env === "object" && env !== null ? (env as Record<string, string>) : undefined,
+				resolver,
+				signal,
 			);
 			return withConfiguredAuth(auth, headers, authHeader);
 		},
@@ -549,6 +562,7 @@ export function composeModelProvider(
 	base: Provider | undefined,
 	modelConfig: ModelConfig,
 	extension: ProviderConfigInput | undefined,
+	resolver?: ConfigValueResolver,
 ): Provider {
 	const config = modelConfig.getProvider(providerId);
 	let extensionOAuthCredential: OAuthCredentials | undefined;
@@ -580,8 +594,8 @@ export function composeModelProvider(
 	};
 	// Validate eagerly so registration/reload reports structural errors immediately.
 	getAllModels();
-	const apiKey = composeApiKeyAuth(providerId, base, config, extension);
-	const oauth = composeOAuthAuth(providerId, base, config, extension);
+	const apiKey = composeApiKeyAuth(providerId, base, config, extension, resolver);
+	const oauth = composeOAuthAuth(providerId, base, config, extension, resolver);
 	if (!apiKey && !oauth) throw new Error(`Provider ${providerId}: no authentication method configured.`);
 
 	const supportsBaseApi = (model: Model<Api>) => base?.getModels().some((entry) => entry.api === model.api) ?? false;
@@ -692,16 +706,20 @@ export function composeModelProvider(
 	return provider;
 }
 
-export function resolveConfiguredModelHeaders(
+export async function resolveConfiguredModelHeaders(
 	model: AnyModel,
 	config: ModelsJsonProvider | undefined,
 	extension: ProviderConfigInput | undefined,
 	env?: Record<string, string>,
-): Record<string, string> | undefined {
-	return resolveHeadersOrThrow(
+	resolver?: ConfigValueResolver,
+	signal?: AbortSignal,
+): Promise<Record<string, string> | undefined> {
+	return resolveHeadersAsync(
 		rawModelHeaders(model, config, extension),
 		`model "${model.provider}/${model.id}"`,
 		env,
+		resolver,
+		signal,
 	);
 }
 
@@ -710,14 +728,17 @@ export interface CompatibilityRequestConfig {
 	authHeader: boolean;
 }
 
-export function resolveCompatibilityRequestConfig(
+export async function resolveCompatibilityRequestConfig(
 	model: AnyModel,
 	config: ModelsJsonProvider | undefined,
 	extension: ProviderConfigInput | undefined,
-): CompatibilityRequestConfig {
-	const configured = resolveHeadersOrThrow(
+	resolver?: ConfigValueResolver,
+): Promise<CompatibilityRequestConfig> {
+	const configured = await resolveHeadersAsync(
 		{ ...configuredHeaders(config, extension), ...rawModelHeaders(model, config, extension) },
 		`model "${model.provider}/${model.id}"`,
+		undefined,
+		resolver,
 	);
 	return {
 		headers: model.headers || configured ? { ...model.headers, ...configured } : undefined,

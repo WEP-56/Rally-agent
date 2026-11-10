@@ -15,3 +15,14 @@ coverage/
 example/
 packages/ai/src/providers/data/
 .artifacts/
+*.tsbuildinfo
+
+# Local agent configuration and runtime data
+/.rally/
+/.pi/
+/.codex/
+/.claude/settings.local.json
+
+# Temporary manual-test notes and screenshots
+/docs/test-image/
+/docs/测试清单-完整测试后的部分问题.md

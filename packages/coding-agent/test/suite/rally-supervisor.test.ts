@@ -508,7 +508,37 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		expect(readFileSync(callsFile, "utf8")).toBe("called\n");
 	}, 30000);
 
-	async function setupMcpRisk(tier: "external" | "irreversible", exposure: "direct" | "codemode" = "direct") {
+	it.each([false, true])("applies per-tool search disclosure and exact hidden overrides (hidden=%s)", async hidden => {
+		const { supervisor, harness, paths } = await setup();
+		const preferences = new McpStore(paths.agentDir); const calls = join(harness.tempDir, "search-calls.txt");
+		preferences.save(JSON.stringify({ mcpServers: { fixture: { command: process.execPath,
+			args: [fileURLToPath(new URL("../fixtures/rally-mcp.cjs", import.meta.url)), join(harness.tempDir, "search.pid"), calls],
+		} } }));
+		preferences.setExposure("fixture", "hidden"); preferences.setExposure("fixture", "deferred", "*");
+		if (hidden) preferences.setExposure("fixture", "hidden", "echo");
+		const route: FauxResponseStep = (context, _options, _state, model) => {
+			if (model.id === "main-1") return fauxAssistantMessage("收到结果。");
+			const names = toolNames(context); const last = context.messages.findLast(message => message.role === "toolResult");
+			if (last?.role === "toolResult") {
+				if (last.toolName === "task_report") return fauxAssistantMessage("完成。");
+				if (last.toolName === "tool_search") {
+					expect(names.includes("mcp__fixture__echo")).toBe(!hidden);
+					expect(getMessageText(last).includes("mcp__fixture__echo")).toBe(!hidden);
+					if (!hidden) return fauxAssistantMessage(fauxToolCall("mcp__fixture__echo", { arguments: { message: "searched" } }), { stopReason: "toolUse" });
+				} else expect(getMessageText(last)).toContain("MCP_FIXTURE_RESULT");
+				return fauxAssistantMessage(fauxToolCall("task_report", { state: "ready", summary: "搜索披露已验证" }), { stopReason: "toolUse" });
+			}
+			expect(names).toContain("tool_search"); expect(names).not.toContain("codemode"); expect(names).not.toContain("mcp__fixture__echo");
+			return fauxAssistantMessage(fauxToolCall("tool_search", { query: "echo", limit: 1 }), { stopReason: "toolUse" });
+		};
+		harness.setResponses(Array(8).fill(route)); const task = createTask(supervisor); supervisor.approve(task.id);
+		await vi.waitFor(() => expect(task.ended?.outcome, task.runs.at(-1)?.lastReport?.summary).toBe("done"), { timeout: 15000 });
+		await supervisor.workers.abort(task.id);
+		expect(existsSync(calls)).toBe(!hidden);
+		if (!hidden) expect(JSON.parse(readFileSync(`${calls}.args.json`, "utf8"))).toEqual({ message: "searched" });
+	}, 20000);
+
+	async function setupMcpRisk(tier: "external" | "irreversible", exposure: "direct" | "codemode" | "deferred" = "direct") {
 		const context = await setup();
 		const { paths, harness } = context;
 		const callsFile = join(harness.tempDir, "gate-mcp-calls.txt");
@@ -549,7 +579,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		expect(() => preferences.tier("mcp__fixture__echo")).toThrow("MCP_RISK_CONFIG_INVALID");
 	}, 20000);
 
-	it.each(["direct", "codemode"] as const)("gates %s MCP calls and executes exact arguments only after a quoted main decision", async (exposure) => {
+	it.each(["direct", "codemode", "deferred"] as const)("gates %s MCP calls and executes exact arguments only after a quoted main decision", async (exposure) => {
 		const { supervisor, harness, paths, callsFile } = await setupMcpRisk("irreversible", exposure);
 		writeFileSync(join(paths.workspaceDir, ".rally", "settings.json"), JSON.stringify({ mcpTiers: { mcp__fixture__echo: "reversible" } }));
 		harness.setResponses([fauxAssistantMessage("已收到授权原话。")]);
@@ -562,6 +592,8 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		const input = { arguments: args, approval: { action: "执行 request-1", scope: ["dist"], alternative: "保留对象" } };
 		const route: FauxResponseStep = (context, _options, _state, model) => {
 			if (model.id === "main-1") {
+				expect(toolNames(context)).not.toContain("tool_search");
+				expect(toolNames(context)).not.toContain("mcp__fixture__echo");
 				const gate = task.gates?.at(-1);
 				if (gate && !gate.decision) {
 					expect(existsSync(callsFile)).toBe(false);
@@ -573,8 +605,19 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 			const last = context.messages.findLast((message) => message.role === "toolResult");
 			if (last?.role === "toolResult") {
 				if (last.toolName === "task_report") return fauxAssistantMessage("Done.");
+				if (last.toolName === "tool_search") {
+					expect(toolNames(context)).toContain("mcp__fixture__echo");
+					expect(getMessageText(last)).toContain("mcp__fixture__echo");
+					return fauxAssistantMessage(fauxToolCall("mcp__fixture__echo", input), { stopReason: "toolUse" });
+				}
 				expect(getMessageText(last)).toContain("MCP_FIXTURE_RESULT");
 				return fauxAssistantMessage(fauxToolCall("task_report", { state: "ready", summary: "Approved MCP call checked" }), { stopReason: "toolUse" });
+			}
+			if (exposure === "deferred") {
+				expect(toolNames(context)).toContain("tool_search");
+				expect(toolNames(context)).not.toContain("mcp__fixture__echo");
+				expect(toolNames(context)).not.toContain("codemode");
+				return fauxAssistantMessage(fauxToolCall("tool_search", { query: "echo", limit: 1 }), { stopReason: "toolUse" });
 			}
 			return fauxAssistantMessage(exposure === "direct" ? fauxToolCall("mcp__fixture__echo", input) : fauxToolCall("codemode", { code: `text(await tools.mcp__fixture__echo(${JSON.stringify(input)}));` }), { stopReason: "toolUse" });
 		};
@@ -1155,7 +1198,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		expect(lastUsage.seq).toBeGreaterThan(supervisor.events.ofKind("task_ended").at(-1)!.seq);
 		const call = toolsFor(supervisor);
 		const files = JSON.parse(getMessageText(await call("task_read", { taskId: task.id, view: "files", offset: 2, limit: 2 })));
-		expect(files).toMatchObject({ accesses: access.slice(2, 4), total: 7, offset: 2, nextOffset: 4, changedFiles: [output], coverage: { shell: "unknown", network: "git fetch/pull/push resolved remote hosts only; attempts, not confirmed traffic" } });
+		expect(files).toMatchObject({ accesses: access.slice(2, 4), total: 7, offset: 2, nextOffset: 4, changedFiles: [output], coverage: { shell: "unknown", network: expect.stringContaining("attempts, not confirmed traffic") } });
 		const restored = new TaskStore(new EventLog(paths.eventsFile), paths.workspaceDir, () => {});
 		expect(restored.access(task.id)).toEqual(access);
 		expect(restored.get(task.id)?.usage).toEqual(task.usage);
@@ -1642,12 +1685,82 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		await vi.waitFor(() => expect(supervisor.main.isBusy()).toBe(false));
 		const original = supervisor.main.state().messages.find((message) => message.role === "user")!;
 		const history = supervisor.main.state().messages;
-		await supervisor.main.reset();
+		expect(await supervisor.main.reset()).toBe(true);
 		expect(supervisor.main.state().messages.slice(0, history.length)).toEqual(history);
 		expect(supervisor.main.quote({ id: original.id })?.text).toBe("COMPACTION_ORIGINAL_WORDS");
 		expect(supervisor.main.isBusy()).toBe(false);
 		expect(supervisor.events.ofKind("chat_compacted")).toHaveLength(1);
 		expect(readFileSync(paths.eventsFile, "utf8")).not.toContain('"kind":"chat_reset"');
+	});
+
+	it("returns false when organizing context cannot run", async () => {
+		const { supervisor } = await setup();
+		expect(await supervisor.main.reset()).toBe(false);
+		expect(supervisor.events.ofKind("chat_compacted")).toHaveLength(0);
+		expect(supervisor.main.isBusy()).toBe(false);
+	});
+
+	it("archives only ended tasks, survives replay and clears archive on resume", async () => {
+		const { supervisor } = await setup();
+		const task = createTask(supervisor);
+		expect(() => supervisor.archive(task.id, true)).toThrow("请先在主对话中结束任务");
+		supervisor.cancel(task.id);
+		supervisor.archive(task.id, true);
+		const restored = new TaskStore(supervisor.events, supervisor.paths.workspaceDir, () => {});
+		expect(restored.get(task.id)?.archivedAt).toBeTypeOf("number");
+		expect(restored.get(task.id)?.ended?.outcome).toBe("cancelled");
+		restored.archive(task.id, false);
+		expect(restored.get(task.id)?.archivedAt).toBeUndefined();
+		restored.archive(task.id, true);
+		restored.resume(task.id, { quotes: task.quotes, note: "RESUME_BRIEF", autoApprove: false });
+		expect(restored.get(task.id)?.archivedAt).toBeUndefined();
+		expect(restored.board(0, 2).tasks[0].inputs).toContainEqual(expect.objectContaining({ kind: "resume", note: "RESUME_BRIEF", quotes: task.quotes }));
+	});
+
+	it("gives main a fresh capability summary but blocks skill bodies and never starts MCP", async () => {
+		const { supervisor, harness, paths } = await setup();
+		const mcp = new McpStore(paths.agentDir);
+		mcp.saveServer("fixture", JSON.stringify({ command: "must-never-start", description: "CAPABILITY_DESCRIPTION", env: { TOKEN: "PRIVATE_TOKEN" } }));
+		const skillPath = join(paths.workspaceDir, ".rally", "skills", "fixture-skill", "SKILL.md");
+		harness.setResponses([
+			context => {
+				const text = JSON.stringify(context.messages);
+				expect(text).toContain("Fixture worker skill for integration tests");
+				expect(text).toContain("CAPABILITY_DESCRIPTION");
+				expect(text).not.toContain("FIXTURE_WORKER_SKILL_SENTINEL");
+				expect(text).not.toContain("PRIVATE_TOKEN"); expect(text).not.toContain("must-never-start");
+				expect(toolNames(context).some(name => name.startsWith("mcp__"))).toBe(false);
+				return fauxAssistantMessage(fauxToolCall("read", { path: skillPath }), { stopReason: "toolUse" });
+			},
+			context => {
+				expect(getMessageText(context.messages.findLast(message => message.role === "toolResult"))).toContain("SKILL_BODY_FORBIDDEN");
+				return fauxAssistantMessage(fauxToolCall("grep", { path: skillPath, pattern: "SENTINEL" }), { stopReason: "toolUse" });
+			},
+			context => {
+				expect(getMessageText(context.messages.findLast(message => message.role === "toolResult"))).toContain("SKILL_BODY_FORBIDDEN");
+				return fauxAssistantMessage(fauxToolCall("grep", { path: paths.workspaceDir, pattern: "FIXTURE_WORKER_SKILL_SENTINEL", glob: "**/SKILL.md" }), { stopReason: "toolUse" });
+			},
+			context => {
+				const result = getMessageText(context.messages.findLast(message => message.role === "toolResult"));
+				expect(result).toContain("No matches found");
+				expect(result).not.toContain("FIXTURE_WORKER_SKILL_SENTINEL");
+				return fauxAssistantMessage("CATALOG_CHECKED");
+			},
+		]);
+		await supervisor.main.send("查看可用能力");
+		await vi.waitFor(() => expect(supervisor.main.state().messages.some(message => message.text === "CATALOG_CHECKED"), JSON.stringify(supervisor.main.state().messages)).toBe(true), { timeout: 10000 });
+		await vi.waitFor(() => expect(supervisor.main.isBusy()).toBe(false));
+		expect(supervisor.events.ofKind("process_stopped").some(event => event.data.kind === "mcp")).toBe(false);
+		await new SkillStore(paths.agentDir).setEnabled(skillPath, false, [paths.workspaceDir]);
+		mcp.update("fixture", false);
+		harness.setResponses([context => {
+			const catalog = context.messages.filter(message => getMessageText(message).includes("Rally worker capability catalog")).map(getMessageText).join("\n");
+			expect(catalog).not.toContain("Fixture worker skill for integration tests");
+			expect(catalog).not.toContain("CAPABILITY_DESCRIPTION");
+			return fauxAssistantMessage("CATALOG_REFRESHED");
+		}]);
+		await supervisor.main.send("重新查看可用能力");
+		await vi.waitFor(() => expect(supervisor.main.state().messages.some(message => message.text === "CATALOG_REFRESHED")).toBe(true));
 	});
 
 	it("answers the current worker question with frozen user words and rejects stale questions", async () => {

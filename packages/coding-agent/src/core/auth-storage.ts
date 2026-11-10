@@ -440,11 +440,17 @@ export class AuthStorage implements CredentialStore {
 		}
 	}
 
-	async read(provider: string, options?: AuthOperationOptions): Promise<Credential | undefined> {
+	/** Hosts with request-time command execution can retain unexpanded configuration references. */
+	async read(
+		provider: string,
+		options?: AuthOperationOptions,
+		preserveConfigReferences = false,
+	): Promise<Credential | undefined> {
 		const credential = (await this.readLatestData(options))[provider];
 		options?.signal?.throwIfAborted();
 		if (credential?.type !== "api_key") return credential;
-		if (credential.key === undefined) return credential;
+		if (credential.key === undefined || preserveConfigReferences)
+			return structuredClone(credential);
 		return { ...credential, key: resolveConfigValue(credential.key, credential.env) };
 	}
 

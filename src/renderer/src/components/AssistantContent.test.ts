@@ -6,6 +6,9 @@ import { ChatPanel } from "./ChatPanel";
 import { GateCard } from "./GateCard";
 import { QuestionCard } from "./QuestionCard";
 import type { TaskGate } from "../../../shared/gate";
+import { conversationItems } from "../conversation";
+import { messagesOf } from "../task-messages";
+import type { TaskView } from "../../../shared/task";
 
 vi.mock("../store", () => ({ useApp: () => ({ config: { name: "Rally" }, openTab: () => {}, openTask: () => {} }) }));
 
@@ -16,8 +19,8 @@ describe("Rally conversation rendering (no browser)", () => {
 			{ type: "tool", toolCallId: "call-1" }, { type: "text", text: "AFTER_TOOL" },
 		], calls: [{ id: "call-1", name: "read", input: "README.md", startedAt: 1, endedAt: 2, status: "ok", output: "COLLAPSED_TOOL_OUTPUT" }] }));
 		expect(html.indexOf("BEFORE_THINKING")).toBeLessThan(html.indexOf("EXPOSED_THINKING"));
-		expect(html.indexOf("EXPOSED_THINKING")).toBeLessThan(html.indexOf("已完成 1 次工具调用"));
-		expect(html.indexOf("已完成 1 次工具调用")).toBeLessThan(html.indexOf("AFTER_TOOL"));
+		expect(html.indexOf("EXPOSED_THINKING")).toBeLessThan(html.indexOf("已读取 1 个文件"));
+		expect(html.indexOf("已读取 1 个文件")).toBeLessThan(html.indexOf("AFTER_TOOL"));
 		expect(html).toContain("<details");
 		expect(html).not.toMatch(/<details[^>]*\sopen(?:=|\s|>)/);
 		expect(html).not.toContain("COLLAPSED_TOOL_OUTPUT");
@@ -34,8 +37,32 @@ describe("Rally conversation rendering (no browser)", () => {
 		}));
 		expect(html).toContain("THINKING_ONLY_MESSAGE");
 		expect(html).toContain("INTERMEDIATE_MESSAGE");
-		expect(html.match(/class="animate-rise text-sm leading-relaxed"/g)).toHaveLength(2);
+		expect(html.match(/class="animate-rise min-w-0 text-sm leading-relaxed"/g)).toHaveLength(1);
 		expect(html).not.toContain("正在规划");
+	});
+
+	it("groups adjacent calls across provider turns and keeps question history before later replies", () => {
+		const items = conversationItems([
+			{ id: "1", at: 1, role: "assistant", text: "", blocks: [{ type: "tool", toolCallId: "a" }], toolCalls: [{ id: "a", name: "read", input: "one.md", status: "ok", startedAt: 1 }] },
+			{ id: "2", at: 2, role: "assistant", text: "", blocks: [{ type: "text", text: " " }, { type: "tool", toolCallId: "b" }], toolCalls: [{ id: "b", name: "read", input: "two.md", status: "ok", startedAt: 2 }] },
+			{ id: "3", at: 4, role: "assistant", text: "LATER_REPLY" },
+		], [{ taskId: "T-1", title: "Task", question: { id: "Q-1", runId: "R-1", askedAt: 1, question: "CONFIRM", answer: { by: "user", text: "ANSWER", basis: [], at: 3 } } }]);
+		expect(items.map(item => item.role)).toEqual(["assistant", "question", "assistant"]);
+		const first = items[0]; if (first.role !== "assistant") throw new Error("Missing assistant group");
+		const html = renderToStaticMarkup(createElement(AssistantContent, { blocks: first.blocks!, calls: first.toolCalls }));
+		expect(html).toContain("已读取 2 个文件"); expect(html).toContain('aria-expanded="false"');
+		expect(html).not.toContain("one.md");
+	});
+
+	it("shows frozen resume/steer inputs between worker replies with delivery state", () => {
+		const view: TaskView = { id: "T-1", title: "task", status: "done", statusText: "done", mode: "readonly", cwd: "/work", scope: [], quotes: [], dependsOn: [], createdAt: 1, updatedAt: 8, durationMs: 0,
+			approval: { state: "approved" }, usage: { inputTokens: 0, outputTokens: 0, toolCalls: 0 },
+			assistantMessages: [{ id: "a", runId: "R-1", at: 2, text: "BEFORE", blocks: [{ type: "text", text: "BEFORE" }], streaming: false }, { id: "b", runId: "R-2", at: 6, text: "AFTER", blocks: [{ type: "text", text: "AFTER" }], streaming: false }],
+			inputs: [{ id: "I-1", kind: "resume", at: 4, deliveredAt: 5, note: "SECOND_BRIEF", quotes: [{ messageId: "#2", kind: "user", text: "EXACT_USER_WORDS", at: 3 }] }, { id: "I-2", kind: "steer", at: 7, note: "QUEUED_BRIEF" }] };
+		const messages = messagesOf(view);
+		expect(messages.map(message => message.role)).toEqual(["assistant", "rally", "assistant", "rally"]);
+		expect(messages[1]).toMatchObject({ label: "续接任务 · 已投递", text: "EXACT_USER_WORDS\n\n主 agent 备注：SECOND_BRIEF" });
+		expect(messages[3]).toMatchObject({ label: "追加指令 · 待投递", text: "主 agent 备注：QUEUED_BRIEF" });
 	});
 
 	it("renders gate request fields verbatim as text and collapses decided cards", () => {

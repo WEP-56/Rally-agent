@@ -1,3 +1,4 @@
+import type { NotificationTarget } from "../../shared/notifications";
 import { Globe, IdCard, Info, Moon, Palette, PanelRight, Plug, Settings as SettingsIcon, SquarePen, SquareTerminal, Sun, Wand2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "./chat";
@@ -12,6 +13,7 @@ import { type AppCtx, type Config, Ctx, loadConfig, loadOnboarded, saveConfig, s
 import { useModels } from "./models";
 import { useTasks } from "./tasks";
 import { cn } from "./utils/cn";
+import { CompactDialog, type CompactPhase } from "./components/CompactDialog";
 
 const winApi = window.rally.window;
 
@@ -37,6 +39,7 @@ export default function App() {
   const [active, setActive] = useState<string | null>("w0");
   const { tasks, board, setAutoApprove } = useTasks();
   const models = useModels();
+  const [notificationFocus, setNotificationFocus] = useState<{ target: NotificationTarget; n: number }>();
   const [inject, setInject] = useState({ text: "", n: 0 });
 
   /* ---------------- config / theme ---------------- */
@@ -86,13 +89,28 @@ export default function App() {
     (taskId: string) => {
       setView("main");
       setRightOpen(true);
-      const ex = tabs.find((t) => t.taskId === taskId);
+      const ex = tabs.find((t) => t.kind === "task" && t.taskId === taskId);
       if (ex) return setActive(ex.id);
       const task = tasks.find((t) => t.id === taskId);
       addTab({ id: uid(), kind: "task", title: task?.title || taskId, taskId });
     },
     [tabs, tasks, addTab],
   );
+
+  const notificationOpenTask = useRef(openTask);
+  const notificationMounted = useRef(false);
+  notificationOpenTask.current = openTask;
+  useEffect(() => {
+    notificationMounted.current = true;
+    const consume = () => { void window.rally.notifications.takeTarget().then(target => {
+      if (!notificationMounted.current || !target) return;
+      setView("main"); setPalette(false);
+      if (!target.cardId) notificationOpenTask.current(target.taskId);
+      setNotificationFocus(current => ({ target, n: (current?.n ?? 0) + 1 }));
+    }).catch(error => console.error("Notification navigation failed", error)); };
+    const off = window.rally.notifications.onClick(consume); consume();
+    return () => { notificationMounted.current = false; off(); };
+  }, []);
 
   useEffect(() => window.rally.browser.onEvent(event => {
     if (event.type === "open") openTab("browser", { url: event.url });
@@ -128,7 +146,35 @@ export default function App() {
   /* ---------------- chat ---------------- */
   const chat = useChat();
   const stop = () => void chat.abort();
-  const newChat = () => void chat.reset();
+  const [compactPhase, setCompactPhase] = useState<CompactPhase | null>(null);
+  const [compactError, setCompactError] = useState("");
+  const compactBoundary = useRef<{ id: string; at: number } | null>(null);
+  const [hiddenHistory, setHiddenHistory] = useState<{ id: string; at: number } | null>(() => {
+    try {
+      const value = JSON.parse(localStorage.getItem("rally.hiddenHistory") ?? "null");
+      return value && typeof value.id === "string" && typeof value.at === "number" ? value : null;
+    } catch { return null; }
+  });
+  const hideHistory = (boundary: { id: string; at: number } | null) => {
+    setHiddenHistory(boundary);
+    if (boundary) localStorage.setItem("rally.hiddenHistory", JSON.stringify(boundary));
+    else localStorage.removeItem("rally.hiddenHistory");
+  };
+  const newChat = () => { setPalette(false); if (!compactPhase) setCompactPhase("confirm"); };
+  const compact = async () => {
+    if (compactPhase !== "confirm") return;
+    if (chat.busy) { setCompactError("请等待当前回复结束后再整理上下文。"); setCompactPhase("error"); return; }
+    const last = chat.messages.at(-1);
+    compactBoundary.current = last ? { id: last.id, at: Date.now() } : null;
+    setCompactPhase("busy");
+    try {
+      const completed = await chat.reset();
+      setCompactError("未完成整理，请查看主对话中的提示。原有历史保持显示。");
+      setCompactPhase(completed ? "done" : "error");
+    } catch (error) { setCompactError(String(error)); setCompactPhase("error"); }
+  };
+  const visibleMessages = hiddenHistory ? chat.messages.slice(chat.messages.findIndex(message => message.id === hiddenHistory.id) + 1) : chat.messages;
+  const visibleQuestions = board.questions?.filter(({ question }) => !hiddenHistory || (!question.answer && !question.closed) || (question.answer?.at ?? question.closed?.at ?? 0) > hiddenHistory.at);
 
   /* ---------------- resize ---------------- */
   const startDrag = (e: React.PointerEvent) => {
@@ -163,7 +209,7 @@ export default function App() {
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
-      if (!onboarded) return;
+      if (!onboarded || compactPhase) return;
       if (mod && e.key.toLowerCase() === "b") {
         e.preventDefault();
         setRightOpen((v) => !v);
@@ -289,8 +335,11 @@ export default function App() {
             <div ref={container} className={cn("min-h-0 flex-1 px-1.5 pb-1.5", view === "settings" ? "hidden" : "flex")}>
               <div className="min-w-0 flex-1 overflow-hidden rounded-xl bg-panel shadow-card">
                 <ChatPanel
-                  questions={board.questions}
-                  messages={chat.messages}
+                  notificationFocus={notificationFocus}
+                  questions={visibleQuestions}
+                  messages={visibleMessages}
+                  onShowHistory={hiddenHistory ? () => hideHistory(null) : undefined}
+                  historyBefore={hiddenHistory?.at}
                   tasks={tasks}
                   busy={chat.busy}
                   onSend={chat.send}
@@ -335,7 +384,8 @@ export default function App() {
             </div>
           {dragging && <div className="fixed inset-0 z-[200] cursor-col-resize" />}
 
-          <CommandPalette open={palette} onClose={() => setPalette(false)} commands={commands} tasks={tasks} onTask={openTask} />
+          <CommandPalette open={palette} onClose={() => setPalette(false)} commands={commands} tasks={tasks.filter(task => task.archivedAt === undefined)} onTask={openTask} />
+          <CompactDialog phase={compactPhase} error={compactError} onConfirm={() => void compact()} onClose={() => setCompactPhase(null)} onHide={() => { hideHistory(compactBoundary.current); setCompactPhase(null); }} />
 
           {!onboarded && (
             <Onboarding

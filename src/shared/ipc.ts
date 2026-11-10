@@ -1,5 +1,6 @@
 // IPC contract shared by main, preload and renderer: channel names and the typed API the preload exposes.
 
+import type { NotificationSettings, NotificationTarget } from "./notifications.ts";
 import type { FetchModelsInput, FetchModelsResult, ModelsState, ProviderEntry, SelectModelInput } from "./models.ts";
 import type { TaskBoard, TaskView } from "./task.ts";
 import type { WorkspacePatch, WorkspaceState } from "./workspace.ts";
@@ -7,7 +8,7 @@ import type { ToolCall } from "./tools.ts";
 import type { AssistantBlock } from "./conversation.ts";
 import type { SkillsState } from "./skills.ts";
 import type { ProjectTrustState } from "./trust.ts";
-import type { McpConfigurationState, McpRiskTier } from "./mcp.ts";
+import type { McpConfigurationState, McpExposure, McpRiskTier } from "./mcp.ts";
 import type { MemoryState } from "./memory.ts";
 import type { ServicesState } from "./services.ts";
 import type { BrowserState, BrowserLayout, BrowserAction, BrowserEvent } from "./browser.ts";
@@ -56,6 +57,9 @@ export interface RallyPaths {
 
 /** Invoke channels (renderer -> main, request/response). */
 export const IpcChannel = {
+	notificationsState: "notifications:state",
+	notificationsUpdate: "notifications:update",
+	notificationsTarget: "notifications:target",
 	browserCreate: "browser:create",
 	terminalCreate: "terminal:create",
 	terminalWrite: "terminal:write",
@@ -85,6 +89,7 @@ export const IpcChannel = {
 	tasksState: "tasks:state",
 	tasksApprove: "tasks:approve",
 	tasksCancel: "tasks:cancel",
+	tasksArchive: "tasks:archive",
 	tasksAnswerOption: "tasks:answer-option",
 	tasksApprovalMode: "tasks:approval-mode",
 	modelsState: "models:state",
@@ -102,13 +107,16 @@ export const IpcChannel = {
 	trustSet: "trust:set",
 	mcpState: "mcp:state",
 	mcpSave: "mcp:save",
+	mcpSaveServer: "mcp:save-server",
 	mcpUpdate: "mcp:update",
 	mcpTier: "mcp:tier",
+	mcpExposure: "mcp:exposure",
 	gateDecide: "gate:decide",
 } as const;
 
 /** Event channels (main -> renderer). */
 export const IpcEvent = {
+	notification: "notifications:event",
 	browser: "browser:event",
 	terminal: "terminal:event",
 	services: "services:event",
@@ -168,7 +176,7 @@ export interface ChatApi {
 	send(text: string): Promise<void>;
 	abort(): Promise<void>;
 	/** Compact context without clearing the conversation. */
-	reset(): Promise<void>;
+	reset(): Promise<boolean>;
 	onEvent(listener: (event: ChatEvent) => void): () => void;
 }
 
@@ -181,6 +189,7 @@ export interface TasksApi {
 	/** The user's explicit click on a dispatch card; no quote needed (docs 01 §4.1). */
 	approve(taskId: string): Promise<TaskBoard>;
 	cancel(taskId: string): Promise<TaskBoard>;
+	archive(taskId: string, archived: boolean): Promise<TaskBoard>;
 	answerOption(taskId: string, questionId: string, option: string): Promise<TaskBoard>;
 	setAutoApprove(enabled: boolean): Promise<TaskBoard>;
 	onEvent(listener: (event: TaskEvent) => void): () => void;
@@ -200,6 +209,12 @@ export interface ModelsApi {
 
 /** API exposed on `window.rally` by the preload script. */
 export interface RallyApi {
+	notifications: {
+		getState(): Promise<NotificationSettings>;
+		update(value: NotificationSettings): Promise<NotificationSettings>;
+		takeTarget(): Promise<NotificationTarget | null>;
+		onClick(listener: () => void): () => void;
+	};
 	terminal: {
 		create(id: string, size: TerminalSize, taskId?: string): Promise<TerminalState>;
 		write(id: string, data: string): Promise<void>;
@@ -221,10 +236,12 @@ export interface RallyApi {
 	memory: { getState(): Promise<MemoryState>; setPath(path: string): Promise<MemoryState>; open(): Promise<void>; pickFile(): Promise<string | null> };
 	gates: { decide(id: string, decision: "allow" | "deny"): Promise<TaskBoard> };
 	mcp: {
+		saveServer(name: string, json: string, originalName?: string): Promise<McpConfigurationState>;
 		getState(): Promise<McpConfigurationState>;
 		save(json: string): Promise<McpConfigurationState>;
 		update(name: string, enabled: boolean | null): Promise<McpConfigurationState>;
 		setTier(name: string, tier: McpRiskTier): Promise<McpConfigurationState>;
+		setExposure(name: string, exposure: McpExposure | null, tool?: string): Promise<McpConfigurationState>;
 	};
 	trust: {
 		getState(): Promise<ProjectTrustState>;

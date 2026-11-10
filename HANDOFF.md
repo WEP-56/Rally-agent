@@ -2,7 +2,89 @@
 
 > 先读 `docs/开发实施TODO.md` 和 `docs/superagent/00-问答记录.md`。实施进度以 TODO 的验证记录为准；本文保留历史背景，不作为阶段完成证明。
 
-## 当前交接点（2026-11-10，应用退出守卫；待新会话继续）
+## 当前交接点（2026-11-10，阶段性验收与开源提交）
+
+- 用户确认当前阶段测试已完成，临时问题文档及图片已自行删除；要求提交当前代码、检查 .gitignore、添加 MIT 并 push 到 `https://github.com/WEP-56/Rally-agent`。本地沿用 `master`，保留既有提交历史。
+- 已补根 LICENSE 和 package/lockfile 的 MIT 声明，安装打包清单包含 LICENSE；保留各 Pi 包及 THIRD_PARTY_NOTICES 的版权和许可文件。新增忽略本地 agent 配置、类型检查缓存及临时测试问题/图片，清理文档失效引用。
+- README、TODO 与长期测试清单同步阶段性验收结论。此确认不代表剩余未实现 TODO 完成，持续开发目标仍暂停，不自动扩项。现有离线测试/构建证据见下方各批记录；根 typecheck 的两个模型数据测试文件错误仍为已知项。
+- 提交前复查：完整 `npm run build`（全部 packages＋应用）通过；node/web 独立类型检查通过；根 `npm run typecheck` 仍只报两个既有模型测试文件错误。直接依赖均固定版本，package/lockfile 元数据一致；忽略规则与 diff 检查通过，未生成新安装包。
+
+## 上批交接（2026-11-10，按用户实测反馈修复）
+
+- 持续开发目标仍暂停；本轮只处理两份实测文档和随后追加的三条 MCP/任务续接反馈，不继续扩展 TODO。用户在后续阶段性验收时确认测试完成，已清理临时反馈及图片；本节保留开发侧的实现与验证记录。
+- 主 agent 每次请求临时注入 Skills 名称/摘要和 MCP 配置能力目录，分别有约 6000/2400 字符的条目预算，报告省略数量；不提供技能正文、MCP 凭据/命令参数/schema，不连接 MCP。主 read/grep 拒绝技能入口原文，递归 grep 排除技能文件；worker 的加载和 MCP 搜索披露不变，不注入连接状态。入口 `supervisor/capability-catalog.ts`、`router-tools.ts`、`main-agent.ts`。
+- MCP 设置分离“添加服务器”和每行编辑按钮；独立保存/重命名不覆盖其他项，重复名称新增报错，整份 JSON 编辑保留。新增 IPC 经主窗口主 frame 校验。
+- TaskView 增加持久 task.inputs 投影，按时间展示续接/追加/回答的原话与备注、投递/读取状态。已结束任务支持工位列表/详情页直接归档，“已归档”恢复，续接自动取消归档；不删除记录，不改变执行中任务。
+- 主/任务对话合并连续助手工具回合、默认折叠、按动作归纳并恢复原型工具图标；已答/失效问题回到历史位置折叠。统一 renderer 的 RallyLogo 为 root icon.png；移除主对话顶部身份/在线/计数，约束主对话横向溢出。
+- 整理上下文四个入口共享确认/进行中原生 dialog/结果流程；成功后可屏蔽旧显示，随时恢复，选择跨重启保留；原话与任务事实不删除。后端 reset 明确返回成功与否，失败不询问清屏。模态窗口遮挡原生浏览器并阻止键盘穿透。
+- 离线验证：MCP 设置/目录预算 5/5；AssistantContent 静态渲染及续接投影 7/7；IPC 8/8；生产 Supervisor 相关子集 6 项通过（分批，包含真实本地 rg）。新目录测试初次等待不足，改为等待实际最终消息、覆盖 Windows 子进程启动时间后通过。无真实供应商/MCP 请求、全量 Vitest、浏览器或 Electron 视觉验收。
+- node/web tsc、应用构建通过；根 npm run typecheck 仍仅两个已知模型测试文件错误。无新增依赖、无 packages 生产代码修改、未提交/重打安装包；out 已更新，视觉和真实服务留待用户复测。
+
+## 上批交接（2026-11-10，联网工具收口后停止扩项）
+
+- 用户最新要求：“不要过度开发，添油加醋哈。todo 做的差不多就可以停了”。已收完当时开工的 fetch_page/http_request，停止继续自动扩项，持续目标按用户要求暂停。剩余 TODO 不假称完成；不要自动开搜索服务商、定时任务、构建隔离或 MCP 连接状态方向。以后按新的具体指示继续。
+- 主/worker 新增 fetch_page；worker 新增 http_request（GET/POST/PUT/PATCH/DELETE/HEAD）。静态 HTML 正文转 Markdown、文本/JSON/XML、分页；HTTP 保留状态/headers/有界正文，4xx/5xx 标错误。固定 HTTP(S)，不执行脚本/子资源，不共享浏览器登录，支持本地服务。
+- 请求、读取、解析放在有界 worker thread，超时/取消/退出等待终止。GET/HEAD 最多 5 次重定向、跨 origin 丢弃显式 headers；写方法返回 3xx 不重放，无自动重试。worker 每跳发送前记录域名/method/requestIndex 的 net attempt，持久化失败不发送；不是实际流量/远端执行证明。分页重新抓取，源变化可导致偏移变化。
+- 新精确生产依赖 @mozilla/readability 0.6.0、jsdom 27.4.0、turndown 7.2.5，类型依赖 @types/jsdom 27.0.0、@types/turndown 5.0.6；均使用 npm install --ignore-scripts。jsdom 版本兼容项目声明的 Node 下限，关闭 scripts/resources。新增 network-host 构建入口及依赖，未改 packages 生产源码。
+- 最终离线联网专项 10/10、生产 Supervisor 角色/访问用量子集 2/2（79 跳过，总 81）。本地 HTTP 覆盖 Markdown/编码/分页、方法正文、重定向与凭据、状态错误、解压上限、取消/超时/退出断连、持久化失败不发包、faux 主/worker 与恢复。首次两项测试等待短于解析库加载，修正等待并保证失败时清理后复验通过。
+- node/web tsc、应用 electron-vite build、diff --check 通过；根 typecheck 仍仅两个已知模型测试文件错误。Electron 45.2.3 Node 模式实际加载构建 network-host 并读取本地文章通过（.artifacts/network-tools/check-built.mjs），无窗口/截图/浏览器验收、真实外部 API 或发帖。未做本批 ASAR/安装验证。
+- TODO、02/03 分册、README、测试清单已同步。未提交，out 已更新；release 安装包仍是图标批次，不含通知、披露、GitHub 和本批联网。公网/代理/真实站点及 UI 留给用户验收。主要剩余项包括 web_search、完整访问投影、部分 MCP/恢复边界、定时任务及安装/视觉验收；保留清单即可，不据此自动继续开发。
+
+## 上批交接（2026-11-10，GitHub 工具）
+
+- 在 MCP 搜索披露之后继续 Q19 的 GitHub TODO；构建隔离/串行仍暂缓，不向任务会话注入 MCP 连接状态。持续项目目标 active，本批未提交。
+- 新增 github-plan/runner/tool：主 github_read 只读 list/view，worker github 提供 issue/PR list/view/create/comment。固定 argv、正文 stdin、当前 gh 登录；repo 显式为 OWNER/REPO 或 HOST/OWNER/REPO，省略先按 cwd 解析再固定。主跟随默认工作区，worker 使用任务目录；不自动安装或登录。
+- 创建/评论先提示并审计、不加内门，原话授权由既定角色提示词要求。PR 必须显式提供已推送 head，避免 gh 隐式 push/fork；push 仍走 git。审计绑定调用及正文哈希/字节数，不重复写正文；失败/取消标记远端结果 unknown，禁止盲目重发。只读任务的项目文件限制不扩大为禁止已授权远端动作。
+- 全部 gh 子进程接 ProcessRegistry kind=github（包括仓库发现），复用取消、退出和恢复清理；长输出存完整日志、元数据有界且分离 stderr。worker net 记录仓库主机的访问尝试，task_read(files) 明确不覆盖发现请求、API/proxy 重定向及实际流量。
+- 离线专项 rally-github 19/19：固定参数/字面正文、八种动作、输入拒绝、审计失败不执行、非零结果、真实本地替身子进程、取消整树、长输出、生产主/worker + faux 和恢复。rally-supervisor 仅角色工具/访问用量子集 2/2（79 跳过，总 81）；未全量 Vitest、未调用真实 GitHub/模型 API、未启动视觉验收。
+- 应用构建与 node/web tsc 通过；根 typecheck 仍只报两个既有模型数据测试文件。未改 packages 生产源码、无新增依赖，不重复完整 packages 构建。out 已更新；release 安装包仍是图标批次，不包含通知、披露及本批 GitHub。
+- 已同步 TODO、02/03 分册、README 和测试清单。真实 gh 登录/代理/企业主机、PR 创建/评论由用户验收。下一步继续 web_search 选型/配置、fetch_page/http_request 或完整访问投影等 TODO；不要重启用户暂缓的方向。
+
+## 上批交接（2026-11-10，MCP 搜索披露）
+
+- 用户最新指示：“不用传连接状态到任务会话。倒是可以看看 Pi 的 toolsearch，允许 MCP 工具设置为搜索披露。”已停止本轮连接状态方向，完成搜索披露设置；未新增状态投影/会话注入。构建产物隔离/串行继续暂缓，持续项目目标 active。
+- Pi 已实现 tool_search 的 BM25/Unicode 检索、deferred 工具的按需声明与会话工具集持久化；Rally 原有 worker 扩展也已接入。本批复用既有运行链路，不另造搜索器。MCP 设置增加服务器默认披露选择，以及原始工具名/通配符规则的保存、修改、删除，支持 direct/deferred/codemode/hidden。默认仍 direct，规则精确名称优先，再按首条通配符匹配。
+- McpStore 将 exposure/toolExposure 经 shared/ipc 新通道写入全局 mcp.json，校验非法输入、坏配置和主窗口主 frame；保存保留连接参数/未知字段及风险档。新建或续接会话读取最新配置，当前会话不热切换，受信任项目的原有覆盖继续有效。逐工具规则目前按服务器原始工具名输入，未把缓存的 mcp__ 名称反解成原始名称。
+- 定向验证：rally-mcp-settings 3/3；生产 rally-supervisor 只跑 MCP 配置/披露/门控子集 6/6（75 跳过，总 81，未跑完整）；rally-ipc-lifecycle 7/7；Pi tool-search 36/36。真实本地 stdio 配合 harness/faux 验证首次无 deferred 工具声明、搜索后声明/调用、精确 hidden 覆盖、不可逆门控和服务器收到精确参数；主会话没有 MCP/tool_search。
+- 应用 electron-vite build、node/web tsc、diff --check 通过，根 typecheck 仍只报两个已知模型测试文件错误。本批未改 packages 生产源码，没有重复完整 packages 构建；无新增依赖、真实 API、浏览器或 Electron 视觉验收，未提交。当前 release 安装包仍是图标批次，未含系统通知和本批披露设置，out 已更新。
+- 已更新问答 Q19、TODO、05 分册、README 与测试清单。视觉、列表/JSON 往返及真实模型搜索选择由用户验收。后续继续联网/GitHub、完整访问投影等剩余 TODO；不要默认重启构建队列或连接状态向任务会话传递的工作。
+
+## 上批交接（2026-11-10，系统通知）
+
+- 用户已明确暂缓构建产物隔离/串行，继续其他 TODO；不新增构建队列。持续项目目标 active，本批完成 A6/05 §4 系统通知的实现和离线验证，尚未实际 Windows 通知验收，未提交。
+- 新增 TaskNotifications，从生产 Supervisor 的任务变更投影 Electron Notification。仅窗口不在前台时提醒上升问题/内门、失败、无待答问题的受阻及完成；相同受阻期间不重复提醒，退出/解决/取消撤回旧通知。完成默认开启，设置 → 通知可关闭，主进程原子保存 ~/.rally/notifications.json。启动恢复与快照不补发，前台忽略的事件不延后补发。
+- 通知点击恢复/前置窗口，经 shared/ipc 的主窗口主 frame 通道消费目标。问题/内门定位并聚焦主对话原卡片，暂停自动跟随直到用户回到底部或发送消息；完成/失败/受阻打开只读任务详情。修复任务已有终端标签时 openTask 误选终端的问题；开发 StrictMode 重订阅不丢首次消费结果。
+- Windows 通知横幅超时后可能仍在通知中心，故不在 close 事件丢弃点击句柄；最多保留 32 个，过期/处理完/退出显式关闭。旧句柄回调不能操纵新一轮同任务提醒；不支持通知或原生发送失败只记日志，不影响任务状态。点击目标仅在应用当前进程内暂存，未实现退出后通知冷启动跳转。
+- 验证：rally-notifications 8/8，rally-ipc-lifecycle 6/6（新增真实 Supervisor 事件、通知 IPC 权限/消费/持久化集成），rally-main-shutdown 1/1。逐文件使用替身或 harness/faux 环境，无真实 API/浏览器/Electron UI。node/web tsc、应用 electron-vite build 通过，根 npm run typecheck 最终仍仅两个已知模型数据测试文件错误。
+- 已更新 TODO、05 分册、README 与测试清单。当前 release/Rally-0.1.0-setup.exe 仍为下节图标批次产物，**未包含本批通知增量**；本批仅重建 out，没有重新打包或安装。下一步继续完整访问投影、MCP 状态/OAuth 设置、联网/GitHub 工具等 TODO；实际通知/图标/终端和安装验收由用户负责。
+
+## 上批交接（2026-11-10，用户图标与 Windows 打包）
+
+- 用户对构建并发隔离明确选择“暂缓这项，继续其他 TODO”。已写入问答 Q2 和 TODO，本轮没有增加构建队列；后续不要再次默认优先推进这一项。持续项目目标仍 active。
+- 根 icon.png 为唯一图标来源，新增 scripts/generate-icons.mjs 和 npm run icons；dev/build 自动生成忽略目录 build/icon.ico，含 16/32/48/256 32-bit 图像。新增精确开发依赖 png-to-ico 3.0.2，安装 --ignore-scripts，未执行依赖生命周期。
+- branding.ts 统一开发/打包图标路径，窗口使用 icon 与 dev.rally.app 的 AppUserModelId；新增托盘显示/恢复与退出菜单，退出调用 app.quit 走原守卫。关闭窗口仍退出应用。收尾销毁托盘，销毁异常也继续 IPC/Supervisor 清理。
+- electron-builder 显式配置 EXE、NSIS 安装/卸载 ICO，并用 extraResources 携带 PNG/ICO。npmRebuild=false 持久配置与此次打包参数一致，使用既有 node-pty 预编译模块；本批没有签名/发布/安装或启动 UI。
+- 真实 Windows x64 打包目录及 NSIS 生成成功：release/Rally-0.1.0-setup.exe（138495593 字节）。EXE 与安装器经 System.Drawing 提取的 32px 图标均和源 ICO 逐像素一致；resources 的 PNG/ICO 哈希一致；ASAR 主入口/守卫/终端宿主/工作区 coding-agent 入口存在。文件存在检查不等于全部打包依赖运行验收。
+- 验证：rally-branding.test.ts 3/3、主入口退出 1/1；应用 electron-vite build、node/web tsc、diff --check 通过。根 typecheck 仍仅两个既有模型测试文件错误。未重复全量 packages 构建，本轮 packages 生产源码无新增修改；工作树此前模型命令增量已完整构建过。
+- 待用户验收：实际安装/卸载、桌面/开始菜单快捷方式、任务栏与托盘图标、不同 DPI、托盘显示/退出；图标总验收项保持未完成。上批 Markdown 与模型配置及本批增量均未提交。下一步可继续完整访问投影、联网/GitHub 工具或 MCP 设置状态等其他 TODO。
+
+## 上批交接（2026-11-10，模型配置命令托管）
+
+- 本批接入 ModelRuntime 可选 ConfigValueResolver，覆盖 models.json/扩展供应商 API key、供应商/模型 header、无鉴权兼容 header、auth.json 与运行时命令密钥。Rally 的共享 ModelStore 注入托管解析器；命令在 agentDir 执行，每次请求重新取值，字面量/环境插值保留 Pi 语义。未注入时继续 Pi 原路径。
+- AuthStorage 增加保留命令引用的读取选项，仅托管运行时启用，避免列表检查同步执行命令；provider check 对存储命令返回配置状态，真正 resolve 才执行。命令输出不写回 auth.json。OAuth toAuth 增加可选 signal 并经 lazy wrapper 传递，header 解析可被单次请求取消；刷新令牌的既有锁与写入规则未改。
+- MCP 与模型命令共用 config-command.ts，沿用 10 秒截止、1 MiB 输出上限、登记后启动及整树清理。模型命令登记 kind=config，为共享运行时的应用级归属，不误记成 worker 工具；进程登记和停止事件不含命令/输出。注册器退出后拒绝再启动。
+- 最终定向验证：rally-model-config 9/9（harness/faux 环境、真实命令、生产 Supervisor 接线）；model-registry 89/89、model-runtime-credential-sync 10/10、ai oauth-auth 13/13、rally-mcp-processes 8/8、rally-mcp-oauth 10/10。按单文件执行，无真实 API 或 UI。完整 npm run build、node/web tsc 通过；根 typecheck 仍只报两个已知模型测试文件错误。
+- 开发中专项先后发现 AuthStorage 提前执行、内置 provider 缺少 check 时回落 resolve 的遗漏，两处都已修复；另补环境展开后以 ! 开头的密钥不二次执行，最终专项 9/9。未新增依赖（工作树依赖变更来自上批 Markdown）。本批及上批均未提交。
+- 持续目标 active；下一步优先处理 Q2 构建产物隔离/串行或完整访问投影等 TODO。跨平台、真实外部鉴权服务、Electron/ASAR 本批模型配置命令专项尚未验证；未勾完恢复总项，退出请求尚未处理时主线程已经阻塞仍是剩余边界。
+
+## 上批交接（2026-11-10，Markdown 渲染）
+
+- 本轮从干净的 aa4add1 继续，先阅读交接、TODO 和问答。选择独立的 Markdown TODO 完成；模型/鉴权配置命令托管仍是后续优先项，未在本批修改。
+- RichText 共用 CommonMark/GFM 解析，主/任务页支持标题、嵌套列表、代码块、表格、任务清单、链接；保留原型 token 与段落间距，长代码/宽表格内部滚动。HTML 转义，仅 HTTP(S) 无凭据绝对链接可打开右栏；图片以点击查看入口展示。原话/内门/问题卡仍逐字显示。
+- 静态 Markdown 专项 4/4、原对话回归 5/5；应用构建、独立 node/web tsc 通过。根 typecheck 仅两个既有模型测试文件错误。未全量 Vitest、真实 API、浏览器或 Electron 视觉验收；视觉、流式和链接点击体验待用户验收。
+- 新精确开发依赖 react-markdown 10.1.0、remark-gfm 4.0.1，以 npm install --ignore-scripts 安装。尚无高亮、数学公式/Mermaid、相对文件跳转或内联图片。更新 TODO、05 分册和测试清单；本轮未提交，用户本轮未要求提交。
+- 持续目标仍 active；下一批继续其他配置命令托管，或构建并发隔离等明确 TODO。下面退出守卫段落及旧提交授权属于上批历史，不自动授权新的提交。
+## 上批交接（2026-11-10，应用退出守卫）
 
 - 用户先要求“更新handoff等文档，新会话交接后继续”，随后追加“提交一下吧”。本会话完成收尾并提交前置提交 `978dc62` 之后累积的代码与文档，不再扩展下一项。新会话读取本节、TODO 和问答记录，先检查 `git log -1`、`git status` 再继续；历史段落中的“未提交”是当时状态，不代表本次交接状态。
 - 本批新增 `src/main/application-shutdown.ts`、`shutdown-guard.ts`、独立构建入口 `shutdown-guard-host.ts`。普通退出与启动失败统一进入幂等收尾：先确认独立守卫就绪，再并行关闭 IPC/原生浏览器/用户终端和 Supervisor 会话、作业、服务、进程；正常完成后取消守卫并 `app.exit`。启动失败通知在 Supervisor 自身清理前执行，通知失败仍尝试清理。
@@ -597,3 +679,5 @@ src/
 | `docs/prototype-inventory.md` | 原型盘点（2026-11-07 快照，部分结论已被 v3 取代） |
 | `packages/*` | 改名后的 Pi 源码 |
 | `example/`（gitignore） | 上游参考：`pi`、`dsh-superagent`、`rally-ai-agent-ui-design` |
+
+最终补验：环境变量展开后以 `!` 开头的凭据仍按字面量传递，避免二次命令求值；模型配置专项最终 9/9，最终完整构建通过。

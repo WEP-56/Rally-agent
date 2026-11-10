@@ -41,7 +41,7 @@ export function readTask(store: TaskStore, task: Task, params: TaskReadParams): 
 		case "files": {
 			const { items, ...paging } = page(store.access(task.id), params);
 			return { accesses: items, changedFiles: task.changedFiles ?? [], outputDir: task.outputDir,
-				coverage: { writes: "successful write/edit only", reads: "successful read/grep/find/ls only", git: "attempted repository command scope; not exact changed files", shell: "unknown", network: "git fetch/pull/push resolved remote hosts only; attempts, not confirmed traffic", deletes: "successful file_delete entries only", jobs: "background shell job IDs; process effects unknown", services: "registered service IDs; process effects unknown", history: "legacy accesses not backfilled" }, ...paging };
+				coverage: { writes: "successful write/edit only", reads: "successful read/grep/find/ls only", git: "attempted repository command scope; not exact changed files", shell: "unknown", network: "fetch_page/http_request explicit hosts, methods and redirect hops; git resolved remote hosts and github repository hosts; attempts, not confirmed traffic; gh discovery, proxy traffic, MCP and arbitrary shell effects not tracked", deletes: "successful file_delete entries only", jobs: "background shell job IDs; process effects unknown", services: "registered service IDs; process effects unknown", history: "legacy accesses not backfilled" }, ...paging };
 		}
 		default: throw new TaskError("VIEW_INVALID", "该任务视图不可用");
 	}

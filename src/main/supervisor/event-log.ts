@@ -17,6 +17,7 @@ export type EventKind =
 	| "task_created"
 	| "task_approved"
 	| "task_updated"
+	| "task_archived"
 	| "task_scope_overlap"
 	| "task_queued"
 	| "task_dequeued"

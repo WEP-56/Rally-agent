@@ -87,6 +87,9 @@ export interface TaskAccess {
 	target: string;
 	created?: boolean;
 	command?: string;
+	/** Explicit HTTP method and redirect hop (not inferred from shell). */
+	method?: string;
+	requestIndex?: number;
 	/** A Git repository scope is not an exact changed file. */
 	coverage?: "command_scope";
 	outcome?: "attempt";
@@ -120,6 +123,7 @@ export interface Task {
 	services?: ServiceRecord[];
 	lastExternalAction?: { tool: string; at: number };
 	ended?: { at: number; outcome: TaskOutcome; by: "worker" | "main" | "system"; reason?: string };
+	archivedAt?: number;
 	usage: TaskUsage;
 	/** Files touched by tools, collected from tool events (04 §2.2). */
 	changedFiles?: string[];
@@ -129,6 +133,7 @@ export interface Task {
 }
 
 export interface TaskView {
+	inputs?: TaskInput[];
 	durationMs: number;
 	assistantMessages?: AssistantMessageView[];
 	toolCalls?: ToolCall[];
@@ -154,6 +159,7 @@ export interface TaskView {
 	lastExternalAction?: Task["lastExternalAction"];
 	lastReport?: { state: ReportState; summary: string; at: number };
 	ended?: Task["ended"];
+	archivedAt?: number;
 	changedFiles?: string[];
 	usage: TaskUsage;
 }
@@ -171,7 +177,7 @@ export type TaskDisplayStatus =
 	| "queued"
 	| "running";
 
-/** Tasks the board shows: open ones plus the most recent ended ones. */
+/** Open tasks, the most recent 20 unarchived ended tasks, and recoverable archived tasks. */
 export interface TaskBoard {
 	tasks: TaskView[];
 	/** Main-chat question records outlive the board's 20-ended-task window. */
@@ -220,7 +226,9 @@ export function taskView(task: Task, now = Date.now()): TaskView {
 		attention: task.attention,
 		attentionHistory: task.attentionHistory,
 		lastReport: lastRun?.lastReport,
+		inputs: task.inputs,
 		ended: task.ended,
+		archivedAt: task.archivedAt,
 		changedFiles: task.changedFiles,
 		usage: task.usage,
 	};
