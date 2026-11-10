@@ -70,14 +70,14 @@ export default function App() {
   }, []);
 
   const openTab = useCallback(
-    (kind: Exclude<TabKind, "task">, opts?: { url?: string }) => {
+    (kind: Exclude<TabKind, "task">, opts?: { url?: string; taskId?: string }) => {
       setView("main");
       setRightOpen(true);
       if (kind === "workstation") {
         const ex = tabs.find((t) => t.kind === "workstation");
         if (ex) return setActive(ex.id);
       }
-      addTab({ id: uid(), kind, title: kind === "browser" && opts?.url ? titleFor(opts.url) : KIND_TITLE[kind], url: opts?.url });
+      addTab({ id: uid(), kind, title: kind === "browser" && opts?.url ? titleFor(opts.url) : KIND_TITLE[kind], url: opts?.url, taskId: opts?.taskId });
     },
     [tabs, addTab],
   );
@@ -94,7 +94,18 @@ export default function App() {
     [tabs, tasks, addTab],
   );
 
+  useEffect(() => window.rally.browser.onEvent(event => {
+    if (event.type === "open") openTab("browser", { url: event.url });
+    else if (event.type === "closed") setTabs(current => { const remaining = current.filter(tab => tab.id !== event.id); setActive(active => active === event.id ? remaining.at(-1)?.id ?? null : active); return remaining; });
+    else if (event.type === "shortcut" && event.key !== "l") window.dispatchEvent(new KeyboardEvent("keydown", { key: event.key, ctrlKey: true }));
+  }), [openTab]);
+
   const closeTab = (id: string) => {
+	if (tabs.find(tab => tab.id === id)?.kind === "terminal") { void window.rally.terminal.close(id).then(() => removeTab(id)).catch(error => console.error("Terminal close failed", error)); return; }
+	if (tabs.find(tab => tab.id === id)?.kind === "browser") void window.rally.browser.close(id).catch(error => console.error("Browser close failed", error));
+    removeTab(id);
+  };
+  const removeTab = (id: string) => {
     setTabs((ts) => {
       const i = ts.findIndex((t) => t.id === id);
       const n = ts.filter((t) => t.id !== id);
@@ -270,12 +281,12 @@ export default function App() {
             onClose={close}
           />
 
-          {view === "settings" ? (
+          {view === "settings" && (
             <div className="min-h-0 flex-1">
               <Settings section={section} setSection={setSection} onBack={() => setView("main")} />
             </div>
-          ) : (
-            <div ref={container} className="flex min-h-0 flex-1 px-1.5 pb-1.5">
+          )}
+            <div ref={container} className={cn("min-h-0 flex-1 px-1.5 pb-1.5", view === "settings" ? "hidden" : "flex")}>
               <div className="min-w-0 flex-1 overflow-hidden rounded-xl bg-panel shadow-card">
                 <ChatPanel
                   questions={board.questions}
@@ -308,6 +319,7 @@ export default function App() {
                 <div className="min-w-0 flex-1 overflow-hidden rounded-xl bg-panel shadow-card">
                   <div className="h-full" style={{ minWidth: 330 }}>
                     <RightPanel
+					  visible={view === "main" && rightOpen && !palette && !dragging && onboarded}
                       tabs={tabs}
                       active={active}
                       setActive={setActive}
@@ -321,8 +333,6 @@ export default function App() {
                 </div>
               </div>
             </div>
-          )}
-
           {dragging && <div className="fixed inset-0 z-[200] cursor-col-resize" />}
 
           <CommandPalette open={palette} onClose={() => setPalette(false)} commands={commands} tasks={tasks} onTask={openTask} />

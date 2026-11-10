@@ -1,0 +1,8 @@
+终端开源来源（2026-11-10 核实）
+
+- @xterm/xterm 6.0.0，以及 addon-fit 0.11.0、addon-web-links 0.12.0、addon-search 0.16.0、addon-unicode11 0.9.0，均为 MIT。终端显示、尺寸适配、链接、查找及 Unicode 宽度直接使用这些依赖；版权声明见 xterm-LICENSE.txt，各插件包内也保留 LICENSE。
+- node-pty 1.1.0：直接运行其 ConPTY 后端。LICENSE 含多个 MIT 版权声明，全文见 node-pty-LICENSE.txt；原包内许可和预编译模块随应用打包。
+- Tabby 的 tabby-local/src/session.ts：参考并适配独立 PTY 会话、cwd/环境、输入输出、resize 与生命周期结构，不引入 Angular/Tabby 运行时。来源 https://github.com/Eugeny/tabby/blob/master/tabby-local/src/session.ts ，MIT 声明见 tabby-LICENSE.txt。
+- xterm.js 官方 Flow Control 指南：https://xtermjs.org/docs/guides/flowcontrol/ 。宿主高低水位暂停/恢复与渲染器 write 回调确认沿用其方案，跨 IPC 按递增序号累计确认，防止高速输出无限积压。
+
+仅用户终端使用此集成；输入输出不保存到任务事件、模型上下文或业务审计。

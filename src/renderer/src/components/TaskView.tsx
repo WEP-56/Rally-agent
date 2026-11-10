@@ -1,4 +1,4 @@
-import { Lock, AtSign, Clock, Hash, Bot } from "lucide-react";
+import { Lock, AtSign, Clock, Hash, Bot, SquareTerminal } from "lucide-react";
 import type { Task } from "../data";
 import { useApp } from "../store";
 import { RichText } from "./RichText";
@@ -9,7 +9,7 @@ import { StatusBadge, clock } from "./status";
 import { RallyLogo } from "./ui";
 
 export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task) => void }) {
-  const { config } = useApp();
+  const { config, openTab } = useApp();
   return (
     <div className="flex h-full flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -85,6 +85,7 @@ export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task)
           <div className="min-w-0 flex-1 text-xs text-muted">
             此对话由 <span className="font-medium text-fg">{config.name || "Rally"}</span> 主代理管理，无法直接发送消息。需要调整时，请在左侧主对话中告诉它。
           </div>
+          <button title="在此目录打开终端" onClick={() => openTab("terminal", { taskId: task.id })} className="flex h-7 shrink-0 items-center gap-1 rounded-lg bg-raised px-2.5 text-xs font-medium text-fg shadow-soft"><SquareTerminal size={12} /><span className="hidden xl:inline">在此目录打开终端</span></button>
           <button
             onClick={() => onMention(task)}
             className="flex h-7 shrink-0 items-center gap-1 rounded-lg bg-raised px-2.5 text-xs font-medium text-fg shadow-soft transition-transform hover:brightness-[0.98] active:scale-95"

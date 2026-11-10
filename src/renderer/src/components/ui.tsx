@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode, type ButtonHTMLAttributes, type InputHTMLAttributes, type TextareaHTMLAttributes } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { cn } from "../utils/cn";
+import { useBrowserOverlay } from "../browser-overlays";
 
 type BtnProps = ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "ghost" | "danger"; size?: "sm" | "md" | "lg" };
 
@@ -61,6 +62,7 @@ export function Textarea({ className, ...p }: TextareaHTMLAttributes<HTMLTextAre
 }
 
 export function useClickOutside<T extends HTMLElement>(open: boolean, onClose: () => void) {
+	useBrowserOverlay(open);
   const ref = useRef<T>(null);
   useEffect(() => {
     if (!open) return;

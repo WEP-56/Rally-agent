@@ -3,6 +3,8 @@
 import type { ToolCall } from "./tools.ts";
 import type { AssistantMessageView } from "./conversation.ts";
 import type { TaskGate } from "./gate.ts";
+import type { JobRecord } from "./jobs.ts";
+import type { ServiceRecord } from "./services.ts";
 
 export type TaskMode = "write" | "readonly";
 export type ReportState = "progress" | "ready" | "blocked" | "failed" | "dropped";
@@ -33,6 +35,8 @@ export interface TaskRun {
 	endedAt?: number;
 	endReason?: "ready" | "failed" | "dropped" | "cancelled" | "interrupted" | "stalled" | "blocked";
 	lastReport?: { state: ReportState; summary: string; at: number };
+	/** One automatic inactivity retry per run, preserved in task facts. */
+	stallRetries?: number;
 }
 
 export type TaskInputKind = "steer" | "answer" | "resume" | "upstream" | "job_done" | "gate_result" | "nudge";
@@ -44,6 +48,7 @@ export interface TaskInput {
 	note?: string;
 	body?: string;
 	questionId?: string;
+	jobId?: string;
 	at: number;
 	deliveredAt?: number;
 	readAt?: number;
@@ -78,7 +83,7 @@ export interface TaskAccess {
 	runId: string;
 	tool: string;
 	at: number;
-	kind: "fs_read" | "fs_write" | "fs_delete" | "shell" | "net";
+	kind: "fs_read" | "fs_write" | "fs_delete" | "shell" | "net" | "job" | "service";
 	target: string;
 	created?: boolean;
 	command?: string;
@@ -111,6 +116,8 @@ export interface Task {
 	attention?: TaskAttention;
 	attentionHistory?: TaskAttention[];
 	gates?: TaskGate[];
+	jobs?: JobRecord[];
+	services?: ServiceRecord[];
 	lastExternalAction?: { tool: string; at: number };
 	ended?: { at: number; outcome: TaskOutcome; by: "worker" | "main" | "system"; reason?: string };
 	usage: TaskUsage;
@@ -142,6 +149,8 @@ export interface TaskView {
 	attention?: TaskAttention;
 	attentionHistory?: TaskAttention[];
 	gates?: TaskGate[];
+	jobs?: JobRecord[];
+	services?: ServiceRecord[];
 	lastExternalAction?: Task["lastExternalAction"];
 	lastReport?: { state: ReportState; summary: string; at: number };
 	ended?: Task["ended"];
@@ -205,6 +214,8 @@ export function taskView(task: Task, now = Date.now()): TaskView {
 		approval: task.approval,
 		queue: task.queue,
 		gates: task.gates,
+		jobs: task.jobs,
+		services: task.services,
 		lastExternalAction: task.lastExternalAction,
 		attention: task.attention,
 		attentionHistory: task.attentionHistory,
@@ -241,7 +252,7 @@ function derive(
 	if (lastRun?.endReason === "interrupted" && !hasResume) {
 		return { status: "interrupted", statusText: "因 Rally 重启中断" };
 	}
-	if (lastRun?.lastReport?.state === "blocked" && !lastRun.endedAt) {
+	if (lastRun?.lastReport?.state === "blocked" && !lastRun.endedAt && !task.jobs?.some(job => job.status === "running" && job.runId === lastRun.id)) {
 		const after = task.inputs.filter((input) => input.at > (lastRun.lastReport?.at ?? 0)).length;
 		if (after === 0) return { status: "blocked", statusText: "受阻" };
 	}

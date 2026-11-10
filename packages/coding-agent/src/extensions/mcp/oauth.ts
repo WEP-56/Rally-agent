@@ -175,10 +175,10 @@ function piSettings(settings: McpOAuthSettings): McpOAuthSettings {
 export function createMcpAuthProvider(options: {
 	serverUrl: string;
 	store: McpOAuthServerStore;
-	settings: () => McpOAuthSettings;
+	settings: () => McpOAuthSettings | Promise<McpOAuthSettings>;
 	onChallenge: (challenge: OAuthChallenge) => void;
 }): McpAuthProvider {
-	return createAuthProvider({ ...options, ...PI_CLIENT, settings: () => piSettings(options.settings()) });
+	return createAuthProvider({ ...options, ...PI_CLIENT, settings: async () => piSettings(await options.settings()) });
 }
 
 export interface McpSignInPrompt {

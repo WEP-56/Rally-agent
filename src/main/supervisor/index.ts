@@ -8,12 +8,16 @@ import { ModelStore } from "../model-store.ts";
 import { WorkspaceStore } from "../workspace-store.ts";
 import { MemoryStore } from "../memory-store.ts";
 import { createMemoryTools } from "./memory-tools.ts";
+import { createChatSearchTool } from "./chat-search.ts";
+import { rallyState } from "./rally-state.ts";
 import { createRouterReadTools } from "./router-tools.ts";
 import { EventLog } from "./event-log.ts";
 import { MainAgent } from "./main-agent.ts";
 import { Relay } from "./relay.ts";
 import { Scheduler } from "./scheduler.ts";
 import { TaskStore } from "./task-store.ts";
+import { TaskSnapshot } from "./task-snapshot.ts";
+import { StateDirectoryLock } from "./state-lock.ts";
 import { createMainTaskTools, createWorkerTools, type TaskToolHost, type WorkerToolHost } from "./tools.ts";
 import { type ReportResult, WorkerManager } from "./worker.ts";
 import { GateService } from "./gates.ts";
@@ -21,8 +25,25 @@ import { AuditLog } from "./audit.ts";
 import { createGateTools } from "./gate-tools.ts";
 import { join } from "node:path";
 import { createGitInspectTool } from "./git-inspect.ts";
+import { managedGitRunner } from "./git-runner.ts";
+import { ProcessRegistry } from "./process-registry.ts";
+import { JobManager } from "./jobs.ts";
+import { ServiceManager } from "./services.ts";
+import type { ServicesState } from "../../shared/services.ts";
 
 export interface SupervisorOptions {
+	/** Arm the application's independent shutdown deadline before startup cleanup. */
+	onStartupFailure?(error: unknown): void | Promise<void>;
+	/** Event rotation threshold. Defaults to 20 MiB; injectable for offline recovery tests. */
+	eventSegmentBytes?: number;
+	mainSegmentBytes?: number;
+	mainSegmentCompactions?: number;
+	jobForegroundSeconds?: number;
+	jobStopGraceMs?: number;
+	serviceReadyMs?: number;
+	serviceStopGraceMs?: number;
+	watchdogNow?: () => number;
+	emitServices?(state: ServicesState): void;
 	emitChat(event: ChatEvent): void;
 	emitTask(event: TaskEvent): void;
 	emitWorkspace?(state: WorkspaceState): void;
@@ -34,6 +55,7 @@ export class Supervisor {
 	readonly paths: RallyPaths;
 	readonly events: EventLog;
 	readonly store: TaskStore;
+	readonly snapshot: TaskSnapshot;
 	readonly models: ModelStore;
 	readonly workspace: WorkspaceStore;
 	readonly memory: MemoryStore;
@@ -43,8 +65,12 @@ export class Supervisor {
 	readonly scheduler: Scheduler;
 	readonly gates: GateService;
 	readonly audit: AuditLog;
+	readonly processes: ProcessRegistry;
+	readonly jobs: JobManager;
+	readonly services: ServiceManager;
 
 	private readonly options: SupervisorOptions;
+	private readonly stateLock: StateDirectoryLock;
 	private autoApprove = false;
 	private disposed = false;
 	private disposal?: Promise<void>;
@@ -52,70 +78,142 @@ export class Supervisor {
 	constructor(paths: RallyPaths, options: SupervisorOptions) {
 		this.paths = paths;
 		this.options = options;
-		this.events = new EventLog(paths.eventsFile);
-		this.audit = new AuditLog(paths.auditFile, this.events);
-		this.memory = new MemoryStore(paths.home, paths.memoryFile, this.events, this.audit);
-		this.workspace = new WorkspaceStore(paths.home, paths.workspaceDir);
-		const approval = this.events.ofKind("approval_mode").at(-1);
-		this.autoApprove = approval?.data.enabled === true;
-		this.store = new TaskStore(this.events, () => this.workspace.state().defaultWorkspace, (task, kind) => this.onStoreChange(task, kind), this.audit);
-		this.models = new ModelStore(paths.modelsFile);
-		this.gates = new GateService({ store: this.store, audit: this.audit, events: this.events,
-			quote: (ref) => this.main.quote(ref), requested: () => this.relay.captureSources(),
-			notice: () => this.relay.captureSources() });
-		this.main = new MainAgent(paths, this.events, options.emitChat, {
-			models: this.models,
-			customTools: [...createMemoryTools(this.memory, (ref) => this.main.quote(ref), () => !this.disposed), ...createRouterReadTools(() => this.workspace.base()), createGitInspectTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main")), ...createMainTaskTools(this.host()), ...createGateTools(this.gates, this.store)],
-			memory: () => this.memory.context(),
-			workspace: () => this.workspace.state(),
-			onRelayRead: (ids) => this.relay.consumed(ids),
-			onAvailable: () => this.relay?.available(),
-			onSettled: (aborted) => {
-				if (this.disposed) return;
-				this.gates.fallback(this.relay.takeDeliveredGates());
-				this.store.fallbackQuestions(this.relay.takeDeliveredQuestions());
-				this.relay.settled(aborted);
-			},
-		});
-		this.relay = new Relay(this.main, this.events, this.store);
-		this.workers = new WorkerManager({
-			paths,
-			store: this.store,
-			models: this.models,
-			gates: this.gates,
-			audit: this.audit,
-			createTools: (task) => createWorkerTools(this.workerHost(task)),
-			report: (task, runId, state, summary, question, answers) =>
-				this.onWorkerReport(task, runId, state, summary, question, answers),
-			onBusyChange: () => { if (!this.disposed) this.scheduler.tick(); },
-		});
-		this.scheduler = new Scheduler({
-			store: this.store,
-			events: this.events,
-			limit: options.limit,
-			activeIds: () => this.workers.streamingIds(),
-			wakePending: (available) => this.workers.wakePending(available),
-			start: (task, run) => this.startRun(task, run),
-			onDependencyFailed: () => this.relay.captureSources(),
-		});
+		this.stateLock = new StateDirectoryLock(paths.stateDir);
+		let events: EventLog | undefined;
+		let snapshot: TaskSnapshot | undefined;
+		try {
+			this.events = events = new EventLog(paths.eventsFile, options.eventSegmentBytes, () => this.stateLock.assertHeld());
+			this.processes = new ProcessRegistry(paths.stateDir, {
+				assertWritable: () => this.events.assertWritable(),
+				onStopped: (entry, reason, result) => this.events.append("process_stopped", { ...entry, reason, result }),
+			});
+			this.audit = new AuditLog(paths.auditFile, this.events);
+			this.memory = new MemoryStore(paths.home, paths.memoryFile, this.events, this.audit);
+			this.workspace = new WorkspaceStore(paths.home, paths.workspaceDir);
+			const approval = this.events.ofKind("approval_mode").at(-1);
+			this.autoApprove = approval?.data.enabled === true;
+			this.snapshot = snapshot = new TaskSnapshot(paths.snapshotFile, this.events, (message) => this.main?.addSystemLine(message));
+			this.store = new TaskStore(this.events, () => this.workspace.state().defaultWorkspace, (task, kind) => this.onStoreChange(task, kind), this.audit, this.snapshot.replay());
+			this.jobs = new JobManager({ store: this.store, processes: this.processes, directory: paths.jobsDir, settingsFile: join(paths.agentDir, "settings.json"), foregroundSeconds: options.jobForegroundSeconds, stopGraceMs: options.jobStopGraceMs,
+				onDone: (job, text) => {
+					const input = this.store.jobDone(job, text);
+					if (input && !this.disposed) this.workers.deliver(job.taskId, text, input.id);
+				},
+				onBusyChange: () => { if (!this.disposed) { this.workers?.jobsChanged(); this.scheduler?.tick(); } },
+				onActivity: taskId => this.workers?.noteActivity(taskId),
+				onError: error => console.error("Rally job lifecycle failed", error),
+			});
+			this.services = new ServiceManager({ store: this.store, processes: this.processes, events: this.events, audit: this.audit, directory: paths.jobsDir,
+				readyMs: options.serviceReadyMs, stopGraceMs: options.serviceStopGraceMs,
+				onChange: state => options.emitServices?.(state),
+				onUserStop: service => { if (!this.disposed) this.main.addSystemLine(`已停止本地服务 ${service.name}（${service.id}，${service.taskId}）。`); },
+				onError: error => console.error("Rally service lifecycle failed", error),
+			});
+			this.models = new ModelStore(paths.modelsFile);
+			this.gates = new GateService({ store: this.store, audit: this.audit, events: this.events,
+				quote: (ref) => this.main.quote(ref), requested: () => this.relay.captureSources(),
+				notice: () => this.relay.captureSources() });
+			this.main = new MainAgent(paths, this.events, options.emitChat, {
+				models: this.models,
+				segmentBytes: options.mainSegmentBytes,
+				segmentCompactions: options.mainSegmentCompactions,
+				taskState: () => rallyState(this.store, this.workers.streamingCount(), this.scheduler.limit, this.autoApprove),
+				customTools: [createChatSearchTool((params) => this.main.search(params)), ...createMemoryTools(this.memory, (ref) => this.main.quote(ref), () => !this.disposed), ...createRouterReadTools(() => this.workspace.base(), this.processes), createGitInspectTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGitRunner(this.processes)), ...createMainTaskTools(this.host()), ...createGateTools(this.gates, this.store)],
+				memory: () => this.memory.context(),
+				workspace: () => this.workspace.state(),
+				onRelayRead: (ids) => this.relay.consumed(ids),
+				onAvailable: () => this.relay?.available(),
+				onSettled: (aborted) => {
+					if (this.disposed) return;
+					this.gates.fallback(this.relay.takeDeliveredGates());
+					this.store.fallbackQuestions(this.relay.takeDeliveredQuestions());
+					this.relay.settled(aborted);
+				},
+			});
+			this.relay = new Relay(this.main, this.events, this.store);
+			this.workers = new WorkerManager({
+				paths,
+				store: this.store,
+				models: this.models,
+				gates: this.gates,
+				audit: this.audit,
+				processes: this.processes,
+				jobs: this.jobs,
+				services: this.services,
+				watchdogNow: options.watchdogNow,
+				createTools: (task) => createWorkerTools(this.workerHost(task)),
+				report: (task, runId, state, summary, question, answers) =>
+					this.onWorkerReport(task, runId, state, summary, question, answers),
+				onBusyChange: () => { if (!this.disposed) this.scheduler.tick(); },
+			});
+			this.scheduler = new Scheduler({
+				store: this.store,
+				events: this.events,
+				limit: options.limit,
+				activeIds: () => this.workers.streamingIds(),
+				pendingIds: () => this.workers.pendingIds(),
+				wake: taskId => this.workers.wake(taskId),
+				start: (task, run) => this.startRun(task, run),
+				onDependencyFailed: () => this.relay.captureSources(),
+			});
+		} catch (error) {
+			// No sessions start in the constructor. Drop partial timers before unlocking.
+			try { snapshot?.dispose(false); } finally { events?.close(); this.stateLock.release(); }
+			throw error;
+		}
 	}
 
 	async start(): Promise<void> {
-		await this.main.start();
 		if (this.disposed) return;
-		this.recoverInterrupted();
-		this.relay.start();
-		this.scheduler.tick();
+		try {
+			await this.processes.recover();
+			if (this.disposed) return;
+			this.jobs.recover();
+			this.services.recover();
+			await this.main.start();
+			if (this.disposed) return;
+			if (this.events.warnings.length) this.main.addSystemLine(`事件恢复跳过 ${this.events.warnings.length} 条损坏记录，原文件已保留。${this.events.warnings.slice(0, 3).join("；")}`);
+			if (this.snapshot.warning) this.main.addSystemLine(this.snapshot.warning);
+			this.recoverInterrupted();
+			this.relay.start();
+			this.scheduler.tick();
+		} catch (error) {
+			// The application arms its independent deadline before cleanup can await a stuck session.
+			const failures: unknown[] = [error];
+			try { await this.options.onStartupFailure?.(error); } catch (preparation) { failures.push(preparation); }
+			try { await this.dispose(); } catch (cleanup) { failures.push(cleanup); }
+			if (failures.length > 1) throw new AggregateError(failures, "Rally startup and cleanup failed");
+			throw error;
+		}
 	}
 
-	dispose(): Promise<void> {
+	dispose(pendingRequests?: Promise<void>): Promise<void> {
 		if (this.disposal) return this.disposal;
 		this.disposed = true;
-		this.scheduler.dispose();
-		this.relay.dispose();
-		this.gates.dispose();
-		this.disposal = Promise.all([this.workers.dispose(), this.main.dispose()]).then(() => {});
+		this.disposal = this.close(pendingRequests);
 		return this.disposal;
+	}
+
+	private async close(pendingRequests?: Promise<void>): Promise<void> {
+		const errors: unknown[] = [];
+		for (const stop of [() => this.scheduler.dispose(), () => this.relay.dispose(), () => this.gates.dispose()]) {
+			try { stop(); } catch (error) { errors.push(error); }
+		}
+		// allSettled prevents an early rejection from releasing the lock while another session still closes.
+		const results = await Promise.allSettled([
+			pendingRequests,
+			Promise.resolve().then(() => this.jobs.dispose()),
+			Promise.resolve().then(() => this.services.dispose()),
+			Promise.resolve().then(() => this.processes.dispose()),
+			Promise.resolve().then(() => this.workers.dispose()),
+			Promise.resolve().then(() => this.main.dispose()),
+		]);
+		errors.push(...results.flatMap(result => result.status === "rejected" ? [result.reason] : []));
+		try { this.snapshot.dispose(); } catch (error) { errors.push(error); }
+		this.events.close();
+		// If cleanup is uncertain, retain ownership until process exit releases the OS lock.
+		if (errors.length) throw new AggregateError(errors, "Rally shutdown failed; state lock retained until exit");
+		this.stateLock.release();
 	}
 
 	board(): TaskBoard {
@@ -156,6 +254,7 @@ export class Supervisor {
 	private onStoreChange(task: Task, kind: string): void {
 		if (["task_report", "gate_requested", "task_queued", "task_approved", "attention_answered", "gate_decided"].includes(kind)) this.relay?.captureSources();
 		if (kind === "task_ended") this.gates?.closeTask(task.id, "Task ended.");
+		if (kind === "task_ended") void this.jobs?.killTask(task.id).catch(error => console.error("Task job cleanup failed", error));
 		if (kind === "run_started") {
 			try { const state = this.workspace.recordProject(task.cwd); this.options.emitWorkspace?.(state); }
 			catch (error) { this.main.addSystemLine(`最近项目记录失败：${String(error)}`); }
@@ -221,8 +320,9 @@ export class Supervisor {
 				return this.deliverInput(taskId, text);
 			},
 			abortWorker: (taskId: string) => {
-				void this.workers.abort(taskId);
+				return this.workers.abort(taskId);
 			},
+			killJobs: taskId => this.jobs.killTask(taskId),
 			board: () => this.board(),
 		};
 	}

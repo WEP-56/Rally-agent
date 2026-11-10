@@ -6,7 +6,8 @@ const DEFAULT_CLOSE_TIMEOUT_MS = 2_000;
 
 /** A running program's stdio, as `@rally/env`'s `RemoteProcess` provides it. */
 export interface McpPipe {
-	write(data: Uint8Array | string): void;
+	/** Async sinks are awaited for backpressure; legacy synchronous sinks may ignore their return value. */
+	write: ((data: Uint8Array | string) => void) | ((data: Uint8Array | string) => Promise<void>);
 	closeStdin(): void;
 	/** Kill the program (and what it started). The pipe owns cleaning up what the program started. */
 	close(): void;
@@ -84,7 +85,7 @@ export class PipeTransport extends TransportEvents implements McpTransport {
 
 	async send(message: JsonRpcMessage): Promise<void> {
 		if (!this.pipe || this.closed || this.ended) throw new McpConnectionClosedError();
-		this.pipe.write(`${JSON.stringify(message)}\n`);
+		await this.pipe.write(`${JSON.stringify(message)}\n`);
 	}
 
 	async close(): Promise<void> {

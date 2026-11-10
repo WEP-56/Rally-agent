@@ -21,7 +21,9 @@ import { questionViews, taskView } from "../../shared/task.ts";
 import type { ToolCall } from "../../shared/tools.ts";
 import type { AssistantMessageView } from "../../shared/conversation.ts";
 import type { TaskGate } from "../../shared/gate.ts";
-import type { EventKind, EventLog } from "./event-log.ts";
+import type { JobRecord } from "../../shared/jobs.ts";
+import type { ServiceRecord } from "../../shared/services.ts";
+import type { EventKind, EventLog, LoggedEvent } from "./event-log.ts";
 import type { AuditLog } from "./audit.ts";
 
 export interface CreateTaskInput {
@@ -53,12 +55,12 @@ export class TaskStore {
 	private readonly conversations = new Map<string, AssistantMessageView[]>();
 	private readonly accesses = new Map<string, TaskAccess[]>();
 
-	constructor(events: EventLog, workspaceDir: string | (() => string), onChange: (task: Task, kind: string) => void, audit?: AuditLog) {
+	constructor(events: EventLog, workspaceDir: string | (() => string), onChange: (task: Task, kind: string) => void, audit?: AuditLog, recovery?: readonly LoggedEvent[]) {
 		this.events = events;
 		this.audit = audit;
 		this.workspaceDir = workspaceDir;
 		this.onChange = onChange;
-		this.replay();
+		this.replay(recovery ?? events.all());
 	}
 
 	/** Persisted tasks, newest first. */
@@ -260,6 +262,40 @@ export class TaskStore {
 		return this.addInput(task, "nudge", { body });
 	}
 
+	recordService(service: ServiceRecord, kind: "service_started" | "service_updated" | "service_exited" | "service_stopped"): void {
+		const task = this.require(service.taskId);
+		const services = [...(task.services ?? [])];
+		const index = services.findIndex(item => item.id === service.id);
+		if (index < 0) services.push(structuredClone(service)); else services[index] = structuredClone(service);
+		const updatedAt = Date.now();
+		this.events.append(kind, { task: { ...task, services, updatedAt }, serviceId: service.id, runId: service.runId });
+		task.services = services; task.updatedAt = updatedAt;
+		this.onChange(task, kind);
+	}
+
+	recordJob(job: JobRecord, kind: "job_started" | "job_backgrounded" | "job_exited"): void {
+		const task = this.require(job.taskId);
+		const jobs = [...(task.jobs ?? [])];
+		const index = jobs.findIndex(item => item.id === job.id);
+		if (index < 0) jobs.push(structuredClone(job)); else jobs[index] = structuredClone(job);
+		const updatedAt = Date.now();
+		this.events.append(kind, { task: { ...task, jobs, updatedAt }, jobId: job.id, runId: job.runId });
+		task.jobs = jobs; task.updatedAt = updatedAt;
+		this.onChange(task, kind);
+	}
+
+	jobDone(job: JobRecord, body: string): TaskInput | null {
+		const task = this.tasks.get(job.taskId);
+		if (!task || task.ended || !task.runs.some(run => run.id === job.runId && !run.endedAt)) return null;
+		if (task.inputs.some(input => input.kind === "job_done" && input.jobId === job.id)) return null;
+		const input: TaskInput = { id: `I-${task.inputs.length + 1}`, kind: "job_done", jobId: job.id, body, at: Date.now() };
+		const inputs = [...task.inputs, input];
+		this.events.append("task_input", { task: { ...task, inputs, updatedAt: input.at }, inputId: input.id, kind: "job_done" });
+		task.inputs = inputs; task.updatedAt = input.at;
+		this.onChange(task, "task_input");
+		return input;
+	}
+
 	recordRead(taskId: string, inputId: string): void {
 		const task = this.tasks.get(taskId);
 		const input = task?.inputs.find((item) => item.id === inputId);
@@ -401,6 +437,20 @@ export class TaskStore {
 		this.endRun(task, run, reason);
 	}
 
+	recordStallRetry(taskId: string, runId: string): boolean {
+		const task = this.require(taskId); const run = task.runs.find(item => item.id === runId);
+		if (!run || task.ended || run.endedAt || run.stallRetries) return false;
+		run.stallRetries = 1; this.commit(task, "run_stall_retry", { runId }); return true;
+	}
+
+	failStalled(taskId: string, runId: string, summary: string): void {
+		const task = this.require(taskId); const run = task.runs.find(item => item.id === runId);
+		if (!run || task.ended || run.endedAt) return;
+		run.lastReport = { state: "failed", summary, at: Date.now() };
+		this.commit(task, "task_report", { runId, state: "failed", summary, source: "watchdog" });
+		this.endRun(task, run, "stalled"); this.end(task, "failed", "system", summary);
+	}
+
 	cancelRunning(taskId: string, by: "main" | "system", authorization: { actor: "main" | "user" | "system"; basis: string[] } = { actor: by, basis: [] }): Task {
 		const task = this.require(taskId);
 		if (task.ended) return this.snapshot(task);
@@ -468,7 +518,7 @@ export class TaskStore {
 	private addInput(
 		task: Task,
 		kind: TaskInputKind,
-		payload: { note?: string; body?: string; quotes?: Quote[]; questionId?: string },
+		payload: { note?: string; body?: string; quotes?: Quote[]; questionId?: string; jobId?: string },
 	): TaskInput {
 		const input: TaskInput = {
 			id: `I-${task.inputs.length + 1}`,
@@ -477,6 +527,7 @@ export class TaskStore {
 			note: payload.note,
 			body: payload.body,
 			questionId: payload.questionId,
+			jobId: payload.jobId,
 			at: Date.now(),
 		};
 		task.inputs.push(input);
@@ -515,11 +566,11 @@ export class TaskStore {
 		return task;
 	}
 
-	private replay(): void {
-		for (const event of this.events.all()) {
+	private replay(records: readonly LoggedEvent[]): void {
+		for (const event of records) {
 			if (event.kind === "access_recorded" && typeof event.data.taskId === "string" && event.data.access) {
 				const entries = this.accesses.get(event.data.taskId) ?? [];
-				entries.push(event.data.access as TaskAccess);
+				entries.push(structuredClone(event.data.access as TaskAccess));
 				this.accesses.set(event.data.taskId, entries);
 				continue;
 			}
@@ -533,7 +584,7 @@ export class TaskStore {
 			}
 			const candidate = event.data.task as Task | undefined;
 			if (!candidate || typeof candidate.id !== "string" || !Array.isArray(candidate.runs)) continue;
-			this.tasks.set(candidate.id, candidate);
+			this.tasks.set(candidate.id, structuredClone(candidate));
 			const numeric = Number(candidate.id.slice(2));
 			if (Number.isFinite(numeric)) this.nextTask = Math.max(this.nextTask, numeric + 1);
 			for (const attention of [...(candidate.attentionHistory ?? []), ...(candidate.attention ? [candidate.attention] : [])]) {

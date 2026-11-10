@@ -6,12 +6,16 @@ export { type Args, parseArgs } from "./cli/args.ts";
 export {
 	CONFIG_DIR_NAME,
 	getAgentDir,
+	getBinDir,
 	getDocsPath,
 	getExamplesPath,
 	getPackageDir,
 	getReadmePath,
 	VERSION,
 } from "./config.ts";
+export { resolveConfigValueOrThrow } from "./core/resolve-config-value.ts";
+export { ensureTool } from "./utils/tools-manager.ts";
+export type { SearchExecution, SearchProcess } from "./core/tools/search-process.ts";
 export {
 	AgentSession,
 	type AgentSessionConfig,
@@ -418,7 +422,7 @@ export type { CodemodeStoreEntryData, CodemodeToolDetails } from "./extensions/c
 export type { LoadedMcpConfig, McpExposure, McpServerConfig, McpServerEntry } from "./extensions/mcp/config.ts";
 export { loadMcpConfig } from "./extensions/mcp/config.ts";
 export { validateMcpServerConfig } from "./core/mcp-servers.ts";
-export { createMcpExtension, type McpExtensionOptions, type McpTransportFactory } from "./extensions/mcp/index.ts";
+export { createMcpExtension, type McpConfigValueResolver, type McpExtensionOptions, type McpTransportFactory } from "./extensions/mcp/index.ts";
 export { createToolSearchExtension } from "./extensions/tool-search/index.ts";
 // Main entry point
 export { type MainOptions, main } from "./main.ts";
@@ -502,4 +506,4 @@ export { convertToPng } from "./utils/image-convert.ts";
 export { formatDimensionNote, type ResizedImage, resizeImage } from "./utils/image-resize.ts";
 export { detectSupportedImageMimeTypeFromFile } from "./utils/mime.ts";
 // Shell utilities
-export { getPowerShellConfig, getShellConfig } from "./utils/shell.ts";
+export { getPowerShellConfig, getShellConfig, getShellEnv } from "./utils/shell.ts";

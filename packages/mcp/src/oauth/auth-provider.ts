@@ -44,7 +44,7 @@ const REFRESH_SKEW_MS = 30_000;
  */
 export function createMcpAuthProvider(
 	options: Omit<McpOAuthClientOptions, "settings"> & {
-		settings: () => McpOAuthSettings;
+		settings: () => McpOAuthSettings | Promise<McpOAuthSettings>;
 		onChallenge: (challenge: OAuthChallenge) => void;
 		/**
 		 * A redirect URI the application signs in with, such as its https callback route. Refreshing tokens
@@ -64,7 +64,7 @@ export function createMcpAuthProvider(
 				const state = await store.load();
 				if (state?.tokens?.access_token !== staleToken) return;
 				if (!state?.tokens?.refresh_token) throw new McpOAuthAuthorizationRequiredError();
-				const client = { ...options, settings: options.settings() };
+				const client = { ...options, settings: await options.settings() };
 				const result = await refreshStoredTokens(client, state, { fetch, challenge, redirectUrl });
 				if (result === "REDIRECT") throw new McpOAuthAuthorizationRequiredError();
 			})

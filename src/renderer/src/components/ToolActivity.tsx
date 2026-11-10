@@ -7,7 +7,7 @@ function kind(name: string): StepKind {
 	if (name === "bash" || name === "powershell" || name === "git") return "cmd";
 	if (name === "read" || name === "write" || name === "edit") return name;
 	if (name === "file_delete") return "delete";
-	if (name === "grep" || name === "find" || name === "ls" || name === "git_inspect") return "search";
+	if (name === "grep" || name === "find" || name === "ls" || name === "git_inspect" || name === "chat_search") return "search";
 	return "web";
 }
 

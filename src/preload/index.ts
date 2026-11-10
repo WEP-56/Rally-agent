@@ -3,8 +3,44 @@
 import { contextBridge, type IpcRendererEvent, ipcRenderer } from "electron";
 import { type ChatEvent, IpcChannel, IpcEvent, type RallyApi, type TaskEvent } from "../shared/ipc";
 import type { WorkspaceState } from "../shared/workspace";
+import type { ServicesState } from "../shared/services";
+import type { BrowserEvent } from "../shared/browser";
+import type { TerminalEvent } from "../shared/terminal";
 
 const api: RallyApi = {
+	terminal: {
+		create: (id, size, taskId) => ipcRenderer.invoke(IpcChannel.terminalCreate, id, size, taskId),
+		write: (id, data) => ipcRenderer.invoke(IpcChannel.terminalWrite, id, data),
+		resize: (id, size) => ipcRenderer.invoke(IpcChannel.terminalResize, id, size),
+		ack: (id, seq) => ipcRenderer.invoke(IpcChannel.terminalAck, id, seq),
+		close: id => ipcRenderer.invoke(IpcChannel.terminalClose, id),
+		openLink: url => ipcRenderer.invoke(IpcChannel.terminalOpenLink, url),
+		onEvent: listener => {
+			const handler = (_event: IpcRendererEvent, event: TerminalEvent) => listener(event);
+			ipcRenderer.on(IpcEvent.terminal, handler); return () => ipcRenderer.off(IpcEvent.terminal, handler);
+		},
+	},
+	browser: {
+		create: (id, url) => ipcRenderer.invoke(IpcChannel.browserCreate, id, url),
+		navigate: (id, url) => ipcRenderer.invoke(IpcChannel.browserNavigate, id, url),
+		action: (id, action) => ipcRenderer.invoke(IpcChannel.browserAction, id, action),
+		layout: layout => ipcRenderer.invoke(IpcChannel.browserLayout, layout),
+		close: id => ipcRenderer.invoke(IpcChannel.browserClose, id),
+		onEvent: listener => {
+			const handler = (_event: IpcRendererEvent, event: BrowserEvent) => listener(event);
+			ipcRenderer.on(IpcEvent.browser, handler);
+			return () => ipcRenderer.off(IpcEvent.browser, handler);
+		},
+	},
+	services: {
+		getState: () => ipcRenderer.invoke(IpcChannel.servicesState),
+		stop: id => ipcRenderer.invoke(IpcChannel.servicesStop, id),
+		onChange: listener => {
+			const handler = (_event: IpcRendererEvent, state: ServicesState) => listener(state);
+			ipcRenderer.on(IpcEvent.services, handler);
+			return () => ipcRenderer.off(IpcEvent.services, handler);
+		},
+	},
 	memory: {
 		getState: () => ipcRenderer.invoke(IpcChannel.memoryState),
 		setPath: (path) => ipcRenderer.invoke(IpcChannel.memoryPath, path),

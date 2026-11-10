@@ -31,9 +31,10 @@ export async function planGit(base: string, input: { args: string[]; cwd?: strin
 		}
 		return result.fullOutputPath ? readFile(result.fullOutputPath, "utf8") : result.output;
 	};
-	const builtins = (await probe(["--list-cmds=builtins"])).split(/\s+/);
+	const [builtinText, directoryText] = await settledProbes([probe(["--list-cmds=builtins"]), probe(["rev-parse", "--absolute-git-dir"], true)]);
+	const builtins = builtinText.split(/\s+/);
 	if (!builtins.includes(parsed.command)) throw new Error("GIT_COMMAND_UNSUPPORTED: 请使用内置 Git 子命令；别名和外部 git-* 扩展无法按实际动作分档");
-	const gitDirText = (await probe(["rev-parse", "--absolute-git-dir"], true)).trim();
+	const gitDirText = directoryText.trim();
 	if (!gitDirText) {
 		// init/clone are legitimate outside a repository. Treat the cwd as a command
 		// scope, not an exact list of written files; readonly tasks reject these.
@@ -41,14 +42,19 @@ export async function planGit(base: string, input: { args: string[]; cwd?: strin
 		return { cwd, args: [...input.args], command: parsed.command, tier: "reversible", readonly: parsed.command === "version", repository: cwd, gitDir: cwd, commonDir: cwd, scope: [cwd], network: [], fingerprint: cwd };
 	}
 	const gitDir = await realpath(gitDirText);
-	const commonDir = await realpath(resolve(cwd, (await probe(["rev-parse", "--git-common-dir"])).trim()));
-	const root = (await probe(["rev-parse", "--show-toplevel"], true)).trim();
+	// Independent readonly probes share no mutable state. Wait for every process even
+	// on failure so no probe outlives this preflight or a subsequent approval decision.
+	const [commonText, rootText, configText, refs, branchText, headText] = await settledProbes([
+		probe(["rev-parse", "--git-common-dir"]), probe(["rev-parse", "--show-toplevel"], true),
+		probe(["config", "--null", "--list", "--includes"]), probe(["for-each-ref", "--format=%(refname)%00%(objectname)"]),
+		probe(["symbolic-ref", "--quiet", "--short", "HEAD"], true), probe(["rev-parse", "--verify", "HEAD"], true),
+	]);
+	const commonDir = await realpath(resolve(cwd, commonText.trim()));
+	const root = rootText.trim();
 	const repository = root ? await realpath(root) : commonDir;
-	const configText = await probe(["config", "--null", "--list", "--includes"]);
 	const config = configMap(configText);
-	const refs = await probe(["for-each-ref", "--format=%(refname)%00%(objectname)"]);
-	const branch = (await probe(["symbolic-ref", "--quiet", "--short", "HEAD"], true)).trim();
-	const head = (await probe(["rev-parse", "--verify", "HEAD"], true)).trim();
+	const branch = branchText.trim();
+	const head = headText.trim();
 	let tier = argumentTier(input.args, parsed);
 	if (parsed.command === "checkout" && parsed.operands.length === 1 && !["create", "force-create", "orphan"].some((name) => parsed.flags.has(name))) {
 		const revision = parsed.operands[0];
@@ -93,6 +99,10 @@ export async function planGit(base: string, input: { args: string[]; cwd?: strin
 }
 
 type Config = Map<string, string[]>;
+async function settledProbes(probes: Promise<string>[]): Promise<string[]> {
+	const results = await Promise.allSettled(probes);
+	return results.map(result => { if (result.status === "rejected") throw result.reason; return result.value; });
+}
 function configMap(text: string): Config {
 	const result: Config = new Map();
 	for (const entry of text.split("\0")) {

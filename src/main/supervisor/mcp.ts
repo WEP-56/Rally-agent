@@ -5,10 +5,13 @@ import { McpStore } from "../mcp-store.ts";
 import type { Task, TaskRun } from "../../shared/task.ts";
 import type { GateService } from "./gates.ts";
 import type { AuditLog } from "./audit.ts";
+import type { ProcessRegistry } from "./process-registry.ts";
+import { managedMcpConfigValue, managedMcpTransport } from "./mcp-transport.ts";
 
 interface McpHost {
 	gates: GateService;
 	audit: AuditLog;
+	processes: ProcessRegistry;
 	external(tool: string): void;
 }
 
@@ -21,6 +24,8 @@ export function workerMcpExtensions(agentDir: string, task: Task, run: TaskRun, 
 	if (exposures.has("codemode")) extensionTools.push("codemode");
 	if (exposures.has("deferred")) extensionTools.push("tool_search");
 	const mcp = createMcpExtension({
+		createTransport: managedMcpTransport(host.processes, task.id),
+		resolveConfigValue: managedMcpConfigValue(host.processes, task.id),
 		loadConfig: () => ({ ...loaded, servers: loaded.servers.map((entry) => ({ ...entry, config: { ...entry.config, exposure: entry.config.exposure ?? "direct" } })) }),
 		logPath: join(agentDir, "mcp.log"),
 	});

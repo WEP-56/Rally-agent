@@ -1155,6 +1155,7 @@ describe("Coding Agent Tools", () => {
 
 			const result = await grepTool.execute("test-call-grep-injection", {
 				pattern: `--pre=${payload}`,
+				literal: true,
 				path: testDir,
 			});
 

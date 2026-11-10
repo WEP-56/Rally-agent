@@ -5,8 +5,9 @@ import { projectSettings } from "../project-trust.ts";
 
 type SessionOptions = NonNullable<Parameters<typeof createAgentSession>[0]>;
 
-export async function createRoleSession(options: SessionOptions & { rolePrompt: string; loadProjectContext?: boolean; loadProjectSkills?: boolean; extensions?: ExtensionFactory[]; extensionTools?: string[] }) {
-	const { rolePrompt, loadProjectContext = false, loadProjectSkills = false, extensions, extensionTools = [], ...sessionOptions } = options;
+export async function createRoleSession(options: SessionOptions & { rolePrompt: string; loadProjectContext?: boolean; loadProjectSkills?: boolean; extensions?: ExtensionFactory[]; extensionTools?: string[]; startupSignal?: AbortSignal; onSessionCreated?(session: AgentSession): void }) {
+	const { rolePrompt, loadProjectContext = false, loadProjectSkills = false, extensions, extensionTools = [], startupSignal, onSessionCreated, ...sessionOptions } = options;
+	startupSignal?.throwIfAborted();
 	if (!options.cwd || !options.agentDir) throw new Error("Rally 会话必须显式指定 cwd 和 agentDir");
 	const settingsManager = projectSettings(options.cwd, options.agentDir, loadProjectContext);
 	const loader = new DefaultResourceLoader({
@@ -24,12 +25,16 @@ export async function createRoleSession(options: SessionOptions & { rolePrompt: 
 	});
 	// The SDK does not reload a caller-supplied loader.
 	await loader.reload();
+	startupSignal?.throwIfAborted();
 	const extensionErrors = loader.getExtensions().errors;
 	if (extensionErrors.length) throw new Error(extensionErrors.map((item) => `${item.path}: ${item.error}`).join("\n"));
 	const tools = [...new Set([...(options.tools ?? []), ...(options.customTools ?? []).map((tool) => tool.name)])];
 	const result = await createAgentSession({ ...sessionOptions, settingsManager, tools: [...tools, ...extensionTools], resourceLoader: loader });
 	try {
+		onSessionCreated?.(result.session);
+		startupSignal?.throwIfAborted();
 		if (extensions?.length) await result.session.bindExtensions({});
+		startupSignal?.throwIfAborted();
 	} catch (error) {
 		await closeRoleSession(result.session);
 		throw error;

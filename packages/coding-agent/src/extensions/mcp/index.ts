@@ -61,17 +61,19 @@ import {
 } from "./resources.ts";
 import { loadMcpRuntime } from "./runtime.lazy.ts";
 import type * as McpRuntime from "./runtime.ts";
-import type { McpServerConnection, McpServerLog, McpTransportFactory } from "./runtime.ts";
+import type { McpConfigValueResolver, McpServerConnection, McpServerLog, McpTransportFactory } from "./runtime.ts";
 import { createMcpToolDefinition, createMcpToolRenderers, type McpToolDetails } from "./tools.ts";
 import { type McpMenu, type McpUi, showMcpManager } from "./ui.ts";
 
-export type { McpTransportFactory } from "./runtime.ts";
+export type { McpConfigValueResolver, McpTransportFactory } from "./runtime.ts";
 
 export interface McpExtensionOptions {
 	/** Defaults to reading `mcp.json` from the agent directory and the trusted project. */
 	loadConfig?: (ctx: ExtensionContext) => LoadedMcpConfig;
 	/** Defaults to stdio and streamable HTTP transports built from the server config. */
 	createTransport?: McpTransportFactory;
+	/** Host-owned OAuth client-secret resolution. Defaults to Pi's config-value resolver. */
+	resolveConfigValue?: McpConfigValueResolver;
 	/** Defaults to `mcp-auth.json` in the agent directory. */
 	credentials?: McpOAuthCredentialStore;
 	/** File server log messages are appended to. Defaults to `mcp.log` in the agent directory. */
@@ -570,6 +572,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
 				entry: server.entry,
 				cwd: sessionCwd,
 				createTransport: options.createTransport ?? runtime.createDefaultTransport,
+				resolveConfigValue: options.resolveConfigValue,
 				credentials: getCredentials(runtime),
 				providerToken: async (provider) => modelRegistry?.getApiKeyForProvider(provider),
 				log: getServerLog(runtime),
@@ -686,17 +689,17 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
 			const signal = cancel ? AbortSignal.any([session.signal, cancel]) : session.signal;
 			try {
 				await track(
-					runtime.signInMcpServer({
+					(async () => runtime.signInMcpServer({
 						serverUrl: url,
 						store: getCredentials(runtime).forServer(server.entry.name, url),
-						settings: connection.oauthSettings(),
+						settings: await connection.oauthSettings(signal),
 						challenge: connection.challenge,
 						prompt,
 						signal,
-					}),
+					}))(),
 				);
 			} catch (error) {
-				if (error instanceof runtime.McpSignInCancelledError) return "Sign-in cancelled.";
+				if (signal.aborted || error instanceof runtime.McpSignInCancelledError) return "Sign-in cancelled.";
 				return `Sign-in failed: ${errorMessage(error)}`;
 			}
 			// The challenge that asked for this sign-in (for example for more scope) is answered.

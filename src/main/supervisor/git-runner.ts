@@ -2,10 +2,15 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { closeSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { ProcessRegistry } from "./process-registry.ts";
 
 export interface GitResult { exitCode: number; output: string; fullOutputPath?: string }
-export interface GitRunOptions { signal?: AbortSignal; outputDir: string; readonly?: boolean; metadata?: boolean }
+export interface GitRunOptions { signal?: AbortSignal; outputDir: string; readonly?: boolean; metadata?: boolean; processes?: ProcessRegistry; taskId?: string }
 export type GitRunner = (cwd: string, args: readonly string[], options: GitRunOptions) => Promise<GitResult>;
+
+export function managedGitRunner(processes: ProcessRegistry, taskId?: string): GitRunner {
+	return (cwd, args, options) => runGit(cwd, args, { ...options, processes, taskId });
+}
 
 /** Noninteractive argv execution; hooks remain enabled for worker mutations. */
 export const runGit: GitRunner = async (cwd, args, options) => {
@@ -27,11 +32,12 @@ export const runGit: GitRunner = async (cwd, args, options) => {
 			// Pretty-format signature placeholders must not execute a configured signer.
 			"gpg.program=", "gpg.openpgp.program=", "gpg.x509.program=", "gpg.ssh.program="]) prefix.push("-c", config);
 	}
-	const child = spawn("git", [...prefix, ...args], { cwd, env, shell: false, windowsHide: true, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
+	const child = options.processes ? undefined : spawn("git", [...prefix, ...args], { cwd, env, shell: false, windowsHide: true, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
+	const controller = new AbortController();
 	let head = ""; let tail = ""; let count = 0; let file: number | undefined; let fullOutputPath: string | undefined;
 	let storageError: unknown;
 	let termination: Promise<void> | undefined;
-	const stop = () => { if (child.pid && !termination) termination = stopTree(child.pid); };
+	const stop = () => { controller.abort(); if (child?.pid && !termination) termination = stopTree(child.pid); };
 	const output = (chunk: string) => {
 		if (storageError) return;
 		try {
@@ -52,17 +58,26 @@ export const runGit: GitRunner = async (cwd, args, options) => {
 			count += chunk.length;
 		} catch (error) { storageError = error; stop(); }
 	};
-	child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
-	child.stdout.on("data", output);
+	child?.stdout.setEncoding("utf8"); child?.stderr.setEncoding("utf8");
+	child?.stdout.on("data", output);
 	// Machine-readable probes must not parse warnings as config/ref/URL data.
-	child.stderr.on("data", options.metadata ? () => {} : output);
+	child?.stderr.on("data", options.metadata ? () => {} : output);
 	options.signal?.addEventListener("abort", stop, { once: true });
 	if (options.signal?.aborted) stop();
 	try {
-		const exitCode = await new Promise<number>((resolve, reject) => {
-			child.once("error", reject);
-			child.once("close", (code, signal) => resolve(code ?? (signal ? 130 : 1)));
-		});
+		let exitCode: number;
+		try {
+			exitCode = options.processes
+				? await options.processes.run({ executable: "git", args: [...prefix, ...args], cwd, env }, { kind: "git", taskId: options.taskId }, { signal: controller.signal, onStdout: output, onStderr: options.metadata ? () => {} : output })
+				: await new Promise<number>((resolve, reject) => {
+					child!.once("error", reject);
+					child!.once("close", (code, signal) => resolve(code ?? (signal ? 130 : 1)));
+				});
+		} catch (error) {
+			if (storageError) throw storageError;
+			if (options.signal?.aborted) throw new Error("GIT_ABORTED: Git 调用已取消", { cause: error });
+			throw error;
+		}
 		if (termination) await termination;
 		if (storageError) throw storageError;
 		if (options.signal?.aborted) throw new Error("GIT_ABORTED: Git 调用已取消");

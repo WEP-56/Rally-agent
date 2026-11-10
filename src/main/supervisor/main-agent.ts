@@ -18,6 +18,8 @@ import type { ModelStore } from "../model-store.ts";
 import type { EventLog } from "./event-log.ts";
 import { closeRoleSession, createRoleSession } from "./session.ts";
 import type { RelayMessage, RelayMode } from "./relay.ts";
+import { searchChat, type ChatSearchParams } from "./chat-search.ts";
+import { existsSync, statSync } from "node:fs";
 
 /** Tools the main agent may call: read-only file access only (docs 02 section 2). */
 const MAIN_TOOLS = ["read", "grep", "find", "ls"];
@@ -27,6 +29,9 @@ export interface MainAgentOptions {
 	customTools?: ToolDefinition[];
 	workspace?(): WorkspaceState;
 	memory?(): string;
+	taskState?(): string;
+	segmentBytes?: number;
+	segmentCompactions?: number;
 	onSettled?(aborted: boolean): void;
 	onRelayRead?(ids: string[]): void;
 	onAvailable?(): void;
@@ -54,6 +59,9 @@ export class MainAgent {
 	private readonly models: ModelStore;
 	private readonly workspace?: () => WorkspaceState;
 	private readonly memory?: () => string;
+	private readonly taskState?: () => string;
+	private readonly segmentBytes: number;
+	private readonly segmentCompactions: number;
 	private readonly onSettled?: (aborted: boolean) => void;
 	private readonly onRelayRead?: (ids: string[]) => void;
 	private readonly onAvailable?: () => void;
@@ -68,6 +76,9 @@ export class MainAgent {
 		this.models = options.models;
 		this.workspace = options.workspace;
 		this.memory = options.memory;
+		this.taskState = options.taskState;
+		this.segmentBytes = options.segmentBytes ?? 20 * 1024 * 1024;
+		this.segmentCompactions = options.segmentCompactions ?? 10;
 		this.onSettled = options.onSettled;
 		this.onRelayRead = options.onRelayRead;
 		this.onAvailable = options.onAvailable;
@@ -79,6 +90,8 @@ export class MainAgent {
 	}
 
 	canReceiveRelay(): boolean { return !this.disposed && Boolean(this.session && this.model); }
+
+	search(params: ChatSearchParams) { return searchChat(this.messages, params); }
 
 	/** Freeze a user message (and optionally the confirmed proposal before it) into a Quote. */
 	quote(ref: QuoteRef): Quote | null {
@@ -243,10 +256,13 @@ export class MainAgent {
 		this.unsubscribe = null;
 		const session = this.session;
 		this.session = null;
-		this.disposal = Promise.all([
+		this.disposal = Promise.allSettled([
 			this.starting,
-			session ? closeRoleSession(session).catch((error: unknown) => console.error("Main session shutdown failed", error)) : undefined,
-		]).then(() => {});
+			session ? closeRoleSession(session) : undefined,
+		]).then((results) => {
+			const errors = results.flatMap(result => result.status === "rejected" ? [result.reason] : []);
+			if (errors.length) throw new AggregateError(errors, "Main session shutdown failed");
+		});
 		return this.disposal;
 	}
 
@@ -258,6 +274,7 @@ export class MainAgent {
 			const sessionManager = fresh
 				? SessionManager.create(this.paths.mainCwd, this.paths.sessionsMainDir)
 				: SessionManager.continueRecent(this.paths.mainCwd, this.paths.sessionsMainDir);
+			this.rotateSession(sessionManager);
 			const { session, modelFallbackMessage } = await createRoleSession({
 				cwd: this.paths.mainCwd,
 				agentDir: this.paths.agentDir,
@@ -277,6 +294,11 @@ export class MainAgent {
 			const transform = session.agent.transformContext;
 			session.agent.transformContext = async (messages, signal) => {
 				let context = transform ? await transform(messages, signal) : messages;
+				const state = this.taskState?.();
+				if (state) {
+					const index = Math.max(0, context.findLastIndex((message) => message.role === "user"));
+					context = [...context.slice(0, index), { role: "custom" as const, customType: "rally-state", display: false, timestamp: Date.now(), content: state }, ...context.slice(index)];
+				}
 				const memory = this.memory?.();
 				if (memory) {
 					const index = Math.max(0, context.findLastIndex((message) => message.role === "user"));
@@ -296,6 +318,7 @@ export class MainAgent {
 			this.busy = session.isStreaming;
 			this.refreshModelState();
 		} catch (error) {
+			if (this.disposed) throw error;
 			this.session = null;
 			this.model = null;
 			this.thinkingLevel = null;
@@ -345,6 +368,9 @@ export class MainAgent {
 
 	private handle(event: AgentSessionEvent): void {
 		switch (event.type) {
+			case "compaction_end":
+				if (event.result && !event.aborted && this.session) this.rotateSession(this.session.sessionManager);
+				return;
 			case "agent_start":
 				this.setBusy(true);
 				return;
@@ -353,6 +379,7 @@ export class MainAgent {
 				this.finishStreaming();
 				return;
 			case "agent_settled":
+				if (this.session) this.rotateSession(this.session.sessionManager);
 				this.queuedRelays.clear();
 				for (const line of new Set(this.toolLines.values())) {
 					for (const call of line.toolCalls ?? []) if (call.status === "running") { call.status = "interrupted"; call.endedAt = Date.now(); }
@@ -396,6 +423,19 @@ export class MainAgent {
 					this.addSystemLine(`模型调用失败：${event.message.errorMessage}`);
 				}
 		}
+	}
+
+	private rotateSession(manager: SessionManager): void {
+		const file = manager.getSessionFile();
+		if (!file || !existsSync(file)) return;
+		try {
+			const base = manager.getHeader()?.segmentCompactionId;
+			const branch = manager.getBranch();
+			const compactions = branch.slice(base ? branch.findIndex(entry => entry.id === base) + 1 : 0).filter(entry => entry.type === "compaction");
+			if (statSync(file).size < this.segmentBytes && compactions.length < this.segmentCompactions) return;
+			const next = manager.rotateCompactedSession();
+			if (next) this.events.append("segment_rotated", { previousFile: file, file: next, compactionId: manager.getHeader()?.segmentCompactionId });
+		} catch (error) { this.addSystemLine(`会话分段失败，继续使用当前会话：${String(error)}`); }
 	}
 
 	private startStreaming(): void {

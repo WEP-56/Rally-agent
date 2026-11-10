@@ -2,10 +2,10 @@
 <html lang="zh-CN">
 	<head>
 		<meta charset="UTF-8" />
-		<!-- frame-src: the prototype's browser tab is an iframe until it moves to WebContentsView (Q20). -->
+		<!-- Remote pages live in isolated native views; the app renderer never embeds them. -->
 		<meta
 			http-equiv="Content-Security-Policy"
-			content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; frame-src http: https:"
+			content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; frame-src 'none'; object-src 'none'"
 		/>
 		<title>Rally</title>
 	</head>

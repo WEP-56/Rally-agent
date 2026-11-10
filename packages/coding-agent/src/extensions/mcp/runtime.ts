@@ -25,6 +25,7 @@ import {
 	type ReadResourceResult,
 	type Resource,
 	type ResourceTemplate,
+	PipeTransport,
 	StdioTransport,
 	StreamableHttpTransport,
 } from "@rally/mcp";
@@ -62,7 +63,17 @@ export type McpTransportFactory = (
 	entry: McpServerEntry,
 	cwd: string,
 	authProvider: AuthProvider | undefined,
-) => McpTransport;
+	/** Aborted during session shutdown, including while resolving command-backed configuration. */
+	signal?: AbortSignal,
+) => McpTransport | Promise<McpTransport>;
+
+/** Host-owned configuration resolution, including cancellable credential commands. */
+export type McpConfigValueResolver = (
+	value: string,
+	description: string,
+	cwd: string,
+	signal: AbortSignal,
+) => string | Promise<string>;
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -160,6 +171,8 @@ export class McpServerConnection implements McpToolCaller, McpResourceServer {
 	private stderrTail: string | undefined;
 	private readonly cwd: string;
 	private readonly createTransport: McpTransportFactory;
+	private readonly resolveConfigValue: McpConfigValueResolver;
+	private readonly resolvingSettings = new Set<Promise<McpOAuthSettings>>();
 	private readonly authProvider: McpAuthProvider | undefined;
 	private readonly onTools: (connection: McpServerConnection) => void;
 	private readonly onChange: ((connection: McpServerConnection) => void) | undefined;
@@ -169,6 +182,7 @@ export class McpServerConnection implements McpToolCaller, McpResourceServer {
 		entry: McpServerEntry;
 		cwd: string;
 		createTransport: McpTransportFactory;
+		resolveConfigValue?: McpConfigValueResolver;
 		credentials: McpOAuthCredentialStore;
 		/** The current token of a pi provider, for servers with `auth.provider`. */
 		providerToken?: (provider: string) => Promise<string | undefined>;
@@ -181,6 +195,7 @@ export class McpServerConnection implements McpToolCaller, McpResourceServer {
 		this.entry = options.entry;
 		this.cwd = options.cwd;
 		this.createTransport = options.createTransport;
+		this.resolveConfigValue = options.resolveConfigValue ?? ((value, description) => resolveConfigValueOrThrow(value, description));
 		this.onTools = options.onTools;
 		this.onChange = options.onChange;
 		this.log = options.log;
@@ -218,15 +233,24 @@ export class McpServerConnection implements McpToolCaller, McpResourceServer {
 		return usesOAuth(this.entry) && "url" in this.entry.config ? this.entry.config.url : undefined;
 	}
 
-	oauthSettings(): McpOAuthSettings {
+	oauthSettings(cancel?: AbortSignal): Promise<McpOAuthSettings> {
+		const signal = cancel ? AbortSignal.any([this.shutdown.signal, cancel]) : this.shutdown.signal;
+		const pending = this.resolveOAuthSettings(signal);
+		this.resolvingSettings.add(pending);
+		void pending.finally(() => this.resolvingSettings.delete(pending)).catch(() => {});
+		return pending;
+	}
+
+	private async resolveOAuthSettings(signal: AbortSignal): Promise<McpOAuthSettings> {
+		signal.throwIfAborted();
 		const oauth = "url" in this.entry.config ? this.entry.config.oauth : undefined;
 		if (!oauth) return {};
+		const clientSecret = oauth.clientSecret === undefined ? undefined
+			: await this.resolveConfigValue(oauth.clientSecret, `MCP server "${this.entry.name}" oauth.clientSecret`, this.cwd, signal);
+		signal.throwIfAborted();
 		return {
 			clientId: oauth.clientId,
-			clientSecret:
-				oauth.clientSecret === undefined
-					? undefined
-					: resolveConfigValueOrThrow(oauth.clientSecret, `MCP server "${this.entry.name}" oauth.clientSecret`),
+			clientSecret,
 			callbackPort: oauth.callbackPort,
 			callbackUrl: oauth.callbackUrl,
 			scope: oauth.scope,
@@ -377,12 +401,13 @@ export class McpServerConnection implements McpToolCaller, McpResourceServer {
 		this.shutdown.signal.addEventListener("abort", closeClient, { once: true });
 		let transport: McpTransport | undefined;
 		try {
-			transport = this.createTransport(this.entry, this.cwd, this.authProvider);
+			transport = await this.createTransport(this.entry, this.cwd, this.authProvider, this.shutdown.signal);
+			if (this.closed) { await transport.close(); throw new Error("shut down while creating transport"); }
 			await client.connect(transport);
 			client.onNotification("notifications/tools/list_changed", () => {
 				void this.refreshTools(client);
 			});
-			const stdio = transport instanceof StdioTransport ? transport : undefined;
+			const stdio = transport instanceof StdioTransport || transport instanceof PipeTransport ? transport : undefined;
 			client.onClose(() => this.handleClientClose(client, stdio));
 			// Servers without the tools capability (prompts or resources only) do not answer tools/list.
 			const tools = client.serverCapabilities?.tools ? await client.listTools() : [];
@@ -399,7 +424,7 @@ export class McpServerConnection implements McpToolCaller, McpResourceServer {
 			return client;
 		} catch (error) {
 			await closeClient();
-			if (transport instanceof StdioTransport) {
+			if (transport instanceof StdioTransport || transport instanceof PipeTransport) {
 				this.stderrTail = sliceTail(transport.stderr.trim(), STDERR_TAIL_CHARS) || undefined;
 			}
 			throw error;
@@ -420,7 +445,7 @@ export class McpServerConnection implements McpToolCaller, McpResourceServer {
 	}
 
 	/** The transport dropped. The next call reconnects; until then the status shows why. */
-	private handleClientClose(client: McpClient, stdio: StdioTransport | undefined): void {
+	private handleClientClose(client: McpClient, stdio: StdioTransport | PipeTransport | undefined): void {
 		if (this.client !== client || this.closed) return;
 		this.client = undefined;
 		this.state = "disconnected";
@@ -448,7 +473,7 @@ export class McpServerConnection implements McpToolCaller, McpResourceServer {
 		this.changed();
 		const client = this.client;
 		this.client = undefined;
-		await Promise.all([client?.close().catch(() => undefined), this.opening?.catch(() => undefined)]);
+		await Promise.allSettled([client?.close(), this.opening, ...this.resolvingSettings]);
 		// A refresh the server already answered may have rotated the refresh token; exiting before the
 		// new tokens are saved would lose the grant.
 		await this.authProvider?.settled();

@@ -15,6 +15,7 @@ import { defaultModel } from "../../../../src/shared/models.ts";
 import { createMainTaskTools, createWorkerTools } from "../../../../src/main/supervisor/tools.ts";
 import { EventLog } from "../../../../src/main/supervisor/event-log.ts";
 import { TaskStore } from "../../../../src/main/supervisor/task-store.ts";
+import { TaskSnapshot } from "../../../../src/main/supervisor/task-snapshot.ts";
 import { Scheduler } from "../../../../src/main/supervisor/scheduler.ts";
 import { WorkspaceStore } from "../../../../src/main/workspace-store.ts";
 import { createRouterReadTools } from "../../../../src/main/supervisor/router-tools.ts";
@@ -28,14 +29,19 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 	const harnesses: Harness[] = [];
 	const supervisors: Supervisor[] = [];
 	afterEach(async () => {
-		await Promise.all(supervisors.splice(0).map((supervisor) => supervisor.dispose()));
+		// Native tree termination includes a five-second grace and identity checks. Keep
+		// this test's directories separate even if cleanup fails or hits the hook deadline.
+		const ownedHarnesses = harnesses.splice(0);
+		const closed = await Promise.allSettled(supervisors.splice(0).map((supervisor) => supervisor.dispose()));
 		vi.restoreAllMocks();
 		vi.unstubAllGlobals();
 		vi.unstubAllEnvs();
-		for (const harness of harnesses.splice(0)) harness.cleanup();
-	});
+		const failures = closed.flatMap(result => result.status === "rejected" ? [result.reason] : []);
+		if (failures.length) throw new AggregateError(failures, "Supervisor cleanup failed; fixture state retained");
+		for (const harness of ownedHarnesses) harness.cleanup();
+	}, 30000);
 
-	async function setup(workerConfigured = true, keepRecentTokens = 20000) {
+	async function setup(workerConfigured = true, keepRecentTokens = 20000, eventSegmentBytes?: number, mainSegmentCompactions?: number) {
 		// Search tools must use installed binaries, never download during offline integration tests.
 		vi.stubEnv("PI_OFFLINE", "1");
 		const harness = await createHarness({ provider: "rally-test", models: [{ id: "main-1" }, { id: "worker-1" }, { id: "worker-2" }] });
@@ -49,7 +55,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		mkdirSync(join(paths.workspaceDir, ".rally", "skills", "fixture-skill"), { recursive: true });
 		writeFileSync(join(paths.workspaceDir, ".rally", "skills", "fixture-skill", "SKILL.md"), "---\nname: fixture-skill\ndescription: Fixture worker skill for integration tests\n---\n\nFIXTURE_WORKER_SKILL_SENTINEL\n");
 		setProjectTrust(paths.agentDir, paths.workspaceDir, true);
-		const supervisor = new Supervisor(paths, { emitChat: () => {}, emitTask: () => {} });
+		const supervisor = new Supervisor(paths, { emitChat: () => {}, emitTask: () => {}, eventSegmentBytes, mainSegmentCompactions });
 		supervisors.push(supervisor);
 		await supervisor.models.save([{ id: "rally-test", name: "Offline", protocol: "messages", baseUrl: "http://localhost:0", apiKey: "faux-key", models: harness.models.map((model) => defaultModel(model.id)) }]);
 		const runtime = await supervisor.models.whenReady();
@@ -63,6 +69,107 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 	}
 
 	function toolNames(context: TranscriptContext) { return getCurrentTools(context.messages).map((tool) => tool.name); }
+	it("owns the state directory before recovery and until sessions and snapshot finish closing", async () => {
+		const { paths, supervisor } = await setup();
+		const open = () => new Supervisor(paths, { emitChat: () => {}, emitTask: () => {} });
+		const original = readFileSync(paths.eventsFile);
+		expect(open).toThrow("STATE_DIRECTORY_LOCKED");
+		expect(readFileSync(paths.eventsFile)).toEqual(original);
+		let release!: () => void;
+		const gate = new Promise<void>(resolve => { release = resolve; });
+		const disposeWorkers = supervisor.workers.dispose.bind(supervisor.workers);
+		vi.spyOn(supervisor.workers, "dispose").mockImplementationOnce(async () => { await gate; return disposeWorkers(); });
+		const save = supervisor.snapshot.dispose.bind(supervisor.snapshot);
+		const snapshot = vi.spyOn(supervisor.snapshot, "dispose").mockImplementationOnce(() => { expect(open).toThrow("STATE_DIRECTORY_LOCKED"); save(); });
+		const closing = supervisor.dispose();
+		try { expect(open).toThrow("STATE_DIRECTORY_LOCKED"); expect(snapshot).not.toHaveBeenCalled(); }
+		finally { release(); }
+		await closing;
+		expect(snapshot).toHaveBeenCalledOnce();
+		expect(() => supervisor.events.append("stop", {})).toThrow("EVENT_LOG_CLOSED");
+		expect(() => supervisor.audit.append("cancel", {})).toThrow("EVENT_LOG_CLOSED");
+		expect(supervisor.snapshot.flush()).toBe(false);
+		const recovered = open(); supervisors.push(recovered);
+		expect(recovered.snapshot.loadedSeq).toBeGreaterThan(0);
+	});
+	it("releases the lock and partial snapshot timer when construction fails", async () => {
+		const { paths, supervisor } = await setup(); await supervisor.dispose();
+		vi.spyOn(TaskSnapshot.prototype, "replay").mockImplementationOnce(() => { throw new Error("fixture replay failure"); });
+		const dispose = vi.spyOn(TaskSnapshot.prototype, "dispose");
+		expect(() => new Supervisor(paths, { emitChat: () => {}, emitTask: () => {} })).toThrow("fixture replay failure");
+		expect(dispose).toHaveBeenCalledWith(false);
+		const recovered = new Supervisor(paths, { emitChat: () => {}, emitTask: () => {} }); supervisors.push(recovered);
+		await recovered.start();
+	});
+	it("closes the supervisor and releases ownership after asynchronous startup fails", async () => {
+		const { paths, supervisor } = await setup(); await supervisor.dispose();
+		const broken = new Supervisor(paths, { emitChat: () => {}, emitTask: () => {} }); supervisors.push(broken);
+		vi.spyOn(broken.main, "start").mockRejectedValueOnce(new Error("fixture main startup failure"));
+		await expect(broken.start()).rejects.toThrow("fixture main startup failure");
+		expect(() => broken.events.append("stop", {})).toThrow("EVENT_LOG_CLOSED");
+		const recovered = new Supervisor(paths, { emitChat: () => {}, emitTask: () => {} }); supervisors.push(recovered);
+		await recovered.start();
+	});
+	it("reinjects live tasks after compaction and searches old words for a real quoted action after restart", async () => {
+		const { harness, paths, supervisor } = await setup(true, 1, 512, 1);
+		const pending = createTask(supervisor, { title: "STATE_PENDING_SENTINEL" });
+		function snapshot(context: TranscriptContext) {
+			const text = context.messages.map(message => getMessageText(message)).find(text => text.startsWith("Rally current task state"));
+			expect(text).toBeTruthy(); return JSON.parse(text!.slice(text!.indexOf("\n") + 1));
+		}
+		harness.setResponses([(context) => {
+			expect(snapshot(context).tasks).toEqual(expect.arrayContaining([expect.objectContaining({ id: pending.id, status: "pending_approval" })]));
+			expect(getCurrentSystemPrompt(context.messages)).not.toContain("STATE_PENDING_SENTINEL");
+			return fauxAssistantMessage("原话收到");
+		}, fauxAssistantMessage("摘要不含原话")]);
+		const original = "记住 HISTORIC_PREFERENCE 用中文回答\n保留换行";
+		await supervisor.main.send(original);
+		await vi.waitFor(() => expect(supervisor.main.state().messages.some(m => m.text === "原话收到")).toBe(true));
+		await vi.waitFor(() => expect(supervisor.main.isBusy()).toBe(false));
+		const sourceId = supervisor.main.state().messages.find(m => m.role === "user")!.id;
+		await supervisor.main.reset();
+		supervisor.cancel(pending.id);
+		expect(readdirSync(paths.sessionsMainDir).filter(name => name.endsWith(".jsonl"))).toHaveLength(2);
+		const newTask = createTask(supervisor, { title: "STATE_NEW_SENTINEL" });
+		await supervisor.dispose();
+		expect(readdirSync(paths.stateDir).filter(name => /^events-\d+\.jsonl$/.test(name)).length).toBeGreaterThan(1);
+		const recovered = await restart(paths, harness);
+		recovered.main.addSystemLine("HISTORIC_PREFERENCE SYSTEM_SHOULD_NOT_BE_SEARCHED");
+		expect(recovered.snapshot.loadedSeq).toBeGreaterThan(0);
+		harness.setResponses([
+			(context) => {
+				const state = snapshot(context);
+				expect(state.tasks.map((t: { id: string }) => t.id)).toEqual([newTask.id]);
+				expect(state.recentEnded[0]).toMatchObject({ id: pending.id, outcome: "cancelled" });
+				expect(toolNames(context)).toContain("chat_search");
+				return fauxAssistantMessage(fauxToolCall("chat_search", { query: "HISTORIC_PREFERENCE" }), { stopReason: "toolUse" });
+			},
+			(context) => {
+				const result = JSON.parse(getMessageText(context.messages.findLast(m => m.role === "toolResult")));
+				expect(result.messages).toEqual([{ id: sourceId, role: "user", at: expect.any(Number), text: original }]);
+				return fauxAssistantMessage(fauxToolCall("chat_search", { id: sourceId }), { stopReason: "toolUse" });
+			},
+			(context) => {
+				expect(JSON.parse(getMessageText(context.messages.findLast(m => m.role === "toolResult"))).messages[0].text).toBe(original);
+				recovered.cancel(newTask.id);
+				return fauxAssistantMessage(fauxToolCall("memory_append", { text: "用中文回答", quotes: [{ id: sourceId }] }), { stopReason: "toolUse" });
+			},
+			(context) => {
+				expect(snapshot(context).tasks).toEqual([]);
+				expect(JSON.parse(getMessageText(context.messages.findLast(m => m.role === "toolResult")))).toMatchObject({ entryId: "M-1" });
+				return fauxAssistantMessage("历史引用成功");
+			},
+		]);
+		await recovered.main.send("查找此前原话并处理");
+		await vi.waitFor(() => expect(recovered.main.state().messages.some(m => m.text === "历史引用成功"), JSON.stringify(recovered.main.state().messages)).toBe(true));
+		await vi.waitFor(() => expect(recovered.main.isBusy()).toBe(false));
+		expect(readFileSync(paths.memoryFile, "utf8")).toContain("用中文回答");
+		for (const name of readdirSync(paths.sessionsMainDir).filter(n => n.endsWith(".jsonl"))) {
+			const persisted = readFileSync(join(paths.sessionsMainDir, name), "utf8");
+			expect(persisted).not.toContain("STATE_PENDING_SENTINEL"); expect(persisted).not.toContain("STATE_NEW_SENTINEL");
+		}
+		expect(harness.getPendingResponseCount()).toBe(0);
+	});
 	it("refreshes memory in tool loops and after restart/compaction without persisting snapshots", async () => {
 		const { harness, paths, supervisor } = await setup(true, 1);
 		writeFileSync(paths.memoryFile, "MEMORY_INITIAL_SENTINEL");
@@ -106,8 +213,59 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		}
 		expect(harness.getPendingResponseCount()).toBe(0);
 	});
-	async function restart(paths: Supervisor["paths"], harness: Harness) {
-		const recovered = new Supervisor(paths, { emitChat: () => {}, emitTask: () => {} }); supervisors.push(recovered);
+	it("rotates after automatic compaction without losing a next-turn relay", async () => {
+		const { harness, paths, supervisor } = await setup(true, 1, undefined, 1);
+		let summarizing = false;
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		harness.setResponses([
+			fauxAssistantMessage("长输入已收到"),
+			async () => { summarizing = true; await gate; return fauxAssistantMessage("AUTO_SEGMENT_SUMMARY"); },
+			(context) => {
+				expect(JSON.stringify(context.messages)).toContain("AUTO_SEGMENT_SUMMARY");
+				const relays = context.messages.filter(message => getMessageText(message).includes("PENDING_DURING_ROTATION"));
+				expect(relays).toHaveLength(1);
+				expect(getMessageText(relays[0])).toBe("PENDING_DURING_ROTATION");
+				return fauxAssistantMessage("自动分段后中继已读取");
+			},
+		]);
+		try {
+			// Faux derives usage from prompt length; this crosses the real automatic threshold.
+			await supervisor.main.send("x".repeat(480000));
+			await vi.waitFor(() => expect(summarizing).toBe(true));
+			await supervisor.main.sendRelay([{ id: "rotation-fixture", text: "PENDING_DURING_ROTATION" }], "notice");
+		} finally { release(); }
+		await vi.waitFor(() => expect(supervisor.main.isBusy()).toBe(false));
+		expect(readdirSync(paths.sessionsMainDir).filter(name => name.endsWith(".jsonl"))).toHaveLength(2);
+		expect(supervisor.events.ofKind("segment_rotated")).toHaveLength(1);
+		await supervisor.main.send("继续处理");
+		await vi.waitFor(() => expect(supervisor.main.state().messages.some(message => message.text === "自动分段后中继已读取")).toBe(true));
+		await vi.waitFor(() => expect(supervisor.main.isBusy()).toBe(false));
+		expect(harness.getPendingResponseCount()).toBe(0);
+		expect(supervisor.main.state().messages.some(message => message.text.includes("分段失败"))).toBe(false);
+	});
+	it("rotates a compacted oversized session on startup and continues its context", async () => {
+		const { harness, paths, supervisor } = await setup(true, 1);
+		harness.setResponses([fauxAssistantMessage("已记录"), fauxAssistantMessage("STARTUP_SEGMENT_SUMMARY")]);
+		await supervisor.main.send("压缩后重启继续");
+		await vi.waitFor(() => expect(supervisor.main.state().messages.some(message => message.text === "已记录")).toBe(true));
+		await vi.waitFor(() => expect(supervisor.main.isBusy()).toBe(false));
+		await supervisor.main.reset();
+		expect(readdirSync(paths.sessionsMainDir).filter(name => name.endsWith(".jsonl"))).toHaveLength(1);
+		await supervisor.dispose();
+		const recovered = await restart(paths, harness, 1);
+		expect(readdirSync(paths.sessionsMainDir).filter(name => name.endsWith(".jsonl"))).toHaveLength(2);
+		harness.setResponses([(context) => {
+			expect(JSON.stringify(context.messages)).toContain("STARTUP_SEGMENT_SUMMARY");
+			return fauxAssistantMessage("接续成功");
+		}]);
+		await recovered.main.send("继续");
+		await vi.waitFor(() => expect(recovered.main.state().messages.some(message => message.text === "接续成功")).toBe(true));
+		await vi.waitFor(() => expect(recovered.main.isBusy()).toBe(false));
+		expect(harness.getPendingResponseCount()).toBe(0);
+	});
+	async function restart(paths: Supervisor["paths"], harness: Harness, mainSegmentBytes?: number) {
+		const recovered = new Supervisor(paths, { emitChat: () => {}, emitTask: () => {}, mainSegmentBytes }); supervisors.push(recovered);
 		const runtime = await recovered.models.whenReady();
 		if (!runtime) throw new Error("Missing recovered runtime");
 		runtime.registerProvider("rally-test", { api: harness.faux.api, apiKey: "faux-key", baseUrl: "http://localhost:0", models: harness.models.map((model) => ({ ...model, type: "chat" as const })) });
@@ -160,6 +318,8 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 				expect(toolNames(context)).not.toContain("task_dispatch");
 				expect(toolNames(context)).not.toContain("memory_append");
 				expect(toolNames(context)).not.toContain("memory_remove");
+				expect(toolNames(context)).not.toContain("chat_search");
+				expect(JSON.stringify(context.messages)).not.toContain("Rally current task state");
 				expect(JSON.stringify(context.messages)).not.toContain("WORKER_MUST_NOT_SEE_MEMORY");
 				expect(lastUser(context)).toContain(original);
 				return fauxAssistantMessage(fauxToolCall("read", { path: "README.md", limit: 20 }), { stopReason: "toolUse" });
@@ -497,6 +657,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		expect(() => process.kill(pid, 0)).toThrow();
 		expect(supervisor.workers.has(task.id)).toBe(false);
 		expect(harness.faux.state.callCount).toBe(mode === "hang-call" ? 1 : 0);
+		expect(supervisor.events.ofKind("process_stopped")).toEqual(expect.arrayContaining([expect.objectContaining({ data: expect.objectContaining({ kind: "mcp", taskId: task.id }) })]));
 		expect(readFileSync(callsFile, "utf8")).toBe(mode === "hang-call" ? "called\n" : "initializing\n");
 		if (mode === "hang-call") expect(supervisor.store.timeline(task.id)).toEqual([
 			expect.objectContaining({ name: "mcp__fixture__echo", status: "interrupted", endedAt: expect.any(Number) }),
@@ -649,13 +810,14 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		await restored.whenReady();
 		expect((await restored.state()).worker?.model).toBe("worker-2");
 		expect((await restored.state()).active?.model).toBe("main-1");
+		await supervisor.dispose();
 		const restart = new Supervisor(paths, { emitChat: () => {}, emitTask: () => {} });
 		supervisors.push(restart);
 		expect(restart.board().autoApprove).toBe(true);
-		await supervisor.models.save([]);
-		await supervisor.main.reapplyActiveModel();
-		expect((await supervisor.models.state()).worker).toBeNull();
-		expect(supervisor.main.state().model).toBeNull();
+		await restart.models.save([]);
+		await restart.main.reapplyActiveModel();
+		expect((await restart.models.state()).worker).toBeNull();
+		expect(restart.main.state().model).toBeNull();
 		expect(JSON.parse(readFileSync(paths.modelsFile, "utf8")).worker).toBeNull();
 	});
 
@@ -844,11 +1006,12 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 				},
 			]);
 			await supervisor.main.send(`查询 ${name} Git 状态`);
-			await vi.waitFor(() => expect(supervisor.main.state().messages.some((line) => line.text === `inspected ${name}`)).toBe(true));
+			await vi.waitFor(() => expect(supervisor.main.state().messages.some((line) => line.text === `inspected ${name}`)).toBe(true), { timeout: 10000 });
 			await vi.waitFor(() => expect(supervisor.main.isBusy()).toBe(false));
 			expect(existsSync(join(cwd, "should-not-exist"))).toBe(false);
 		}
 		const calls = supervisor.main.state().messages.flatMap((line) => line.toolCalls ?? []).filter((call) => call.name === "git_inspect");
+		expect(supervisor.events.ofKind("process_stopped")).toEqual(expect.arrayContaining([expect.objectContaining({ data: expect.objectContaining({ kind: "git", reason: "completed" }) })]));
 		expect(calls.map((call) => call.status)).toEqual(["ok", "error", "ok", "error"]);
 		await supervisor.dispose();
 		const restored = await restart(paths, harness);
@@ -869,15 +1032,16 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		supervisor.workspace.recordProject(harness.tempDir);
 		expect(supervisor.workspace.state().recentProjects).toEqual([harness.tempDir]);
 		expect(supervisor.workspace.base()).toBe(before.defaultWorkspace);
-		const read = createRouterReadTools(() => supervisor.workspace.base()).find((tool) => tool.name === "read");
+		const read = createRouterReadTools(() => supervisor.workspace.base(), supervisor.processes).find((tool) => tool.name === "read");
 		expect(read).toBeDefined();
 		const result = await read!.execute("test", { path: "README.md" }, undefined, undefined, {} as ExtensionToolContext);
 		expect(getMessageText(result)).toContain("Fixture README");
 		for (const [name, input] of [["ls", {}], ["find", { pattern: "README.md" }], ["grep", { pattern: "Fixture" }]] as const) {
-			const tool = createRouterReadTools(() => supervisor.workspace.base()).find((item) => item.name === name)!;
+			const tool = createRouterReadTools(() => supervisor.workspace.base(), supervisor.processes).find((item) => item.name === name)!;
 			const output = await tool.execute("test", input, undefined, undefined, { cwd: paths.mainCwd } as ExtensionToolContext);
 			expect(getMessageText(output)).toContain("README.md");
 		}
+		expect(supervisor.events.ofKind("process_stopped").filter(event => event.data.kind === "search")).toHaveLength(2);
 	});
 
 	it("ignores legacy current project selection and rejects attempts to select recent projects", async () => {
@@ -899,14 +1063,15 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		const duplicate = JSON.parse(getMessageText(await call("task_dispatch", { ...input, quotes: [...input.quotes].reverse() })));
 		expect(duplicate).toMatchObject({ taskId: first.taskId, reused: true });
 		expect(supervisor.store.list()).toHaveLength(1);
+		await supervisor.dispose();
 		const restart = new Supervisor(paths, { emitChat: () => {}, emitTask: () => {} });
 		supervisors.push(restart);
 		expect(JSON.parse(getMessageText(await toolsFor(restart)("task_dispatch", input))).taskId).toBe(first.taskId);
 		const createdAt = supervisor.store.get(first.taskId)!.createdAt;
 		vi.spyOn(Date, "now").mockReturnValue(createdAt + 60000);
-		const next = JSON.parse(getMessageText(await call("task_dispatch", input)));
+		const next = JSON.parse(getMessageText(await toolsFor(restart)("task_dispatch", input)));
 		expect(next.taskId).not.toBe(first.taskId);
-		expect(supervisor.store.list()).toHaveLength(2);
+		expect(restart.store.list()).toHaveLength(2);
 	});
 
 	it("pages the task board, runs and tool timeline without leaking worker conversations", async () => {
@@ -981,6 +1146,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		expect(task.changedFiles).toEqual([output]);
 		expect(readFileSync(output, "utf8")).toBe("after");
 		expect(task.usage.toolCalls).toBe(10);
+		expect(supervisor.events.ofKind("process_stopped").filter(event => event.data.kind === "search" && event.data.taskId === task.id)).toHaveLength(2);
 		expect(task.usage.inputTokens).toBeGreaterThan(0);
 		expect(task.usage.inputTokens).toBe((task.usage.cacheReadTokens ?? 0) + (task.usage.cacheWriteTokens ?? 0));
 		expect(task.usage.costUsd).toBeUndefined();
@@ -1169,6 +1335,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		expect(supervisor.store.access(task.id)).toEqual(expect.arrayContaining([expect.objectContaining({ tool: "git", kind: "fs_write", coverage: "command_scope" }), expect.objectContaining({ tool: "git", kind: "fs_read" })]));
 		expect(task.changedFiles ?? []).toEqual([]);
 		const readonly = createTask(supervisor, { title: "只读 Git" });
+		expect(supervisor.events.ofKind("process_stopped")).toEqual(expect.arrayContaining([expect.objectContaining({ data: expect.objectContaining({ taskId: task.id, kind: "git", reason: "completed" }) })]));
 		const route: FauxResponseStep = (context, _options, _state, model) => {
 			if (model.id === "main-1") return fauxAssistantMessage("已收到汇报。");
 			const last = context.messages.findLast((message) => message.role === "toolResult");
@@ -1222,12 +1389,13 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 			return fauxAssistantMessage(fauxToolCall("git", { args: ["restore", "--worktree", "--", "__rally_missing__"] }), { stopReason: "toolUse" });
 		};
 		harness.setResponses(Array(10).fill(route)); supervisor.approve(task.id);
-		await vi.waitFor(() => expect(task.ended?.outcome, task.runs.at(-1)?.lastReport?.summary).toBe("done"), { timeout: 15000 });
+		// Both approval snapshots now include real Windows process identity checks for every Git probe.
+		await vi.waitFor(() => expect(task.ended?.outcome, task.runs.at(-1)?.lastReport?.summary).toBe("done"), { timeout: 40000 });
 		expect(task.gates![0].decision).toMatchObject({ value: "allow", actor: "main", basis: [quoteId] });
 		expect(supervisor.store.timeline(task.id).find((entry) => entry.name === "git")?.status).toBe("error");
 		expect(readFileSync(join(paths.workspaceDir, "README.md"), "utf8")).toContain("Fixture README");
 		expect(task.changedFiles ?? []).toEqual([]);
-	}, 20000);
+	}, 50000);
 
 	it("restores late usage deltas, partial cost and elapsed time across resumed runs", async () => {
 		const { supervisor, paths } = await setup();
@@ -1274,7 +1442,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		const approved = JSON.parse(getMessageText(await call("task_approve", { taskId: dispatched.taskId, quotes: input.quotes })));
 		expect(approved).toMatchObject({ status: "queued", approval: "approved" });
 		expect(JSON.parse(getMessageText(await call("task_dispatch", input)))).toMatchObject({ reused: true, queuedReason: "dependency" });
-		expect(JSON.parse(getMessageText(await call("task_cancel", { taskId: upstream.id, quotes: input.quotes })))).toMatchObject({ outcome: "cancelled", affected: [{ taskId: dispatched.taskId, status: "dependency_failed" }], coverage: { jobs: "not_implemented" } });
+		expect(JSON.parse(getMessageText(await call("task_cancel", { taskId: upstream.id, quotes: input.quotes })))).toMatchObject({ outcome: "cancelled", affected: [{ taskId: dispatched.taskId, status: "dependency_failed" }], killedJobs: 0 });
 		const task = createTask(supervisor);
 		const run = supervisor.store.startRun(task.id, "dispatch", "fixture");
 		const report = (question?: string | null) => supervisor.store.report(task.id, run.id, "progress", "progress", question);
@@ -1383,7 +1551,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		const started: string[] = [];
 		const releases: (() => void)[] = [];
 		const failed = vi.fn();
-		const scheduler = new Scheduler({ store, events, activeIds: () => [...active], wakePending: () => {}, onDependencyFailed: failed,
+		const scheduler = new Scheduler({ store, events, activeIds: () => [...active], pendingIds: () => [], wake: () => {}, onDependencyFailed: failed,
 			start: async (task) => { started.push(task.id); active.add(task.id); await new Promise<void>((resolve) => releases.push(resolve)); } });
 		const input = { title: "queued", quotes: [], cwd: paths.workspaceDir, scope: [], mode: "readonly" as const, dependsOn: [], autoApprove: true };
 		const first = store.create(input).task;
@@ -1409,7 +1577,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		expect(supervisor.workers.streamingCount()).toBe(0);
 	});
 
-	it.each(["steer", "answer"] as const)("queues an idle worker's %s until a streaming slot is released", async (kind) => {
+	it.each(["steer", "answer"] as const)("uses one extra slot for an idle worker's user %s while ordinary slots are full", async (kind) => {
 		const { supervisor, harness } = await setup();
 		let releaseSecond!: () => void;
 		let releaseThird!: () => void;
@@ -1420,8 +1588,8 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 			fauxAssistantMessage(fauxToolCall("task_report", { state: "blocked", summary: "等待补充", question: "如何继续？", options: ["逐字原话", "停止"] }), { stopReason: "toolUse" }), fauxAssistantMessage("等待。"),
 			async () => { await secondGate; return ready(); },
 			async () => { await thirdGate; return ready(); },
-			fauxAssistantMessage("完成。"),
 			(context) => { expect(lastUser(context)).toContain("逐字原话"); return ready(); },
+			fauxAssistantMessage("完成。"),
 			fauxAssistantMessage("完成。"),
 			fauxAssistantMessage("完成。"),
 		]);
@@ -1439,12 +1607,12 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 			supervisor.answerOption(first.id, id, "逐字原话");
 		} else expect((await toolsFor(supervisor)("task_steer", { taskId: first.id, quotes: [{ id: "#fixture" }] })).isError).not.toBe(true);
 		const input = first.inputs.at(-1)!;
-		expect(input.deliveredAt).toBeUndefined();
-		expect(first.queue?.reason).toBe("capacity");
-		releaseSecond();
+		expect(input.deliveredAt).toBeDefined();
+		expect(first.queue).toBeUndefined();
 		await vi.waitFor(() => expect(first.ended?.outcome).toBe("done"));
 		expect(input.deliveredAt).toBeDefined();
-		expect(supervisor.workers.streamingCount()).toBeLessThanOrEqual(2);
+		expect(supervisor.workers.streamingCount()).toBeLessThanOrEqual(3);
+		releaseSecond();
 		releaseThird();
 		await vi.waitFor(() => expect(supervisor.workers.streamingCount()).toBe(0));
 	});

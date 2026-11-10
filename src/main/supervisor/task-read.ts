@@ -5,7 +5,7 @@ import { TaskError, type TaskStore } from "./task-store.ts";
 
 export const TaskReadSchema = Type.Object({
 	taskId: Type.Optional(Type.String()),
-	view: Type.Optional(Type.Union([Type.Literal("board"), Type.Literal("card"), Type.Literal("report"), Type.Literal("runs"), Type.Literal("files"), Type.Literal("timeline")])),
+	view: Type.Optional(Type.Union([Type.Literal("board"), Type.Literal("card"), Type.Literal("report"), Type.Literal("runs"), Type.Literal("files"), Type.Literal("timeline"), Type.Literal("services")])),
 	offset: Type.Optional(Type.Integer({ minimum: 0 })),
 	limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
 });
@@ -29,6 +29,10 @@ export function readTask(store: TaskStore, task: Task, params: TaskReadParams): 
 			const { items, ...paging } = page([...task.runs].reverse(), params);
 			return { runs: items, ...paging };
 		}
+		case "services": {
+			const { items, ...paging } = page([...(task.services ?? [])].reverse(), params);
+			return { services: items, ...paging };
+		}
 		case "timeline": {
 			// Tool inputs are bounded summaries; outputs and full worker messages are excluded.
 			const { items, ...paging } = page(store.timeline(task.id).reverse().map(({ output: _output, ...call }) => call), params);
@@ -37,7 +41,7 @@ export function readTask(store: TaskStore, task: Task, params: TaskReadParams): 
 		case "files": {
 			const { items, ...paging } = page(store.access(task.id), params);
 			return { accesses: items, changedFiles: task.changedFiles ?? [], outputDir: task.outputDir,
-				coverage: { writes: "successful write/edit only", reads: "successful read/grep/find/ls only", git: "attempted repository command scope; not exact changed files", shell: "unknown", network: "git fetch/pull/push resolved remote hosts only; attempts, not confirmed traffic", deletes: "successful file_delete entries only", jobs: "not_implemented", services: "not_implemented", history: "legacy accesses not backfilled" }, ...paging };
+				coverage: { writes: "successful write/edit only", reads: "successful read/grep/find/ls only", git: "attempted repository command scope; not exact changed files", shell: "unknown", network: "git fetch/pull/push resolved remote hosts only; attempts, not confirmed traffic", deletes: "successful file_delete entries only", jobs: "background shell job IDs; process effects unknown", services: "registered service IDs; process effects unknown", history: "legacy accesses not backfilled" }, ...paging };
 		}
 		default: throw new TaskError("VIEW_INVALID", "该任务视图不可用");
 	}

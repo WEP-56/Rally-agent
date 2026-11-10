@@ -7,6 +7,7 @@ import { ensureTool } from "../../utils/tools-manager.ts";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
 import { resolveToCwd } from "./path-utils.ts";
 import { grepRenderers } from "./renderers/grep.ts";
+import type { SearchExecution } from "./search-process.ts";
 import { type TypeBoxAgentTool, wrapToolDefinition } from "./tool-definition-wrapper.ts";
 import {
 	DEFAULT_MAX_BYTES,
@@ -73,6 +74,7 @@ function decodeRgText(data: { text?: string; bytes?: string } | undefined): stri
 export interface GrepToolOptions {
 	/** Custom operations for grep. Default: local filesystem plus ripgrep */
 	operations?: GrepOperations;
+	execution?: SearchExecution;
 }
 
 export function createGrepToolDefinition(
@@ -124,7 +126,8 @@ export function createGrepToolDefinition(
 
 				(async () => {
 					try {
-						const rgPath = await ensureTool("rg");
+						const rgPath = await (options?.execution?.resolveTool ? options.execution.resolveTool("rg", signal) : ensureTool("rg"));
+						if (signal?.aborted) { settle(() => reject(new Error("Operation aborted"))); return; }
 						if (!rgPath) {
 							settle(() => reject(new Error("ripgrep (rg) is not available and could not be downloaded")));
 							return;
@@ -168,7 +171,8 @@ export function createGrepToolDefinition(
 						// searchPath (macOS /tmp) would no longer lie under the glob root.
 						args.push("--", pattern, isDirectory ? "." : searchPath);
 
-						const child = spawn(rgPath, args, {
+						if (signal?.aborted) { settle(() => reject(new Error("Operation aborted"))); return; }
+						const child = options?.execution ? options.execution.spawn(rgPath, args, isDirectory ? searchPath : undefined) : spawn(rgPath, args, {
 							cwd: isDirectory ? searchPath : undefined,
 							stdio: ["ignore", "pipe", "pipe"],
 						});

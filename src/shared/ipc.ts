@@ -9,6 +9,9 @@ import type { SkillsState } from "./skills.ts";
 import type { ProjectTrustState } from "./trust.ts";
 import type { McpConfigurationState, McpRiskTier } from "./mcp.ts";
 import type { MemoryState } from "./memory.ts";
+import type { ServicesState } from "./services.ts";
+import type { BrowserState, BrowserLayout, BrowserAction, BrowserEvent } from "./browser.ts";
+import type { TerminalSize, TerminalState, TerminalEvent } from "./terminal.ts";
 
 /** Basic facts about the running app, shown in the shell and used by smoke checks. */
 export interface AppInfo {
@@ -37,7 +40,7 @@ export interface RallyPaths {
 	modelsFile: string;
 	/** ~/.rally/state: events, snapshot, audit, job logs. */
 	stateDir: string;
-	/** ~/.rally/state/events-0001.jsonl: append-only event stream. */
+	/** ~/.rally/state/events-0001.jsonl: first segment of the append-only event stream. */
 	eventsFile: string;
 	/** ~/.rally/state/snapshot.json: derived state rebuild cache. */
 	snapshotFile: string;
@@ -53,6 +56,19 @@ export interface RallyPaths {
 
 /** Invoke channels (renderer -> main, request/response). */
 export const IpcChannel = {
+	browserCreate: "browser:create",
+	terminalCreate: "terminal:create",
+	terminalWrite: "terminal:write",
+	terminalResize: "terminal:resize",
+	terminalAck: "terminal:ack",
+	terminalClose: "terminal:close",
+	terminalOpenLink: "terminal:open-link",
+	browserNavigate: "browser:navigate",
+	browserAction: "browser:action",
+	browserLayout: "browser:layout",
+	browserClose: "browser:close",
+	servicesState: "services:state",
+	servicesStop: "services:stop",
 	memoryState: "memory:state",
 	memoryPath: "memory:path",
 	memoryOpen: "memory:open",
@@ -93,6 +109,9 @@ export const IpcChannel = {
 
 /** Event channels (main -> renderer). */
 export const IpcEvent = {
+	browser: "browser:event",
+	terminal: "terminal:event",
+	services: "services:event",
 	windowMaximizedChanged: "window:maximized-changed",
 	chat: "chat:event",
 	task: "task:event",
@@ -181,6 +200,24 @@ export interface ModelsApi {
 
 /** API exposed on `window.rally` by the preload script. */
 export interface RallyApi {
+	terminal: {
+		create(id: string, size: TerminalSize, taskId?: string): Promise<TerminalState>;
+		write(id: string, data: string): Promise<void>;
+		resize(id: string, size: TerminalSize): Promise<void>;
+		ack(id: string, seq: number): Promise<void>;
+		close(id: string): Promise<void>;
+		openLink(url: string): Promise<void>;
+		onEvent(listener: (event: TerminalEvent) => void): () => void;
+	};
+	browser: {
+		create(id: string, url?: string): Promise<BrowserState>;
+		navigate(id: string, url: string): Promise<BrowserState>;
+		action(id: string, action: BrowserAction): Promise<BrowserState>;
+		layout(layout: BrowserLayout): Promise<void>;
+		close(id: string): Promise<void>;
+		onEvent(listener: (event: BrowserEvent) => void): () => void;
+	};
+	services: { getState(): Promise<ServicesState>; stop(id: string): Promise<ServicesState>; onChange(listener: (state: ServicesState) => void): () => void };
 	memory: { getState(): Promise<MemoryState>; setPath(path: string): Promise<MemoryState>; open(): Promise<void>; pickFile(): Promise<string | null> };
 	gates: { decide(id: string, decision: "allow" | "deny"): Promise<TaskBoard> };
 	mcp: {

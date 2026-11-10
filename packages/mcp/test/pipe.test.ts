@@ -130,6 +130,12 @@ describe("PipeTransport framing", () => {
 });
 
 describe("PipeTransport lifecycle", () => {
+	it("awaits asynchronous write backpressure and propagates sink failures", async () => {
+		const write = Promise.withResolvers<void>(); const exited = Promise.withResolvers<void>(); let sent = false;
+		const transport = new PipeTransport({ open: async () => ({ write: () => write.promise, closeStdin: () => exited.resolve(), close: () => exited.resolve(), exited: exited.promise }) });
+		await transport.start(); const pending = transport.send(ping(1)).then(() => { sent = true; }); await settle(); expect(sent).toBe(false);
+		write.reject(new Error("pipe write failed")); await expect(pending).rejects.toThrow("pipe write failed"); await transport.close();
+	});
 	it("writes each message as one line", async () => {
 		const program = await startFake();
 		await program.transport.send(ping(1));

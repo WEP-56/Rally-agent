@@ -11,7 +11,8 @@ export class AuditLog {
 		this.events = events;
 		mkdirSync(dirname(file), { recursive: true });
 	}
-	append(kind: "gate" | "external" | "approve" | "answer" | "cancel" | "memory", data: Record<string, unknown>): void {
+	append(kind: "gate" | "external" | "approve" | "answer" | "cancel" | "memory" | "stop", data: Record<string, unknown>): void {
+		this.events.assertWritable();
 		const entry = { ...data, ts: Date.now(), kind };
 		appendFileSync(this.file, `${JSON.stringify(entry)}\n`, "utf8");
 		this.events.append("audit_appended", entry);

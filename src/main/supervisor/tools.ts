@@ -19,7 +19,8 @@ export interface TaskToolHost {
 	tick(): void;
 	deliverSteer(taskId: string, text: string): InputDelivery;
 	deliverAnswer(taskId: string, text: string): InputDelivery;
-	abortWorker(taskId: string): void;
+	abortWorker(taskId: string): void | Promise<void>;
+	killJobs?(taskId: string): Promise<number>;
 	board(): TaskBoard;
 }
 
@@ -351,11 +352,11 @@ function cancelTool(host: TaskToolHost): ToolDefinition {
 				if (task.ended && task.ended.outcome !== "cancelled") return fail("TASK_ENDED: 任务已结束，不能更改为取消");
 				const quotes = freezeQuotes(host, params.quotes);
 				host.store.cancelRunning(params.taskId, "main", { actor: "main", basis: quotes.map((quote) => quote.messageId) });
-				host.abortWorker(params.taskId);
+				const [killedJobs] = await Promise.all([host.killJobs?.(params.taskId) ?? 0, host.abortWorker(params.taskId)]);
 				host.tick();
 				const affected = host.store.list().filter((item) => item.queue?.reason === "dependency_failed" && item.queue.holder === task.id)
 					.map((item) => ({ taskId: item.id, status: "dependency_failed" }));
-				return result(JSON.stringify({ taskId: params.taskId, outcome: "cancelled", affected, coverage: { jobs: "not_implemented" } }));
+				return result(JSON.stringify({ taskId: params.taskId, outcome: "cancelled", affected, killedJobs }));
 			} catch (error) {
 				return fail(messageOf(error));
 			}
@@ -442,18 +443,19 @@ export function createWorkerTools(host: WorkerToolHost): ToolDefinition[] {
 	const read: ToolDefinition = {
 		name: "task_read",
 		label: "读取任务",
-		description: "Read card/report/runs/files/timeline for your task (default) or direct upstream tasks, with offset/limit paging. Board and unrelated tasks are not visible. Files records observed file-tool access; shell effects and other gaps are explicit in coverage.",
+		description: "Read card/report/runs/files/timeline for your task (default) or direct upstream tasks, with offset/limit paging. The services view is only for your own task, including services from previous runs. Board and unrelated tasks are not visible. Files records observed access; shell effects and other gaps are explicit in coverage.",
 		parameters: TaskReadSchema,
 		async execute(_toolCallId: string, params: TaskReadParams) {
 			try {
 				if (params.view === "board") return fail("NOT_VISIBLE: worker 不能读取全局任务板");
 				const target = params.taskId ?? host.taskId;
+				if (params.view === "services" && target !== host.taskId) return fail("NOT_VISIBLE: 只能查看本任务服务");
 				if (target !== host.taskId && !host.dependsOn.includes(target)) {
 					return fail("NOT_VISIBLE: 该任务不在你的可见范围");
 				}
 				const task = host.store.get(target);
 				if (!task) return fail(`TASK_NOT_FOUND: ${target}`);
-				return result(JSON.stringify(readTask(host.store, task, params)));
+				return result(JSON.stringify(readTask(host.store, target === host.taskId ? task : { ...task, services: undefined }, params)));
 			} catch (error) {
 				return fail(messageOf(error));
 			}

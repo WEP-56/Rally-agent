@@ -6,6 +6,7 @@ import { ensureTool } from "../../utils/tools-manager.ts";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
 import { pathExists, resolveToCwd } from "./path-utils.ts";
 import { findRenderers } from "./renderers/find.ts";
+import type { SearchExecution } from "./search-process.ts";
 import { type TypeBoxAgentTool, wrapToolDefinition } from "./tool-definition-wrapper.ts";
 import { DEFAULT_MAX_BYTES, formatSize, type TruncationResult, truncateHead } from "./truncate.ts";
 
@@ -64,6 +65,7 @@ const defaultFindOperations: FindOperations = {
 export interface FindToolOptions {
 	/** Custom operations for find. Default: local filesystem plus fd */
 	operations?: FindOperations;
+	execution?: SearchExecution;
 }
 
 export function createFindToolDefinition(
@@ -101,6 +103,8 @@ export function createFindToolDefinition(
 				};
 				const onAbort = () => {
 					stopChild?.();
+					// Managed processes resolve only after their entire tree has stopped.
+					if (stopChild && options?.execution) return;
 					settle(() => reject(new Error("Operation aborted")));
 				};
 				signal?.addEventListener("abort", onAbort, { once: true });
@@ -172,7 +176,7 @@ export function createFindToolDefinition(
 						}
 
 						// Default implementation uses fd.
-						const fdPath = await ensureTool("fd");
+						const fdPath = await (options?.execution?.resolveTool ? options.execution.resolveTool("fd", signal) : ensureTool("fd"));
 						if (signal?.aborted) {
 							settle(() => reject(new Error("Operation aborted")));
 							return;
@@ -217,7 +221,8 @@ export function createFindToolDefinition(
 						}
 						args.push("--", effectivePattern, searchPath);
 
-						const child = spawn(fdPath, args, { stdio: ["ignore", "pipe", "pipe"] });
+						if (signal?.aborted) { settle(() => reject(new Error("Operation aborted"))); return; }
+						const child = options?.execution ? options.execution.spawn(fdPath, args) : spawn(fdPath, args, { stdio: ["ignore", "pipe", "pipe"] });
 						const rl = createInterface({ input: child.stdout });
 						let stderr = "";
 						// Results within the limit, stored only up to the first one past the byte cap:

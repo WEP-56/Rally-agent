@@ -38,7 +38,9 @@
   - [x] dispatch/reuse 返回真实排队原因，approve 返回状态，steer/answer 返回实际投递情况（含等待名额），cancel 返回受影响下游；report 返回 recorded/notifiedMain/taskEnded，支持 question=null 清除及终态清除。（离线回归）
   - [x] task_read report 返回实际未决内门。（内门专项与生产集成）
   - [x] file_delete 成功实删逐项记录 fs_delete；同调用多个路径均保留，changedFiles 与分页/重启恢复覆盖删除。（删除专项）
-  - [ ] 完整 files 网络/作业/服务访问痕迹、cancel.killedJobs 与完整投影；现有 coverage 明示缺口，shell 效果仍 unknown，旧访问历史与旧缓存用量不补录。
+  - [x] files 记录后台作业 ID，cancel 等待作业整树停止并返回实际 killedJobs。（4 项作业生产链路回归）
+  - [x] files 记录 service_start 返回的服务 ID，task_read services 返回本任务持久服务记录；worker 不读取其他任务服务详情。（服务生产回归与归属专项）
+  - [ ] 完整 files 网络访问痕迹与完整投影；现有 coverage 明示缺口，shell/作业/服务效果仍 unknown，旧访问历史与旧缓存用量不补录。
 - [ ] worker 资源加载及真实设置接线：
   - [x] worker 按 cwd 加载项目 AGENTS 与 skills 目录；skills 名称/描述/路径进入模型请求，正文由 read 按需加载；主会话不自动加载。（34 项离线集成回归）
   - [x] Skills 设置展示实际发现列表、加载诊断、目录导入及持久化启停；新建/续接 worker 读取最新配置。（35 项离线回归与应用构建；视觉待用户验收）
@@ -54,11 +56,13 @@
 - [x] scope 交叉警告覆盖排队后启动/续接/更新。（25 项定向回归）
 - [ ] 构建产物真正隔离或构建串行（仅注入环境变量不算实现）。
 - [x] worker 逐字上升卡片、选项回答、自动兜底与相同问题幂等；原话代答/选项直达遵守名额，旧问题失效、历史持久保留。（55 项生产离线集成＋7 项问题专项；视觉与真实模型行为待用户验收）
-- [ ] 调度额外名额、后台作业占位、卡死检测与重试。
+- [x] 后台作业与流式 worker 按任务去重占位，等待期间不催汇报；已占位任务可追加原话，完成空闲唤醒或忙时 steer。（4 项作业生产链路回归）
+- [x] 用户续接/回答/追加优先且最多借一个名额，系统唤醒与首次派发不借用；初始化/worker 连续 10 分钟无事件中止重试一次，再次超时 stalled/failed 并唤醒主 agent；后台作业豁免、前台输出刷新、服务不豁免。（调度 5 项、watchdog 11 项、快照 8 项及生产回归；第三方调用无法中止时的最终关闭边界仍另列）
 - [x] 中继持久队列、至少一次投递、relayId 幂等与失败恢复；报告源事件补入队、Pi 上下文消费确认、通知恢复不唤醒、发送失败重试。（60 项生产离线集成＋9 项中继专项；旧版缺载荷/确认的历史不追溯补发，完整事件恢复另列）
 - [ ] 完整工具投影、文件/域名/作业/服务访问痕迹、用量与费用、退出码/diff；已有基础工具时间线，shell 改动明确标 unknown。
-- [ ] 长命令自动转后台、job_output/job_kill、作业结束唤醒。
-- [ ] service_start/stop/status、服务列表/预览、用户停止服务直连与事件审计。
+- [x] 长命令自动转后台、job_output/job_kill、作业结束唤醒、终态/退出清理及重启中断恢复。（8 项作业专项＋4 项生产链路，真实模型与任务页体验待用户验收）
+- [x] service_start/stop/status、任务终态保留/续接重启/退出清理/崩溃恢复、真实服务列表、用户停止直连与事件审计。（7 项服务专项＋4 项生产链路＋4 项 IPC；列表视觉待用户验收）
+- [x] 服务预览迁移到每标签独立 WebContentsView、统一隔离 partition；真实导航/标题/加载/错误/普通新窗口链接、布局/遮挡/关闭资源和 IPC 归属校验。（11 项替身专项＋4 项 IPC 生命周期；实际 Electron 视觉/窗口验收另列）
 - [x] 受控 file_delete：默认 dry-run、完整清单内门、产出/新建文件例外、只读检查、批准后重验、链接不跟随、逐项删除与失败/未执行清单；确认卡展示未提交改动与 cwd 外目标。（19 项专项＋67 项生产集成；真实模型与视觉待用户验收）
 - [x] 主会话 git_inspect：动态 cwd、五种只读查询、branch 列表模式、参数允许清单、长输出日志和取消进程树；拒绝修改/输出文件/有歧义的路径分隔符。（26 项专项＋68 项生产集成；真实模型与视觉待用户验收）
 - [x] worker git 分档/内门/external 审计与访问投影：结构化 argv、远端配置/强推 refspec、批准后上下文复核、只读边界、仓库范围访问记录。（专项 66/66＋补充 push 子集 4/4，生产集成 71/71；真实模型与视觉待用户验收）
@@ -66,14 +70,26 @@
 - [x] 内门服务：挂起、原话引用校验、主模型判断动作/范围覆盖、上升确认及自动兜底、超时拒绝、取消/退出/恢复失效与独立审计；已接 MCP、file_delete、git 强制点。（真实模型对范围的判断及确认卡视觉待用户验收）
 - [ ] 完整审计动作/字段验收：gate/external、手动批准/代答/选项回答/取消已验证；问题 ID、原话依据及按钮归因已补齐，记忆 append/remove 审计已接；未来受控工具及完整字段验收仍待做。
 - [x] 简版 MEMORY.md、原话引用工具、每次模型调用动态重读、真实路径/打开编辑设置。（7 项专项＋生产集成增量；明确意图的语义判断由主模型执行，真实模型与视觉待用户验收）
-- [ ] 压缩后任务状态重注入、chat_search、会话与事件物理分段。
-- [ ] 事件快照、完整恢复流程、孤儿进程清理、优雅中止超时升级进程树终止。
-- [ ] WebContentsView 独立 partition；xterm.js + node-pty 用户终端。
+- [x] 每次主模型调用重建任务/问题/内门状态，压缩后与重启后仍有效；chat_search 检索完整主对话、返回可引用原话 ID。（73 项生产集成＋4 项检索＋2 项状态专项；真实模型行为待用户验收）
+- [x] 事件流按 UTF-8 字节轮转分段、全局连续 seq 与跨段恢复；短写失败回滚，损坏记录告警、缺段/重复序号拒绝。（8 项专项＋9 项中继＋73 项生产集成）
+- [x] 主会话物理分段：20 MiB 或本段新增 10 次压缩；保留最新摘要/近期上下文及 ID，前段只读保留，失败继续原段；自动压缩/启动轮转、中继与跨段引用恢复。（4 项专项＋75 项生产集成）
+- [x] TaskStore 快照：每 200 事件/30 秒/退出保存 snapshotSeq 与校验，只从已提交事件投影；缓存加尾部重放，坏/过期/异源快照回退。（7 项专项＋73 项生产集成）
+- [x] 状态目录跨进程独占、构造/启动失败释放及退出 IPC 收尾；会话与已受理请求全部结束、快照保存后解锁，关闭失败持锁至进程退出。（6 项锁专项＋3 项 IPC＋78 项生产集成，关闭补丁后相关子集 8/8）
+- [ ] 完整恢复流程、孤儿进程清理、优雅中止超时升级进程树终止。
+  - [x] 进程宿主先持久登记 PID/精确创建时间再启动命令；主/worker Git 全路径接线，启动恢复先于主会话/调度，取消 5 秒升级、关闭失败持锁，身份不符不杀。（进程 9 项、Git 67 项、只读 Git 26 项；Electron Node 模式构建文件与 ASAR 2 项）
+  - [x] worker shell 接入持久登记，作业事实/日志/完成输入恢复；强杀父进程后先清理孤儿，再中断原运行，重启不自动唤醒旧作业。（作业专项）
+  - [x] 服务进程登记、业务事件/快照/日志恢复，启动先清孤儿并标记 stopped/interrupted，不自动重启或唤醒。（服务专项及真实父进程强杀生产恢复）
+  - [x] MCP stdio 与 env/header 取值命令、主/worker grep/find 及搜索工具准备迁移到登记宿主；取消等待整树清理，启动中关闭不再派发命令，崩溃恢复先于主会话。（MCP 8 项、搜索 8 项、生产 78 项；Electron Node 模式构建文件与 ASAR 各 3 项）
+  - [x] MCP OAuth clientSecret 的异步取值命令托管，登录/刷新按需重新读取；取消/关闭等待命令树清理，10 秒超时；已发出的令牌刷新仍保存结果后关闭。（10 项本机 HTTP/真实命令专项，含生产 worker；原 OAuth/连接定向回归）
+  - [x] 应用退出及启动失败先启动独立守卫，60 秒收尾后按身份终止应用树；IPC 请求、原生视图/终端、Supervisor 并行收尾，状态锁不提前释放。（退出专项 10 项、主入口 1 项、IPC 5 项；Electron Node 模式构建/ASAR 各 1 项；实际窗口待用户验收）
+  - [ ] 其他配置命令（如 Pi 模型/鉴权路径）的托管；退出请求处理前已阻塞、守卫启动失败且主线程阻塞等剩余挂死边界；Windows 核验启动开销优化及其他系统验证。
+- [x] xterm.js + node-pty 用户终端：默认 PowerShell、默认工作区/任务 cwd、多标签保留、输入/resize/背压、用户专属 IPC、关闭进程树与主进程崩溃断连清理。（真实 ConPTY＋IPC 专项及 Electron Node 模式/ASAR 验证，视觉待用户验收）
+- [ ] 浏览器与终端实际 Electron 验收（服务/公网、键盘/粘贴/选区、浅深色/缩放、遮挡、焦点、退出）。
 - [ ] Windows 通知、长路径/编码实测、NSIS 安装包与工作区依赖打包验证、更新。
 - [ ] 将用户设计的根目录 `icon.png` 接入应用图标，生成所需 Windows 图标资源，用于快捷方式、任务栏、托盘和安装包，并验证实际显示。
 - [ ] 定时任务 worker
 - [ ] markdown 渲染
-- [ ] 浏览器控制集成、computer use集成
+- [ ] 浏览器控制集成、computer use集成（延后）
 
 ## 验证记录
 
@@ -229,3 +245,127 @@
 - 路径持久化、实际统计/预算、打开编辑和刷新接 IPC；取消模拟目录/向量库/自动整理/清空。新条目有成对边界，旧开始标记仅管理首段，无关手写段落保留；重复标记报错。记忆专用事件仅 ID/op，专用审计无正文、记录引用与哈希；普通工具历史仍保留参数。
 - rally-memory.test.ts 7/7，rally-supervisor.test.ts 首跑 71/72（新增测试等待条件过早），修正后新增用例单独 1/1，既有 71 项含新 worker 隔离断言已通过。静态渲染 5/5；完整构建及最终应用构建、双端类型检查通过；根 typecheck 仅两个已知模型测试文件错误。未真实 API/视觉验收/提交。
 - 预算为 6000 UTF-8 字节估算，超限截取开头并提示精简。写前重验不构成外部进程锁；真实模型语义、编辑器打开和视觉待用户验收。
+
+2026-11-10 永续对话状态与原话检索：
+
+- 开始前按用户要求提交当前基线 `978dc62`（95 文件，含根 icon.png）；后续增量未提交。
+- rally-state 每次请求从 TaskStore 重建全部未结束任务的 ID/标题/状态/目录/scope/引用/队列/运行与有界最近报告，逐字附未决问题和有效内门，标明等待主模型或用户；附最近 20 个结束任务与名额/审批模式/时间。快照不进入静态提示词或 Pi 历史；worker 不注入。任务清单无 20 条截断，已答/结束/过期门不列为待决。
+- chat_search 仅主会话可用，读取事件恢复的完整用户/助手对话，排除系统/中继/流式未完成消息。query 是大小写不敏感的字面匹配，before/after 是不含边界的 Unix 毫秒；按 ID 倒序，默认 20/最多 100，200 字预览；id 全文保留原始空白；aroundId 返回邻近窗口；next 游标配原过滤条件继续。游标固定消息上界，同毫秒不漏页，新消息不挤入旧页。仅用户 ID 能作为授权依据。
+- 单文件离线验证：rally-supervisor.test.ts 73/73，rally-chat-search.test.ts 4/4，rally-state.test.ts 2/2。生产覆盖压缩/重启后取旧原话并实际 memory_append 引用、工具循环状态改变、不落盘快照及 worker 隔离。完整构建、最终双端 tsc、diff --check 通过；根 typecheck 仍两个已知模型测试文件错误。无真实供应商或视觉验收。
+- 物理会话/事件轮转与快照恢复尚未实现；当前历史仍全量载入内存，检索不是持久搜索索引。总目标继续进行，不能据本批勾选分段/完整恢复。
+
+2026-11-10 事件流分段：
+
+- EventLog 默认 20 MiB 轮转 events-0001/0002…，按 UTF-8 字节计算；单个超大事件独占一段，不拆 JSON 记录。兼容未编号 events.jsonl 和原单文件，按编号加载全部历史；保留旧段，排除临时/备份文件，支持空末段重启。RallyPaths.eventsFile 明确为首段，读者使用 all/ofKind。
+- 写入先校验当前段长度，明确偏移同步写；失败截断回原长度，失败事实不发布、不消费 seq。Windows 的 append 模式不能可靠截断，已由故障测试发现并改为 r+；回滚失败使实例拒绝后续写入、要求恢复。独占创建下一段，不覆盖碰撞文件。
+- UTF-8/JSON 损坏记录保留并告警；兼容此前被换行隔开的 torn tail。严格校验事件信封与全局连续 seq，缺段/重复或乱序 seq 拒绝启动。只给当前末段补换行，旧段不改。启动通过系统消息显示跳过记录计数/位置。
+- 单文件离线：rally-event-log.test.ts 8/8（含真实部分写入＋注入失败、回滚失败），rally-relay.test.ts 9/9（恢复用例强制多段），rally-supervisor.test.ts 73/73（压缩/重启/历史搜索/原话记忆授权用例强制 512 字节轮转）。完整构建与最终应用构建、双端类型检查、diff --check 通过；根 typecheck 最终仅两项已知模型测试文件错误。
+- 未真实 API/视觉验收，未新增提交。未声称跨进程锁或断电 fsync 保证；事件仍全量载入内存。TaskStore snapshot、主会话物理轮转、进程恢复及其余 TODO 继续推进。
+
+2026-11-10 TaskStore 快照：
+
+- 新增 task-snapshot.ts，缓存每个任务的最新已提交快照、工具/消息的首次和最新版本（保序）及访问记录；复用 TaskStore replay 构建相同投影，随后仅重放 snapshotSeq 之后的事件。ID 计数从任务/问题历史恢复，访问记录写入到后续 task 快照之间的崩溃窗口仍补 changedFiles。
+- 每 200 事件在微任务边界、每 30 秒及 Supervisor 完成会话清理后保存；临时文件 fsync 后替换，保存失败保留事件权威来源并提示，可重试。快照不读取 live TaskStore，未落盘流式内容不进入快照。
+- version/snapshotSeq、事件前缀 SHA-256 链及文件载荷 checksum 不匹配时告警并完整重放。EventLog 在读取/追加时计算前缀；旧事件文件无需迁移。修复 TaskStore replay 对 event.data.task/access 的对象别名，运行时修改不再改写内存中的已提交事件。
+- 离线单文件：rally-snapshot.test.ts 7/7，rally-event-log.test.ts 8/8，rally-supervisor.test.ts 73/73；生产重启验证实际 loadedSeq > 0，保留跨事件分段、压缩历史原话查询及记忆授权链路。完整 build、双端 tsc、diff --check 通过；根 typecheck 最终仅两个已知模型测试文件错误。
+- 当前快照是 TaskStore 重放缓存，事件/主聊天/中继仍全历史内存加载；不删旧事件，不声称启动复杂度或内存已恒定。Pi 主会话物理分段、状态目录锁、完整进程恢复仍待推进；本批未提交、未真实 API/视觉验收。
+
+2026-11-10 主会话物理分段：
+
+- SessionManager.rotateCompactedSession 从最新压缩边界到当前 leaf 保留近期上下文，携带有效模型/思考设置及 custom metadata，保持原 entry ID；重连 parentId 后验证完整 SessionContext 相等。新段独立文件临时写入/fsync/rename 发布，失败不切换 manager、不改旧文件，可重试；header.parentSession 指向前段，segmentCompactionId 防同摘要重复轮转。
+- MainAgent 默认文件达 20 MiB 或本段新增 10 次压缩后轮转；启动、成功手动/自动压缩和回合收尾检查。尚无新的摘要则等待下一次压缩，不额外发起模型调用；20 MiB 是触发阈值而非文件硬上限。沿用会话对象保留待送中继，成功记录 segment_rotated；UI 历史、检索和原话引用继续由跨段 EventLog 保持。
+- 离线单文件：rally-session-segments 4/4，SessionManager file-operations 35/35、build-context 16/16，生产 Supervisor 75/75；追加轮转事实后相关子集 2/2。覆盖发布失败重试、空保留区间/连续分段、上下文编辑及 metadata、自动压缩期间待送通知、启动按大小分段、重启查旧原话并实际授权 memory_append。完整 build、最后事件补丁后的应用 build、双端 tsc、diff --check 通过；根 typecheck 最终仅两个已知模型测试文件错误。
+- 本批无真实 API/视觉验收、无新提交。事件与聊天仍全量载入内存；状态目录跨进程锁、完整恢复、孤儿进程清理与优雅中止超时仍待实现。
+
+2026-11-10 状态目录独占与生命周期：
+
+- StateDirectoryLock 使用运行时内置 node:sqlite，在 state/writer-lock.sqlite 保持 BEGIN EXCLUSIVE；数据库不存业务数据，事件/快照仍按原文件格式。按真实目录解析，junction 别名互斥；不靠心跳时间判断存活，不删除/替换锁文件，不增依赖。进程退出由 OS 释放，坏锁文件保留并拒绝启动。
+- Supervisor 在 EventLog 读取/修尾、任务恢复及内门失效之前拿锁；构造中断清除半建 snapshot timer/订阅并解锁，异步启动异常完成 dispose。正常退出等主/worker 会话及已受理 IPC 请求全部收尾，再保存快照、关闭事件写入和释放锁；event/audit/snapshot 旧引用不能继续写盘。会话关闭错误向 Supervisor 汇总，清理失败保留锁到进程退出。
+- IPC 注册返回可重复调用的 stop：移除 handler/listener、拒绝新请求并等待已受理请求。Electron 同时启动会话关闭与请求收尾，避免等待停止/压缩请求造成关闭互等；启动异常明确提示并退出，smoke 路径也遵守状态锁。两条旧回归里同时保留可写 Supervisor 的伪重启改为真实关闭后重建。
+- 离线：锁专项 6/6（真实子进程四方竞争、阻塞事件循环、强制终止后立即恢复、junction/独立目录、损坏文件、关闭失败持锁、项目自带 Electron 以 Node 模式互斥）；IPC 专项 3/3（已受理设置写入、停止请求与会话关闭、失败注册/请求清理）；生产 Supervisor 78/78，关闭错误补丁后相关子集 8/8；快照 7/7、事件 8/8。完整 build、最终应用 build、双端 tsc、diff --check 通过；根 typecheck 仅两个已知模型测试文件错误。
+- 子进程测试不继承 API 密钥，仅用隔离目录；未真实 API/浏览器/截图/Electron UI 验收。实际窗口退出和启动错误框待用户验收。本批未提交。后台作业/服务、持久 PID/创建时间登记、孤儿清理与优雅关闭超时仍未实现；不能据状态锁标记完整恢复完成。
+
+2026-11-10 进程登记与 Git 生命周期增量：
+
+- 新增 ProcessRegistry/ProcessIdentity/独立 process-host 构建入口。先登记独立隐藏宿主的 PID 与精确创建时间，fsync/rename 成功后再下发命令；环境经 IPC 传递，不进入 processes.json。主 git_inspect、worker git 及其仓库预检全部使用同一管理器。
+- Windows 核对使用 UTC ticks，核对和 taskkill 间保持进程句柄；PID 不符/消失只记跳过，包含复用为当前 Rally 的 PID。取消、退出及恢复先温和终止，5 秒后升级强杀；正常完成立即回收宿主树。恢复在主会话/任务中断恢复/调度之前执行。taskkill 非零、事实写失败或登记写失败均保留恢复证据；清理失败禁止新命令且退出持锁。
+- 隐藏宿主在 Windows 也 detached，防止 Node 父进程 Job 在崩溃时只杀根、遗留原生后代。已有命令的宿主断联后保活并排空管道，供下次按身份清理；未下发命令则自行退出。独立只读 Git 探测并行且 allSettled 收齐，审批前后仍重新核对全部原有指纹字段；Windows 身份检查仍有启动开销。
+- 单文件验证：在 packages/coding-agent 下分别运行 node ../../node_modules/vitest/dist/cli.js --run test/suite/rally-processes.test.ts（9/9）、rally-git.test.ts（67/67）、rally-git-inspect.test.ts（26/26）、rally-supervisor.test.ts（最终 78/78）。生产断言检查主/worker 的 process_stopped 事实，含批准前后核对与错误退出码；Git 等待窗口适配真实进程核验耗时。
+- 进程专项含真实父子树、UTF-8 大输出、登记先于执行、预取消/不存在可执行程序、写盘失败禁止执行、PID 身份不符不杀、坏文件保留、退出取消、事实写失败后的恢复、父进程强杀后在 Supervisor 主会话启动前清理。独立夹具环境不继承 API 密钥。
+- 完整 npm run build 与最后应用构建、node/web 独立 tsc、git diff --check 通过；最终 npm run typecheck 只有已知两个模型测试文件错误。另用项目 Electron 的 Node 模式验证构建宿主及 ASAR 内宿主执行/崩溃恢复，2/2 通过，脚本保留在本机 .artifacts/process-lifecycle/check-electron.mjs。
+- 无真实 API、无浏览器/Electron 视觉验收、无新依赖或新提交。NSIS 安装包/实际窗口退出待用户验证；Linux 分支尚未实测，macOS 明确不支持精确身份查询。shell/MCP/grep/find 尚未迁移，主动脱离可发现父子链的进程不保证回收；作业/服务、完整孤儿覆盖及挂死会话退出不因此完成，继续按 Q14 推进。
+
+2026-11-10 后台作业增量：
+
+- worker 的 bash/powershell 改用 JobManager 与登记宿主。默认前台 30 秒，全局 agent/settings.json 的 jobs.foregroundSeconds 可设正数至 3600（无设置 UI）；超时只返回后台 ID/当前输出并解除工具取消归属。显式 timeout 到期立即强杀，普通 job_kill/终态/退出按 5 秒升级。保留 Pi shell 选择与 binPath、stdin 传输、cwd/RALLY 环境及 UTF-8；拒绝开头的等待轮询命令。
+- 全量 UTF-8 输出独立写 state/jobs/J-n.log，内存/工具返回有界，结束附尾部最多 200 行。job_output 立即读状态，tail 默认 200、范围 1–2000；job_kill 等待真实进程树停止，均只允许本任务。失败启动、退出码、耗时与日志路径如实返回。
+- Task.jobs 保存业务事实，ProcessRegistry 仅保存可验证进程身份。job_started/backgrounded/exited 事件先提交再发布；job_done 按 jobId 去重。完成空闲唤醒/忙时 steer，不另建任务或运行；同任务的多个作业与模型只占一个名额，等待作业不触发忘记汇报提醒。files 增加 job 访问，cancel.killedJobs 返回实际数量。
+- 终态和退出清理不唤醒。启动先清理登记进程，未结束作业记 killed/interrupted，再恢复任务中断；已结束作业的缺失完成输入可补记，重复恢复不重新通知中断作业。快照保留作业元数据，输出不进入快照；日志文件参与 ID 计数，避免登记前崩溃后撞号。事实写入失败不会污染 live 作业/输入；清理失败继续保留恢复记录与状态锁。
+- 定向离线：rally-jobs.test.ts 8/8、rally-job-supervisor.test.ts 4/4、rally-supervisor.test.ts 78/78。前者覆盖真实进程、超时/取消/归属、输出与快照、写入失败及父进程强杀后的生产恢复；后者覆盖名额、原话追加、忙时 steer、终态不唤醒与实际 killedJobs=2。原进程专项 9 项及新增 stdin 1 项分别通过。完整 build、最终应用 build 与独立 node/web tsc 通过；根 npm run typecheck 最终仅两个已知模型测试文件错误。
+- 无真实 API、无视觉验收、无新依赖、无新提交。用户待验收：真实模型按提示等待作业且不轮询、长作业完成继续处理、取消/任务页体验与实际应用退出。服务管理、额外名额、卡死检测、完整访问投影和其他进程迁移继续保留，下一项 service_start/stop/status。
+
+2026-11-10 服务生命周期与列表增量：
+
+- service_start/stop/status 接入生产 worker，服务以 S-n 独立登记并使用同一进程宿主身份核验。start 支持 cwd/env/port/readyPattern，默认 PowerShell/Bash，最多等 30 秒；显式端口启动前检查占用，缺省从输出识别 localhost/127.0.0.1 的端口及 http/https。就绪依据为本机端口监听或输出匹配，不保证端口与进程原子归属；超时返回真实 running/ready=false。PID 是进程树宿主，输出有界并附完整日志路径。
+- readyPattern 语法先检查、执行置于独立 Worker thread；最多匹配最近 8192 字符，每次 1 秒截止，复杂正则超时终止匹配线程并返回 error，不阻塞主事件循环、不擅自停服务。服务停止/就绪/退出均关闭线程。env 不进入持久服务元数据，日志与普通工具参数仍按实际记录。
+- 服务元数据通过 service_started/updated/exited/stopped 先落事件再发布，随 Task.services 快照恢复；日志文件参与 ID 计数避免孤儿日志撞号。任务 ready/failed/cancelled 不停止已启动服务，不占名额或唤醒；取消启动前阻止执行、启动后取消 worker 只结束就绪等待。续接可查上次服务并显式 stop/start。退出/恢复按进程树核验清理，重启标 stopped/interrupted，保留历史输出。
+- shared/ipc 新增服务列表/停止/推送，用户直接停止先写审计与 stop 事件，再等终止确认，不改变任务。主对话显示完成通知，每轮动态状态含运行与最近结束服务。task_read services 分页、worker 只限本任务，上游 card 过滤服务详情；files 增加服务 ID。
+- 工位与浏览器起始页使用真实 LocalServices，保留原型卡片/token，展示任务/端口/状态及停止/预览按钮；删除假服务和假本地页面。预览暂沿现有 iframe 载入真实 URL，加载指示读 onLoad；WebContentsView 与完整导航/隔离另列未完成。
+- 离线单文件：rally-services 7/7、rally-service-supervisor 4/4、rally-ipc-lifecycle 4/4、rally-processes 10/10、rally-job-supervisor 4/4、rally-supervisor 78/78。最后归属/端口检测补丁后服务相关 2/2。覆盖真实 HTTP、输出、归属、审计/事实失败保护、快照与编号、正则阻塞隔离、取消等待、完成释放名额、续接替换、父进程强杀恢复及 IPC 用户停止。Electron Node 模式匹配线程与构建宿主服务生命周期 2/2，证据 .artifacts/service-lifecycle/check-electron.mjs 不入库。
+- 完整 npm run build、最终应用构建、node/web tsc 及 diff --check 通过；根 typecheck 仅两个已知模型测试错误。未调用真实 API、未视觉验收、无新依赖/提交。用户待验收真实模型使用服务工具、列表/停止/预览/实际窗口退出；下一步按 Q20 落实 WebContentsView，不能把临时 iframe 当最终产品。
+- 最后补验输出先匹配就绪、端口稍后出现的服务：URL 继续更新，真实 HTTP 用例 1/1 通过。依 05 分册移除模拟书签/星标，最终应用构建和双端检查再次通过；根检查仍仅已知错误。
+
+2026-11-10 原生浏览器增量（Q20）：
+
+- BrowserManager 为每个右栏标签建立 WebContentsView；共用独立持久 partition，无 preload/Node/Rally IPC。新增浏览器声明通道，校验宿主主 frame 和窗口归属，远端页无法调用这些通道。宿主移除 iframe，CSP 禁用 frame/object。
+- Chromium 提供真实导航历史、页面 URL/标题/加载状态；起始页保留真实服务列表，HTTP/HTTPS 新窗口链接转右栏标签，支持外部打开、停止和错误重试。修正旧导航失败覆盖新页、失败后重试旧成功页的问题。下载/未开放权限/新窗口 POST 给出系统浏览器提示，不承诺复杂 popup/OAuth 兼容。
+- 渲染层同步可见区域、滚动、父层裁剪、缩放；菜单/面板/抽屉/拖动/设置/右栏收起隐藏原生视图，切换保留页面。窗口重载/崩溃/关闭、标签关闭与退出显式关闭 child webContents 并等待销毁；页面自行关闭会同步删除右栏标签。
+- 参考适配 electron-browser-shell 的 tabs.js 生命周期，2026-11-10 核实根 MIT，保留版权声明并加入打包清单；未集成其不同许可证的扩展包。05 分册记录来源、隔离、功能边界和官方 API 依据；无新依赖/lockfile 改动。
+- 单文件 rally-browser 11/11（Electron 替身、harness，无真实网络/UI），覆盖隔离、归属、导航、布局/缩放、弹窗/权限/下载、过期回调、销毁等待和实际 registerIpc 接线；已有 rally-ipc-lifecycle 4/4。最终 node/web tsc 和应用 electron-vite build 通过；根 npm run typecheck 仍仅两个已知模型测试文件错误。未改 package 生产代码，本批未重复完整 package 构建。
+- 实际 Electron 服务/公网预览、焦点/快捷键、浅深色/缩放/遮挡/关闭仍由用户验收；没有启动 UI、没有真实供应商调用、没有新提交。用户终端仍待实现，Q20 总体未验收；其余 TODO 继续推进。
+
+2026-11-10 用户终端增量（Q20）：
+
+- TerminalView 删除模拟文件系统/命令输出，换成 xterm.js 与 fit/web-links/search/unicode11。默认优先 PowerShell 7、否则 Windows PowerShell；默认工作区/任务目录由主进程取值，任务页新增打开终端入口。搜索、Ctrl+Shift+C/V、Ctrl+C、HTTP/HTTPS 链接外部打开及尺寸适配接实际终端。主面板在设置页隐藏而非卸载，保留会话；原型 bg-term/fg/accent 和间距沿用。
+- 独立隐藏 terminal-host 加载 node-pty，先核验宿主 PID/创建时间再启动 shell，关闭确认整树回收，失败留标签可重试。shell 退出后宿主保留根便于清理后代；UI 重载/崩溃/退出清理，应用强杀断连由宿主自清。启动取消包括命令已发、native 尚未 ready 的等待；无持久终端历史/自动恢复。
+- 用户终端仅所属窗口主 frame IPC 可读写；不提供给 agent、不写 TaskStore/业务审计/聊天。宿主高低水位与 xterm 回调序号确认控制背压，16 标签/5000 回滚行，输入分片不拆 emoji 代理对。实际 UI 由用户验收。
+- 新直接依赖全部精确锁定：node-pty 1.1.0，xterm 6.0.0，fit 0.11.0，web-links 0.12.0，search 0.16.0，unicode11 0.9.0；安装使用 --ignore-scripts。原包 MIT 与 Tabby 会话/官方流控参考来源已核实并保留说明；node-pty 整包原生辅助文件 asarUnpack，无新增 rebuild。
+- 最终单文件 terminal-session 8/8，terminal-ipc 6/6，browser 11/11，既有 IPC lifecycle 4/4。真实 ConPTY 验证中文/emoji、真实 PowerShell cwd、resize/Ctrl+C、512KB 输出背压、退出码、启动取消/失败、关闭整树、父进程强杀清理；Electron Node 模式验证构建和 ASAR 宿主加载预编译模块及中文往返，2/2，最终补丁后再验证 2/2。
+- 完整 npm run build、最后应用 build、node/web tsc、diff --check 通过；根 typecheck 仍仅两个已知模型测试文件错误。无真实 API/视觉自动化/新提交。用户待验收交互式 shell、选区/粘贴/IME、快捷键、浅深色/缩放/焦点、标签保留/退出，以及实际 NSIS 安装。旧版 Windows 回退及主动脱离父子链/权限改变的进程不保证覆盖。下一项继续额外名额/卡死检测或完整进程管理。
+
+2026-11-10 调度优先级与卡死恢复增量：
+
+- Scheduler 统一接纳新运行和空闲 worker 输入，用户回答/追加/续接优先于系统输入和首次派发；同类按待送输入时间、首次按批准时间排序。全局最多 limit+1，额外一个仅用户续接可借，首次运行前追加不借。流式、作业与异步启动预留按任务去重；预留按具体 run 释放，已结束初始化不永久占名额，旧 Promise 晚到不误删新预留。
+- WorkerManager 每秒以单调时钟检查无活动时长，所有 Pi 会话事件及前台 shell 输出刷新；仅已后台化的运行作业豁免，结束后给满新 10 分钟。即使前台窗口调至一小时，无输出命令仍可被中止；常驻服务不豁免 worker。空闲/待批准不检测，异步资源/会话初始化也纳入检测。
+- 第一次连续 10 分钟无事件先记录 run_stall_retry 和 stallRetries=1，等待当前轮 abort 完成后向同一会话/运行/原模型发送 03 §5.9 原文及未送输入。计数随事件/快照保存，每 run 一次，显式续接的新 run 重置。第二次超时 system 失败报告、endReason=stalled、任务 failed，沿持久中继唤醒主 agent；合并窗口维持原 2 秒。
+- 中止或初始化没有返回时不创建重叠调用，另等 10 分钟判失败并释放名额；取消/退出阻止重试，晚到结果不能复活任务。无法关闭的第三方调用仍可能阻塞最终 dispose；不据任务终态宣称完整进程/关闭恢复完成，相关 TODO 保留。
+- 单文件定向验证：rally-scheduler 5/5、rally-watchdog 11/11、rally-snapshot 8/8、rally-jobs 8/8、rally-job-supervisor 4/4、rally-service-supervisor 4/4、rally-supervisor 78/78。调度最后修正后生产子集 10/10；前台输出最后修正后 watchdog、jobs、job-supervisor 已按上述数量复跑。使用 harness/faux、可控时钟及真实本地进程，无实际 10 分钟等待、无真实供应商调用。
+- 完整 npm run build、最后应用 build、node/web tsc 与 diff --check 通过；最终 npm run typecheck 仅 packages/ai/test 中已知的两个模型数据测试文件报错。无新依赖/新提交/视觉自动化。用户待验收真实模型无活动后继续工作的行为、失败转述和任务页体验；MCP/grep/find 完整进程管理、所有关闭挂死边界及其他清单项继续推进。
+
+2026-11-10 MCP 与搜索进程托管增量：
+
+- MCP stdio 改由 ProcessRegistry.open + PipeTransport 接线，宿主先登记 PID/创建时间才下发命令；双向 stdin 采用 native pipe 背压，输出保留 UTF-8，Windows .cmd 用 cross-spawn 保持参数边界。关闭等待启动中/已运行树清理，登记后的取消不再启动命令；普通 EOF、挂起初始化/调用、忽略 EOF 的后代及崩溃恢复均覆盖。
+- McpTransportFactory 支持异步和 shutdown signal，工厂晚返回先关闭 transport；env/header 的 !command 改为托管 shell 执行，10 秒截止、1 MiB 输出限制，结果不写进程登记。Windows 无 Bash 时回退 cmd。HTTP 沿用原 authProvider；OAuth clientSecret 等剩余配置命令仍未迁移，完整 HTTP/OAuth 验证不据本批完成。
+- 主/worker grep/find 注入可选 SearchExecution，原参数、解析、忽略规则、glob/context/截断继续由 Pi 处理。取消/结果上限等待整树停止。文件查找避免主进程直接执行版本探测；缺失二进制的探测/下载/解压由新构建入口 search-tool-host 置于登记树内。离线测试 PI_OFFLINE=1，未执行真实下载。
+- 最终按单文件验证：rally-mcp-processes 8/8、rally-search-processes 8/8、packages/mcp 的 pipe 16/16、agent-session-mcp 52/52、rally-supervisor 78/78、rally-processes 10/10、rally-job-supervisor 4/4、rally-service-supervisor 4/4。tools.test.ts 仅 grep/find 子集 23/23（88 跳过）；原安全测试的 Windows 绝对路径被当正则，增加 literal=true 保留其参数注入验证目的。
+- 生产完整回归初次出现 10 秒清理钩子超时及下一例临时目录占用；改为 30 秒并隔离每例目录，allSettled 收齐关闭错误、失败保留证据，随后单文件独立完整 78/78。遗留测试宿主已核验 PID/创建时间及原父进程状态后清理，不隐去该失败记录。
+- Electron Node 模式构建宿主与 ASAR 各验证 MCP 崩溃树恢复、.cmd 参数及中文通信、离线搜索 helper，共 6/6；证据 .artifacts/mcp-search-lifecycle/check-electron.mjs 为本机忽略文件。完整 npm run build、node/web 独立 tsc 通过；根 npm run typecheck 仅两个已知模型测试文件错误。
+- 新直接精确依赖 @rally/mcp 1.5.0、cross-spawn 7.0.6、@types/cross-spawn 6.0.6，使用 npm install --ignore-scripts，未跑生命周期脚本。无新提交、真实供应商调用或视觉验收。真实外部 MCP、在线下载、实际窗口退出/安装包、非 Windows 平台及脱离父子链的进程仍未验证；完整恢复和所有关闭挂死边界保留 TODO。
+
+2026-11-10 MCP OAuth 配置命令增量：
+
+- 新增可注入 McpConfigValueResolver，Rally 的生产 worker 将 OAuth clientSecret 与 env/header 接到同一受管命令解析。密钥在登录/刷新需要时异步读取，每次重新取值；10 秒超时、1 MiB 输出限制，取消等待整树退出，取值结果不写 processes.json。
+- oauthSettings 返回 Promise 并跟踪未完成的解析，合并单次取消与连接关闭信号；扩展登录把读取包含在 track 中，CLI 截止也包含设置读取。关闭发生于读取阶段时不开回调/浏览器、不发 token 请求；已经发出的刷新继续等待并保存轮换结果，保留 Pi 的凭据持久规则。
+- 新专项 rally-mcp-oauth 10/10：本机 HTTP OAuth 服务、真实命令/子孙树、harness/faux；覆盖按需登录、密钥文件更新后刷新、取值/刷新过程中关闭、真实 10 秒超时、扩展登录关闭、单次取消后再次解析、已发刷新迟到令牌保存、生产 worker 成功与取消/进程归属。原 agent-session-mcp-oauth 10/10、mcp-oauth-refresh 16/16、mcp-extension 28/28（1 项原有 Windows 跳过）、packages/mcp oauth 14/14、agent-session-mcp 52/52、rally-mcp-processes 8/8、生产 MCP 子集 11/11（67 跳过）。均按单文件运行，无全量 Vitest。
+- 初次原 OAuth/配置回归因旧测试写死 .pi、Pi 名称与默认 Pi 元数据文档失败。改用 CONFIG_DIR_NAME/APP_NAME；显式 CIMD 用例保留，新增自动注册按构建身份验证。没有改变 Rally 不是官方 Pi 的产品行为。
+- 完整 build、node/web 独立类型检查、diff --check 通过；最终根 typecheck 仍仅两个已知模型数据测试文件错误。无新依赖/新提交、真实供应商请求、外部登录、浏览器或 Electron UI。Rally 设置页 OAuth 登录与连接状态、其他模型/鉴权取值命令、任意第三方会话挂死关闭等仍是待办；本机测试不等同实际外部服务兼容验收。
+- 最后补验持续超量配置输出：触发 1 MiB 上限后丢弃后续块，避免等待终止时内存继续增长；OAuth 专项最终 10/10，最后应用构建及双端类型检查通过，根检查仍仅已知错误。
+
+2026-11-10 应用退出守卫与新会话交接：
+
+- ApplicationShutdown 统一退出与启动失败；先确认独立 shutdown-guard-host 就绪，再启动收尾。IPC 停止受理后并行等待已有请求、原生浏览器/终端及 Supervisor 清理，避免请求挂起阻止其他资源回收。重复退出只执行一次；启动失败通知异常仍执行清理并汇总错误。
+- 独立守卫默认 60 秒后核对主进程 PID/创建时间并强杀应用树；正常完成取消守卫，终止已开始则不再取消。主进程保留 75 秒本地异步兜底。状态锁不提前释放，正常完成保存快照，错误持锁到退出；重启按已有登记及事件恢复 interrupted。
+- 此上限只用于应用退出，不改变 Q12 单任务无上限。正常关闭保留已发 OAuth 刷新的落盘等待；强制退出可能打断尚未完成的凭据/其他写入，不承诺全保存。守卫未就绪、退出请求处理前已阻塞、权限变化/脱离父子链、非 Windows 平台等边界继续留待办。
+- 最终单文件：rally-application-shutdown 10/10、rally-main-shutdown 1/1、rally-ipc-lifecycle 5/5、rally-terminal-ipc 6/6、rally-browser 11/11；生产 Supervisor 退出/启动/锁子集 14/14（64 跳过）。真实隔离进程覆盖 Promise 挂起、同步死循环、启动失败、正常退出、全树回收、持锁及生产恢复；主入口使用 Electron 替身，无 UI 和供应商请求。
+- 最终构建及 ASAR 的 Electron Node 模式验证各 1 项通过，证据 `.artifacts/shutdown-lifecycle/check-electron.mjs` 不入库。应用 build、node/web tsc 通过；根 typecheck 仅已知两个模型测试文件错误。新主入口测试引出的 NodeNext 相对导入扩展名错误已修复并复验。未改 packages 生产代码，本批没有重复完整 packages 构建。
+- 用户要求更新交接后转新会话继续，随后要求提交；本次将前置提交 978dc62 之后的累积增量与文档一起提交。下一会话以 HANDOFF 顶部为入口，建议先处理其他模型/鉴权配置命令托管；实际窗口退出、错误框、安装包和视觉验收继续由用户负责。

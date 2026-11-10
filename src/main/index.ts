@@ -1,11 +1,13 @@
 // Electron main entry: single-instance lock, Rally paths, main window. `RALLY_SMOKE=1` runs the M0 smoke check and exits.
 
 import { join } from "node:path";
-import { app, BrowserWindow, nativeTheme, shell } from "electron";
-import { broadcastChat, broadcastTask, broadcastWorkspace, forwardWindowState, registerIpc } from "./ipc";
-import { ensureRallyDirs, resolveRallyPaths } from "./paths";
-import { runSmoke } from "./smoke";
-import { Supervisor } from "./supervisor";
+import { app, BrowserWindow, dialog, nativeTheme, shell } from "electron";
+import { broadcastChat, broadcastTask, broadcastWorkspace, broadcastServices, forwardWindowState, registerIpc } from "./ipc.ts";
+import { ensureRallyDirs, resolveRallyPaths } from "./paths.ts";
+import { runSmoke } from "./smoke.ts";
+import { Supervisor } from "./supervisor/index.ts";
+import { StateDirectoryLock } from "./supervisor/state-lock.ts";
+import { ApplicationShutdown } from "./application-shutdown.ts";
 
 const paths = resolveRallyPaths();
 
@@ -24,33 +26,55 @@ if (process.env.RALLY_SMOKE === "1") {
 		win.focus();
 	});
 	app.on("window-all-closed", () => app.quit());
-	void app.whenReady().then(() => {
-		ensureRallyDirs(paths);
-		const supervisor = new Supervisor(paths, { emitChat: broadcastChat, emitTask: broadcastTask, emitWorkspace: broadcastWorkspace });
-		registerIpc(paths, supervisor);
-		let shutdownStarted = false;
-		let shutdownFinished = false;
-		app.on("before-quit", (event) => {
-			if (shutdownFinished) return;
-			event.preventDefault();
-			if (shutdownStarted) return;
-			shutdownStarted = true;
-			void supervisor.dispose().catch((error: unknown) => console.error("Rally shutdown failed", error)).finally(() => {
-				shutdownFinished = true;
-				app.quit();
-			});
-		});
-		void supervisor.start();
-		createMainWindow();
+	void app.whenReady().then(startApplication);
+}
+
+async function startApplication(): Promise<void> {
+	let supervisor: Supervisor | undefined;
+	let stopIpc: (() => Promise<void>) | undefined;
+	let startupError: unknown;
+	const shutdown = new ApplicationShutdown({
+		close: async () => {
+			// Draining requests can depend on session cancellation, so start both together.
+			const pending = stopIpc?.();
+			if (supervisor) await supervisor.dispose(pending); else await pending;
+		},
+		exit: code => {
+			if (startupError) dialog.showErrorBox("Rally 无法启动", startupError instanceof Error ? startupError.message : String(startupError));
+			app.exit(code);
+		},
+		report: error => console.error("Rally shutdown failed", error),
 	});
+	app.on("before-quit", event => { event.preventDefault(); void shutdown.run(); });
+	try {
+		// Supervisor locks the state directory before any recovery or state writes.
+		supervisor = new Supervisor(paths, { emitChat: broadcastChat, emitTask: broadcastTask, emitWorkspace: broadcastWorkspace, emitServices: broadcastServices,
+			onStartupFailure: async error => { startupError = error; await shutdown.prepare(); void shutdown.run(true); },
+		});
+		ensureRallyDirs(paths);
+		stopIpc = registerIpc(paths, supervisor);
+		await supervisor.start();
+		if (!shutdown.started) createMainWindow();
+	} catch (error) {
+		startupError = error;
+		await shutdown.run(true);
+	}
 }
 
 async function runSmokeAndExit(): Promise<void> {
 	await app.whenReady();
-	ensureRallyDirs(paths);
-	const result = await runSmoke(paths);
-	process.stdout.write(`RALLY_SMOKE ${JSON.stringify(result, null, 2)}\n`);
-	app.exit(result.ok ? 0 : 1);
+	let lock: StateDirectoryLock | undefined;
+	let ok = false;
+	try {
+		lock = new StateDirectoryLock(paths.stateDir);
+		ensureRallyDirs(paths);
+		const result = await runSmoke(paths);
+		process.stdout.write(`RALLY_SMOKE ${JSON.stringify(result, null, 2)}\n`);
+		ok = result.ok;
+	} catch (error) {
+		process.stdout.write(`RALLY_SMOKE ${JSON.stringify({ ok: false, error: String(error) })}\n`);
+	} finally { lock?.release(); }
+	app.exit(ok ? 0 : 1);
 }
 
 function createMainWindow(): void {

@@ -59,6 +59,7 @@ function Launcher({ onPick, tasks, compact }: { onPick: (k: NewKind) => void; ta
 }
 
 export function RightPanel({
+	visible = true,
   tabs,
   active,
   setActive,
@@ -68,6 +69,7 @@ export function RightPanel({
   onMention,
   renameTab,
 }: {
+	visible?: boolean;
   tabs: Tab[];
   active: string | null;
   setActive: (id: string) => void;
@@ -156,8 +158,8 @@ export function RightPanel({
             <div key={t.id} className={cn("absolute inset-0", t.id !== active && "invisible")}>
               {t.kind === "workstation" && <Workstation tasks={tasks} />}
               {t.kind === "task" && task && <TaskView task={task} onMention={onMention} />}
-              {t.kind === "browser" && <BrowserView initialUrl={t.url} onTitle={(s) => renameTab(t.id, s)} />}
-              {t.kind === "terminal" && <TerminalView tasks={tasks} />}
+              {t.kind === "browser" && <BrowserView id={t.id} visible={visible && t.id === active && !drawer} initialUrl={t.url} onTitle={(s) => renameTab(t.id, s)} />}
+              {t.kind === "terminal" && <TerminalView id={t.id} taskId={t.taskId} visible={visible && t.id === active && !drawer} />}
             </div>
           );
         })}

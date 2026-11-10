@@ -21,7 +21,7 @@ function json(response: ServerResponse, status: number, body: unknown, headers: 
  * accept requests and never answer them, like an unresponsive server.
  */
 export async function startOAuthMcpServer(
-	options: { iss?: string; issParameter?: boolean; cimd?: boolean; redirectPath?: string } = {},
+	options: { iss?: string; issParameter?: boolean; cimd?: boolean; redirectPath?: string; clientSecret?: () => string } = {},
 ) {
 	const log: string[] = [];
 	const registrations: Record<string, unknown>[] = [];
@@ -29,7 +29,7 @@ export async function startOAuthMcpServer(
 	const tokenRequests: URLSearchParams[] = [];
 	const deletes: (string | undefined)[] = [];
 	const stall = new Set<string>();
-	const stalled: { path: string; request: IncomingMessage }[] = [];
+	const stalled: { path: string; request: IncomingMessage; response: ServerResponse }[] = [];
 	const validTokens = new Set<string>();
 	const refreshTokens = new Set<string>();
 	const challenges = new Map<string, string>();
@@ -86,7 +86,7 @@ export async function startOAuthMcpServer(
 	const handle = async (request: IncomingMessage, response: ServerResponse) => {
 		const url = new URL(request.url ?? "/", origin);
 		if (stall.has(url.pathname)) {
-			stalled.push({ path: url.pathname, request });
+			stalled.push({ path: url.pathname, request, response });
 			return;
 		}
 		switch (url.pathname) {
@@ -102,7 +102,7 @@ export async function startOAuthMcpServer(
 					registration_endpoint: `${origin}/register`,
 					response_types_supported: ["code"],
 					code_challenge_methods_supported: ["S256"],
-					token_endpoint_auth_methods_supported: ["none"],
+					token_endpoint_auth_methods_supported: [options.clientSecret ? "client_secret_post" : "none"],
 					...(options.cimd ? { client_id_metadata_document_supported: true } : {}),
 					...(options.issParameter ? { authorization_response_iss_parameter_supported: true } : {}),
 				});
@@ -128,6 +128,7 @@ export async function startOAuthMcpServer(
 			case "/token": {
 				const params = new URLSearchParams(await readBody(request));
 				tokenRequests.push(params);
+				if (options.clientSecret && params.get("client_secret") !== options.clientSecret()) return json(response, 401, { error: "invalid_client" });
 				if (params.get("grant_type") === "authorization_code") {
 					const challenge = challenges.get(params.get("code") ?? "");
 					const verifier = createHash("sha256")

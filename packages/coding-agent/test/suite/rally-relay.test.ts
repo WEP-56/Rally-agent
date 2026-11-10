@@ -16,10 +16,10 @@ describe("Rally durable relay (no provider calls)", () => {
 		vi.useRealTimers(); vi.restoreAllMocks();
 		for (const harness of harnesses.splice(0)) harness.cleanup();
 	});
-	async function setup() {
+	async function setup(segmentBytes?: number) {
 		const harness = await createHarness(); harnesses.push(harness);
 		const paths = resolveRallyPaths(harness.tempDir); ensureRallyDirs(paths);
-		const events = new EventLog(paths.eventsFile);
+		const events = new EventLog(paths.eventsFile, segmentBytes);
 		const store = new TaskStore(events, paths.workspaceDir, () => {});
 		const transport = { isBusy: vi.fn(() => false), canReceiveRelay: vi.fn(() => true),
 			sendRelay: vi.fn(async (_items: RelayMessage[], _mode: RelayMode) => {}), addSystemLine: vi.fn() };
@@ -56,7 +56,7 @@ describe("Rally durable relay (no provider calls)", () => {
 	});
 
 	it("recovers queued payloads with stable IDs, skips receipts and keeps source dedup across restart", async () => {
-		const { paths, relay, task, transport } = await setup();
+		const { paths, relay, task, transport } = await setup(512);
 		const done = relay.enqueue({ kind: "worker_report", task, state: "ready", summary: "已送达" }, ["done"]);
 		const pending = relay.enqueue({ kind: "worker_report", task, state: "blocked", summary: "待补送" }, ["pending"]);
 		relay.consumed([done]); relay.dispose();

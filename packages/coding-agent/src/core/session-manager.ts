@@ -15,14 +15,18 @@ import { randomUUID } from "crypto";
 import {
 	appendFileSync,
 	closeSync,
+	fsyncSync,
 	createReadStream,
 	existsSync,
 	mkdirSync,
 	openSync,
 	readdirSync,
 	readSync,
+	renameSync,
 	type Stats,
 	statSync,
+	unlinkSync,
+	utimesSync,
 	writeFileSync,
 } from "fs";
 import { readdir, stat } from "fs/promises";
@@ -47,6 +51,8 @@ export interface SessionHeader {
 	timestamp: string;
 	cwd: string;
 	parentSession?: string;
+	/** Last compaction carried into a physical continuation segment. */
+	segmentCompactionId?: string;
 }
 
 export interface NewSessionOptions {
@@ -755,7 +761,7 @@ export function findMostRecentSession(sessionDir: string, cwd?: string): string 
 			.filter((file) => file.endsWith(".jsonl"))
 			.map((file) => join(resolvedSessionDir, file))
 			.map((path) => ({ path, mtime: statSync(path).mtimeMs }))
-			.sort((a, b) => b.mtime - a.mtime);
+			.sort((a, b) => b.mtime - a.mtime || b.path.localeCompare(a.path));
 
 		for (const { path } of files) {
 			const header = readSessionHeaderForDiscovery(path);
@@ -1634,6 +1640,61 @@ export class SessionManager {
 		};
 		this._appendEntry(entry);
 		return entry.id;
+	}
+
+	/** Physically continue a compacted branch, preserving its exact model projection and entry IDs.
+	 * Call only at a session boundary. Old files remain available through parentSession.
+	 * Publication is atomic: failed writes leave this manager on the old segment.
+	 */
+	rotateCompactedSession(): string | undefined {
+		if (!this.persist || !this.sessionFile) return undefined;
+		const path = this.getBranch();
+		const compaction = path.findLast((entry) => entry.type === "compaction");
+		if (!compaction || this.getHeader()?.segmentCompactionId === compaction.id) return undefined;
+		const compactionIndex = path.indexOf(compaction);
+		const firstKept = path.findIndex((entry) => entry.id === compaction.firstKeptEntryId);
+		if (firstKept === -1 || firstKept > compactionIndex) throw new Error("SESSION_SEGMENT_INVALID: compaction retained boundary is missing");
+		const start = firstKept;
+		const retained = path.slice(start);
+		const retainedIds = new Set(retained.map((entry) => entry.id));
+		const prefix = path.slice(0, start);
+		const settings = getSessionContextSettings(prefix);
+		const previous = this.sessionFile;
+		const at = Math.max(Date.now(), Date.parse(this.getHeader()!.timestamp) + 1, existsSync(previous) ? statSync(previous).mtimeMs + 1 : 0);
+		const timestamp = new Date(at).toISOString();
+		const sessionId = createSessionId();
+		const file = join(this.getSessionDir(), `${timestamp.replace(/[:.]/g, "-")}_${sessionId}.jsonl`);
+		const header: SessionHeader = { type: "session", version: CURRENT_SESSION_VERSION, id: sessionId, timestamp,
+			cwd: this.cwd, parentSession: previous, segmentCompactionId: compaction.id };
+		const sessionInfo = prefix.findLast((entry) => entry.type === "session_info");
+		const metadata: SessionEntry[] = prefix.filter((entry) => entry.type === "custom" ||
+			(entry.type === "label" && retainedIds.has(entry.targetId)) || entry === sessionInfo);
+		const usedIds = new Set(this.byId.keys());
+		const nextId = () => { const id = generateId(usedIds); usedIds.add(id); return id; };
+		if (settings.model) metadata.push({ type: "model_change", id: nextId(), parentId: null, timestamp, ...settings.model });
+		metadata.push({ type: "thinking_level_change", id: nextId(), parentId: null, timestamp, thinkingLevel: settings.thinkingLevel });
+		let parentId: string | null = null;
+		const entries = [...metadata, ...retained].map((entry) => {
+			const copy = { ...structuredClone(entry), parentId }; parentId = entry.id; return copy;
+		});
+		const before = this.buildSessionContext();
+		const after = buildSessionContext(entries);
+		if (JSON.stringify(before) !== JSON.stringify(after)) throw new Error("SESSION_SEGMENT_CONTEXT_CHANGED: refusing a lossy continuation");
+		const fileEntries: FileEntry[] = [header, ...entries];
+		const temporary = `${file}.${randomUUID()}.tmp`; let fd: number | undefined;
+		try {
+			fd = openSync(temporary, "wx", 0o600);
+			writeFileSync(fd, fileEntries.map((entry) => JSON.stringify(entry)).join("\n") + "\n", "utf8");
+			fsyncSync(fd); closeSync(fd); fd = undefined;
+			utimesSync(temporary, at / 1000, at / 1000);
+			renameSync(temporary, file);
+		} finally {
+			if (fd !== undefined) closeSync(fd);
+			try { unlinkSync(temporary); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+		}
+		this.fileEntries = fileEntries; this.sessionFile = file; this.sessionId = sessionId; this.flushed = true;
+		this._buildIndex();
+		return file;
 	}
 
 	/**

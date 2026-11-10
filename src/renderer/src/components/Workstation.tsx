@@ -6,6 +6,7 @@ import { useModels } from "../models";
 import { cn } from "../utils/cn";
 import { clock, StatusBadge, StatusIcon, timeAgo } from "./status";
 import { RallyLogo, Segmented } from "./ui";
+import { LocalServices } from "./LocalServices";
 
 function BusinessCard({ tasks }: { tasks: Task[] }) {
   const { config } = useApp();
@@ -95,7 +96,7 @@ const FILTERS: { v: Filter; l: string }[] = [
 ];
 
 export function Workstation({ tasks }: { tasks: Task[] }) {
-  const { openTask } = useApp();
+	const { openTask, openTab } = useApp();
   const [order, setOrder] = useState<"desc" | "asc">("desc");
   const [filter, setFilter] = useState<Filter>("all");
 
@@ -110,6 +111,7 @@ export function Workstation({ tasks }: { tasks: Task[] }) {
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-[640px] px-5 pb-8 pt-5">
         <BusinessCard tasks={tasks} />
+		<div className="mt-5"><LocalServices onOpen={url => openTab("browser", { url })} /></div>
 
         <div className="mt-5 grid grid-cols-4 gap-2">
           {[

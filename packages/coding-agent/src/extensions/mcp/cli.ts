@@ -623,11 +623,12 @@ async function login(
 
 	const openUrl = options.openUrl ?? openBrowser;
 	const interactive = process.stdin.isTTY === true && options.openUrl === undefined;
+	const signal = AbortSignal.timeout(timeoutMs);
 	try {
 		await signInMcpServer({
 			serverUrl: url,
 			store: credentials.forServer(name, url),
-			settings: connection.oauthSettings(),
+			settings: await connection.oauthSettings(signal),
 			challenge: connection.challenge,
 			prompt: {
 				showAuthorizationUrl: (authorizationUrl) => {
@@ -636,11 +637,11 @@ async function login(
 				},
 				promptForRedirectUrl: (signal) => waitForRedirectUrl(signal, interactive),
 			},
-			signal: AbortSignal.timeout(timeoutMs),
+			signal,
 		});
 	} catch (signInError) {
 		error(
-			signInError instanceof McpSignInCancelledError
+			signal.aborted || signInError instanceof McpSignInCancelledError
 				? `Sign-in to MCP server "${name}" was cancelled or not completed within ${Math.round(timeoutMs / 1000)} seconds.`
 				: `Sign-in to MCP server "${name}" failed: ${errorMessage(signInError)}`,
 		);

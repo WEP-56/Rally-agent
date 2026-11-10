@@ -2,7 +2,141 @@
 
 > 先读 `docs/开发实施TODO.md` 和 `docs/superagent/00-问答记录.md`。实施进度以 TODO 的验证记录为准；本文保留历史背景，不作为阶段完成证明。
 
-## 当前交接点（2026-11-10，简版 MEMORY 已接线）
+## 当前交接点（2026-11-10，应用退出守卫；待新会话继续）
+
+- 用户先要求“更新handoff等文档，新会话交接后继续”，随后追加“提交一下吧”。本会话完成收尾并提交前置提交 `978dc62` 之后累积的代码与文档，不再扩展下一项。新会话读取本节、TODO 和问答记录，先检查 `git log -1`、`git status` 再继续；历史段落中的“未提交”是当时状态，不代表本次交接状态。
+- 本批新增 `src/main/application-shutdown.ts`、`shutdown-guard.ts`、独立构建入口 `shutdown-guard-host.ts`。普通退出与启动失败统一进入幂等收尾：先确认独立守卫就绪，再并行关闭 IPC/原生浏览器/用户终端和 Supervisor 会话、作业、服务、进程；正常完成后取消守卫并 `app.exit`。启动失败通知在 Supervisor 自身清理前执行，通知失败仍尝试清理。
+- 守卫只在退出开始时启动，默认给予 60 秒收尾；到期核对主进程 PID＋精确创建时间，以既有 Windows 句柄核验路径强制终止应用树。已开始整树终止后忽略取消/断连，父端也不再强杀守卫打断清理。正常收尾仍等待已发 OAuth 刷新的令牌写入；超过退出截止时未完成的写入可能中断，不承诺凭据必然保存。任务本身没有新增时长上限，遵守 Q12。
+- 关闭期间不提前释放状态目录锁；失败持锁到 OS 随进程退出释放，重启沿既有登记清理与 interrupted 恢复。守卫无法启动/退出时，主进程另有 75 秒异步兜底；该兜底不能处理主事件循环阻塞。守卫只保护成功就绪之后的收尾阻塞，不能解决退出请求尚未被处理时已经卡住的主进程。权限变化、主动脱离父子链、非 Windows 平台仍未覆盖。
+- 最终定向验证：`rally-application-shutdown.test.ts` 10/10（真实子进程 Promise 挂起、同步死循环、启动失败、正常退出，进程树消失、持锁与重启恢复；守卫失败/取消错误/启动通知失败）；`rally-main-shutdown.test.ts` 1/1（实际主入口＋Electron 替身，重复退出幂等、先守卫后清理、等待全部写入）；`rally-ipc-lifecycle.test.ts` 5/5；terminal-ipc 6/6、browser 11/11、Supervisor 退出/锁/启动子集 14/14（64 跳过）。均按单文件运行，没有全量 Vitest、真实供应商或 UI 自动化。
+- 项目 Electron 的 Node 模式对最终构建入口与 ASAR 路径各验证一次主线程阻塞后整树退出、锁释放及生产恢复，2/2；证据为忽略文件 `.artifacts/shutdown-lifecycle/check-electron.mjs`。构建产生共享 process-identity chunk，ASAR 验证复制整个 out/main；打包配置现有 out/** 包含它。实际窗口退出、错误框及 NSIS 安装待用户验收。
+- 最终应用 electron-vite build、node/web 独立 tsc 通过；根 `npm run typecheck` 仅两个已知模型测试文件错误。新主入口测试暴露 NodeNext 扩展名检查，已给 index/smoke 相对导入补 `.ts`，修复后复验主入口、根检查、应用构建和 node tsc。退出守卫这批未改 packages 生产源码，无需重复完整 packages 构建；无新依赖。TODO、04 分册、README、测试清单同步；本次按用户追加要求提交此前全部累积增量。
+- 新会话建议先接 TODO 的“其他配置命令托管”：盘点 Pi 模型/鉴权的命令取值路径，按需异步接入 ProcessRegistry，保持密钥不落进程登记和原凭据持久行为；不要把本批当作所有第三方挂死已解决。其后还有构建并发隔离、完整访问投影、联网工具、MCP 状态/OAuth 设置 UI、图标/markdown 等未完成项。旧段落是历史记录，若与本节不同，以本节和 TODO 最新验证记录为准。
+
+## 上批交接（MCP OAuth 配置命令）
+
+- 持续目标 active；用户要求的前置提交 `978dc62` 已完成，后续增量继续未提交。本批补齐 MCP OAuth clientSecret 的命令托管，不扩大为完整 HTTP/OAuth 或全部关闭边界已完成。
+- Pi MCP 扩展新增可选 McpConfigValueResolver 注入，Rally 的 workerMcpExtensions 传 managedMcpConfigValue；与 env/header 共用已有命令宿主，10 秒截止/1 MiB 输出限制，按任务登记，结果不写进程登记。超过输出上限后丢弃后续块，避免等待清理期间内存继续增长，持续输出夹具已补验。未注入时保留 Pi 原配置解析；模型/鉴权其他取值命令尚未迁移。
+- McpServerConnection.oauthSettings 改为 Promise，按需解析、逐次读取，不缓存旧密钥。合并单次取消与连接 shutdown 信号，关闭等待全部正在解析的配置。登录的配置读取纳入扩展 track，CLI 超时涵盖读取；取消取值后不开回调/浏览器、不发令牌请求。auth-provider settings 支持 Promise，已发出的刷新仍等待保存轮换令牌，不能为了快速退出丢弃凭据。
+- 新 rally-mcp-oauth.test.ts 10/10，使用 harness/faux、本机 OAuth HTTP 服务、真实命令与子孙树：登录及秘密轮换后刷新、手动/刷新取值时关闭、10 秒超时、扩展登录关闭、单次取消后可再解析、已发请求迟到令牌保存、生产 worker 成功/取消并核对 process_stopped 归属。没有外部 API 或浏览器启动。
+- 原回归：agent-session-mcp-oauth 10/10、mcp-oauth-refresh 16/16、mcp-extension 28/28（1 项原有 Windows 跳过）、packages/mcp oauth 14/14、agent-session-mcp 52/52、MCP 进程 8/8、生产 Supervisor MCP 子集 11/11（67 跳过）。未重复本文件的全部 78 项。旧测试初次因硬编码 .pi、Pi 名称与默认 CIMD 失败，已按 CONFIG_DIR_NAME/APP_NAME 修夹具；显式 CIMD 仍保留，另验 Rally 默认 DCR，未修改产品身份规则。
+- 完整 build、最后输出上限补丁后的应用 build、最终 node/web tsc 与 diff --check 通过；根 typecheck 只剩两个既有模型测试文件错误。无新增依赖/提交/UI 视觉验收。02/04、README、TODO 与测试清单已同步。
+- 下一步继续 TODO：其他配置命令托管、任意第三方会话挂死的退出边界，或完整访问投影/构建并发隔离。HTTP/OAuth 设置页登录及连接状态尚未实现；不要把 Pi 命令行登录专项说成 Rally 设置页可用。实际外部服务、窗口退出、安装包、非 Windows 平台仍待验证。
+
+## 上批交接（MCP 与搜索进程托管）
+
+- 持续目标 active；前置提交 `978dc62` 已完成，此后增量仍全部未提交，不重复提交。本批落实 MCP stdio、env/header 取值命令以及主/worker grep/find 的进程托管，保留 OAuth clientSecret、任意第三方会话关闭挂死等缺口。
+- ProcessRegistry 新增 mcp/search 归属和双向管道；隐藏宿主登记后才启动命令，启动 ACK 后开放 stdin，写入等背压，stdout/stderr 保留 UTF-8。登记后取消不再发命令；退出与重启沿已有 PID/创建时间核验及 5 秒升级。cross-spawn 处理 Windows .cmd，既有 Git/作业/服务仍沿原路径。
+- 新增 mcp-transport.ts，Pi PipeTransport 继续处理帧、错误和 stderr；ManagedStdioTransport 幂等关闭并等待启动中/已运行树收尾。McpTransportFactory 支持异步及 shutdown signal，晚返回的 transport 会先关闭，不复活会话。env/header 的 !command 在托管 shell 内解析，10 秒截止、1 MiB 输出上限；Windows 无 Bash 时回退 cmd。HTTP authProvider 保留；oauthSettings.clientSecret 仍调用 Pi 同步解析，下一批需迁移。
+- 新增 SearchExecution 可选执行层及 search-process/search-tool-host。主/worker 保留 Pi 参数/解析/忽略规则/截断，取消与结果上限等待整树退出；搜索工具准备放到独立构建 helper，避免主进程的未登记探测/解压。PI_OFFLINE 测试使用本机二进制或返回不可用，没有下载；真实联网下载未验证。
+- 最终单文件离线：MCP 8/8、搜索 8/8、PipeTransport 16/16、AgentSession MCP 52/52、生产 Supervisor 78/78、进程 10/10、job-supervisor 4/4、service-supervisor 4/4；原 tools.test.ts 仅 grep/find 子集 23/23。修正该旧测试的 Windows 路径被当正则问题（literal=true）。生产完整回归曾因 10 秒清理钩子超时连带删临时目录失败，改为 30 秒并将每例目录提前隔离、allSettled 收齐失败，随后独立完整通过；遗留测试宿主按身份核验清理。
+- Electron Node 模式对构建文件/ASAR 各验 MCP 父进程强杀恢复、.cmd 参数与中文往返、离线搜索 helper，6/6；本机证据 .artifacts/mcp-search-lifecycle/check-electron.mjs 不入库。完整 build、node/web tsc 通过；根 typecheck 仍仅两个已知模型数据测试文件错误。无真实供应商、无 UI/截图验收。
+- 新直接精确依赖 @rally/mcp 1.5.0、cross-spawn 7.0.6、开发类型 @types/cross-spawn 6.0.6，均已有工作区/传递依赖；npm install --ignore-scripts 更新 lock，未执行生命周期。不要把上批终端依赖重复记作本批新增。
+- 下一步按 TODO 继续 OAuth/其他配置命令托管、第三方会话关闭超时，或完整工具访问投影、构建并发隔离等明确条目。HTTP/OAuth 连接状态 UI、真实模型与实际 Electron/NSIS 仍待验收。主动脱离父子链及权限变化的回收、非 Windows 平台未实测，不勾完完整恢复总项。
+
+## 上批交接（调度与卡死恢复）
+
+- 持续目标 active；用户要求的前置提交 `978dc62` 已完成，其后增量全部未提交，不重复提交。已完成 TODO 中调度额外名额与 Q12 卡死恢复的实现/离线验证；视觉与真实供应商行为仍由用户验收。
+- Scheduler 统一调度新运行与空闲 worker：用户 answer/steer/resume > 系统输入 > 首次派发，同类按待送输入/批准时间排序。用户最多使总占位达到 limit+1；初次运行前的 steer 不借名额。流式/作业/异步启动按任务去重，已有作业占位唤醒不重复扣除。预留关联具体 run，初始化失败释放，旧 Promise 晚返回不误删续接预留。
+- WorkerManager 每秒用 performance.now 检查 10 分钟无事件；Pi 会话事件和前台 shell 输出刷新计时，仅已转后台的运行作业豁免、结束后重新给满 10 分钟，常驻服务不豁免 worker。空闲/待批准不误报，初始化也检测。测试注入单调时钟，不实际等待 10 分钟。
+- 首次超时先落 run_stall_retry/stallRetries=1，await abort 后用同一 session/run/model 发送 03 §5.9 nudge 和未送输入；每 run 仅一次，显式续接新 run 重置。第二次无事件以 system 写 failed 报告和 endReason=stalled，经既有持久中继唤醒主 agent；空闲中继正常合并等待 2 秒。取消/退出或晚到响应不会重启任务。
+- 初始化/abort 始终未返回时另等 10 分钟判失败并释放名额，不启动重叠重试；原初始化完成后自行收尾。此处不是强制终止任意第三方调用的方案，无法完成的会话关闭仍可能使 dispose 等待；完整关闭超时、MCP/grep/find 进程迁移仍在 TODO。
+- 最终离线：scheduler 5/5，watchdog 11/11，snapshot 8/8，jobs 8/8，job-supervisor 4/4，service-supervisor 4/4，原 Supervisor 78/78；预留/排序修正后 Supervisor 相关子集再验 10/10。涵盖真实后台/前台命令、输出刷新、常驻服务、同模型重试、再次失败通知、取消、初始化挂起、晚到结果及快照重放/续接重置。完整 build 与最后应用 build、node/web tsc 通过；根 typecheck 仅两个已知模型数据测试文件错误。
+- 新测试在 packages/coding-agent/test/suite/rally-scheduler.test.ts、rally-watchdog.test.ts；既有快照/生产测试追加或更新。未真实 API、未浏览器/Electron 视觉验收、无新依赖。下一步继续 MCP/grep/find 完整进程登记与关闭边界、完整访问投影等 TODO；新增图标/markdown 等条目也保留。不要据本批勾完完整恢复或 UI 验收。
+
+## 上批交接（用户终端）
+
+- 持续目标 active；前置提交 `978dc62` 已完成，其后全部增量未提交。本批完成 Q20 用户终端实现；浏览器/终端实际 Electron 视觉/键盘体验仍待用户验收，不勾完阶段。
+- 新增 shared/terminal、main/terminal-protocol/terminal-host/terminal-session/terminal。TerminalView 已删除模拟命令集，直接使用 xterm＋fit/web-links/search/unicode11；PowerShell 7 优先、否则 Windows PowerShell；从默认工作区或任务 ID 对应真实 cwd 打开，任务页新增终端按钮。显示初始目录，不猜测 shell 的 cd。查找、Ctrl+Shift+C/V、Ctrl+C、Ctrl+点击网页链接；原型 token/间距沿用。
+- node-pty 在独立隐藏宿主中运行；宿主 PID/创建时间核验完成后才发启动命令。关闭终端整树清理且等待确认，关闭失败保留标签并提示重试。shell 退出时保留根以清理后代，关闭/窗口重载/渲染进程崩溃/应用退出均回收；启动中取消立即拒绝 ready 等待。应用强杀后宿主 IPC 断连自清整树。输入输出只经所属窗口主 frame 的声明 IPC，不进入模型工具、TaskStore、审计或聊天；不持久存终端历史。
+- 宿主按 128 Ki 字符高水位暂停、32 Ki 低水位恢复；xterm write 完成后按序号累计确认。页签最多 16 个，每页回滚 5000 行，输入分片避免拆 emoji 代理对。设置页从卸载主面板改为隐藏，保持终端/浏览器实例。尺寸调整、选区/粘贴、主题和焦点真实效果待用户验收；未主动启动 UI。
+- 新直接精确依赖：node-pty 1.1.0（生产）；@xterm/xterm 6.0.0、addon-fit 0.11.0、web-links 0.12.0、search 0.16.0、unicode11 0.9.0（前端构建）。两次安装都使用 --ignore-scripts，没有执行生命周期脚本。node-pty 的 lib/预编译模块/辅助文件整包 asarUnpack；已有 xterm/Tabby/node-pty MIT 版权声明及来源说明，随 THIRD_PARTY_NOTICES 打包。Tabby 会话与 ConPTY DLL 回退、xterm 官方流控方案已参考适配，来源在 05 分册。
+- 最终离线：真实 terminal-session 8/8（含 PowerShell cwd、中文/emoji、Ctrl+C、resize、512KB 背压、退出码、整树清理、两种启动取消、父进程强杀），terminal-ipc 6/6（归属/校验/真实注册器/任务隔离/生命周期/关闭失败重试），browser 11/11、已有 IPC 生命周期 4/4。完整 npm run build、最后应用 build、node/web tsc、diff --check 通过；根 typecheck 仅两个已知模型数据测试文件错误。
+- Electron Node 模式验证构建宿主与 ASAR 宿主直接加载包内预编译模块，中文往返和退出码 2/2；最终 fallback 补丁后再验证 2/2。本机证据 .artifacts/terminal-lifecycle/check-electron.mjs，不入库；无需新增 rebuild。无真实供应商调用、无 UI/截图验收。旧版 Windows 回退/NSIS 实际安装、主动脱离父子关系或权限改变的进程回收未验证，不扩大结论。
+- 下一项可继续调度额外名额、10 分钟无事件卡死检测/重试（Q12，后台作业运行须豁免），或 MCP/grep/find 完整进程管理。先读问答记录对应条款和现有 scheduler/worker，不能按旧计划假设阈值或触发条件。完整访问投影、联网工具/服务商等其他 TODO 仍未完成。
+
+## 上批交接（原生浏览器）
+
+- 持续目标 active；用户要求的前置提交 `978dc62` 已完成，此后增量均未提交。本批完成 TODO 的 WebContentsView 实现，实际 Electron 验收保持待验收；用户终端仍未实现，不勾完 Q20 总项。
+- 新增 shared/browser、main/browser、renderer/browser 和 browser-overlays。每个右栏浏览器标签有自己的 WebContentsView，共用 `persist:rally-browser` 独立 session，无 preload/Node/Rally IPC。所有宿主通信经 shared/ipc；主进程要求发送者为所属 BrowserWindow 的主 frame，拒绝 guest/subframe/跨窗口操作。最多 32 页。
+- 地址栏/前后退/刷新停止/标题/加载/错误均接 Chromium 事实，起始页仍为原型真实服务列表；HTTP/HTTPS 普通弹窗转为右栏新标签。地址校验拒绝危险 scheme 和 URL 凭据；页面权限默认拒绝并提示系统浏览器，仅本机 origin 可申请本地网络权限；下载取消并提示。新窗口 POST、window.opener/OAuth 等复杂关系未兼容，不宣称完整浏览器能力。
+- 布局经 ResizeObserver/scroll/visibility 同步，主进程按宿主 zoom 转 DIP 并限制窗口范围。菜单、命令面板、抽屉、拖动、设置/右栏隐藏时隐藏原生视图；切换标签/设置保留页面。关闭标签/宿主重载或崩溃/退出显式关闭 child webContents，IPC 收尾等待 destroyed，处理 page 自行关闭、过期导航失败及失败 URL 重试。已移除 iframe，宿主 CSP 禁用 frame/object。保留原型视觉 token，不主动运行 UI。
+- 开源生命周期适配来源为 electron-browser-shell 的 packages/shell/browser/tabs.js；根 MIT 已核实，版权说明在 THIRD_PARTY_NOTICES/electron-browser-shell-LICENSE.txt，electron-builder 文件清单包含它。未引入不同许可证的 electron-chrome-extensions 包；05 分册列了来源与 Electron 官方文档。无新增依赖或 lockfile 改动。
+- 离线最终：rally-browser 11/11（Electron 替身，无网络/UI，包含真实 registerIpc+Supervisor 接线），已有 rally-ipc-lifecycle 4/4；应用 node/web tsc 和 electron-vite build 通过；npm run typecheck 仍仅 packages/ai/test 两个已知模型测试文件错误。本批未运行完整 package 构建（未改 package 生产代码），未调用真实供应商、未启动 Electron/浏览器/截图验收。
+- 用户待验收：服务/公网预览与前后退、失败重试、多标签、浅深色/缩放/收起/拖动、菜单/抽屉/设置遮挡、Ctrl+L/B/K、页面和窗口退出。替身验证不证明原生窗口实际叠放/焦点/网络行为。
+- 下一项可按 Q20/05 §3.4 实现 xterm.js + node-pty 用户终端：先核实开源终端集成许可证和当前依赖，沿 shared/ipc，默认 PowerShell 7/5.1、默认工作区/任务 cwd，关闭整树；不得把它接给 agent 读写。也可推进额外名额/卡死检测、MCP/grep/find 完整进程管理等已明确 TODO，联网检索服务商等未定项不得自行编造决策。
+
+## 上批交接（服务生命周期与真实列表）
+
+- 持续目标 active；前置提交 `978dc62` 已完成，之后增量均未提交。Q14 的服务工具/生命周期和列表已接入；Q20 的 WebContentsView 是下一项，不据 iframe 临时接线勾完浏览器。
+- 新增 shared/services、ServiceManager/service-tools、ReadyPattern。service_start 用系统 PowerShell/Bash，支持 cwd/env/port/readyPattern，默认最多等待 30 秒就绪；端口从参数或 localhost/127.0.0.1 输出识别，TCP 监听或输出匹配即可 ready，尚未就绪仍返回真实运行状态。显式端口已被监听时拒绝启动；发现端口仅是尽力推断，不宣称端口归属原子验证。输出正则在线程内匹配，1 秒超时终止线程，避免卡住 Electron 主事件循环；超时保留服务并明确 error，可继续通过端口确认。
+- 服务用独立 S-n ID，日志在 state/jobs，业务事实在 Task.services/事件/快照；ProcessRegistry 扩展 service owner 与登记后、发命令前的 onStarted。返回 PID 是整树管理宿主 PID。env 不进入服务元数据/进程登记（命令及普通工具参数/输出仍按既有记录规则）。任务终态保留已启动服务，不占名额、不生成 worker 输入；启动前取消拒绝执行，登记后的取消只结束就绪等待。用户/本任务 worker 显式停止、退出、重启孤儿清理才停止服务；续接 worker 可停上次运行的服务并重启。
+- 用户停止通过 shared/ipc 的 servicesState/Stop/Event 直连，先记独立审计和 stop{target:service,source:user}，停止确认后主对话显示通知；主模型每轮状态包含全部运行服务及最近停止服务。task_read 新增 services 视图，worker 只读自身；上游 card 不夹带服务详情。files 记录服务 ID，进程效果仍 unknown。
+- 原型 Workstation 与浏览器起始页共用真实 LocalServices 列表，显示所属任务/端口/状态、预览/停止；保留 token/卡片样式。删掉模拟 5173/3000 服务和 Northwind 本地页面，预览暂使用现有 iframe 载入真实 URL，加载指示改读 onLoad。WebContentsView 独立 partition、导航/弹窗/权限等仍未实现；不要称内嵌浏览器完成。
+- 最终离线：services 7/7（真实 HTTP/进程、正则阻塞隔离、快照/失败保护），service-supervisor 4/4（完成释放名额但保留服务、取消等待、续接替换、父进程强杀恢复），IPC 4/4、processes 10/10、job-supervisor 4/4、原 Supervisor 78/78。最后归属/探测补丁后 services 相关 2/2；完整 build 与最终应用 build、node/web tsc 通过，根 typecheck 仅两个已知模型测试错误。Electron Node 模式匹配线程＋构建宿主真实服务 2/2，本机脚本 .artifacts/service-lifecycle/check-electron.mjs 不入库。无真实 API、无视觉验收、无新依赖/提交。
+- 下一步对照 Q20 和 05 分册迁移 BrowserView 到 WebContentsView（不要用 iframe 当最终实现）；继续沿 shared/ipc 声明通道、保留原型地址栏/标签/浅深色样式。各浏览器标签需独立实例、统一隔离 partition，隐藏/关闭/设置遮挡与窗口缩放需处理；开发侧可做主进程替身功能验证，不主动打开 UI。视觉/实际 Electron 预览与窗口退出待用户验收。之后继续额外名额/卡死检测、MCP/grep/find 完整进程管理及其余 TODO。
+- 最后修正：readyPattern 先命中后，晚到的端口输出仍更新 URL；相关真实服务用例 1/1 再次通过。按 05 分册移除原型模拟书签及星标；最终双端检查、根 typecheck（仅已知错误）、应用构建和 diff --check 已复核。
+
+## 上批交接（后台作业）
+
+- 持续目标 active；前置提交已完成 `978dc62`，其后增量仍未提交，不重复提交。Q14 作业已接入，服务管理是下一项。
+- 新增 JobManager、job-tools、shared/jobs；worker bash/powershell 使用 ProcessRegistry，前台默认 30 秒，超时返回 jobId 并解除原工具取消信号，命令继续执行。全局 agent/settings.json 的 jobs.foregroundSeconds 可设 0–3600 之间的正秒数（尚无设置 UI）；显式 timeout 到期立即强杀。保留 shell cwd、RALLY 环境变量和 UTF-8，支持 stdin 命令传输，拒绝开头 sleep/Start-Sleep/timeout /t 轮询。
+- 完整输出在 state/jobs/J-n.log，有界尾部回模型；job_output/job_kill 仅本任务可用。job_started/backgrounded/exited 事实进入 Task.jobs 与快照，job_done 输入按 jobId 去重，空闲唤醒、忙时 steer。流式 worker 与后台作业按任务去重占一个名额，等待作业时不触发忘记汇报提醒；已占名额任务仍可接受用户追加。files 记录作业 ID，task_cancel 等待停止并返回实际 killedJobs。
+- 终态/退出停止作业且不唤醒；启动先完成进程身份核验清理，再将未结束作业记为 killed/interrupted，原运行仍按既有逻辑中断待决。已结束后台作业在完成输入尚未提交时可恢复补记，不能声称跨崩溃模型只消费一次。事实写失败不污染 live 状态，清理不确定不伪报已结束；日志已创建但未登记时也不复用 ID。
+- 离线：rally-jobs 8/8（真实子进程与父进程强杀恢复）、rally-job-supervisor 4/4（faux provider）、原生产 Supervisor 78/78；原进程 9 项与新增 stdin 1 项分别通过。完整 build 及最终应用 build、node/web tsc 通过，根 typecheck 仍只有两个已知模型测试文件错误。未真实 API、未视觉验收，无依赖变更。真实供应商使用长作业、任务页显示与取消体验待用户验收。
+- 下一步按 02 §3.3/04 §5.2 实现 service_start/stop/status、独立持久状态及右栏本地服务：任务终态保留、退出清理、不占名额不唤醒，用户停止经 shared/ipc 直连并记审计。不要复用 job 的终态规则；先对照原型服务区域和 Q20 内嵌浏览器约定。额外名额/卡死检测、MCP/grep/find 完整进程登记、关闭挂死边界仍未完成；保留相关 TODO。
+
+## 上批交接（进程登记与 Git 生命周期）
+
+- 持续目标 active；用户要求的前置一次提交已完成 `978dc62`，其后增量均未提交。本批继续 TODO 的进程恢复基础，没有实现后台作业/服务，不勾完总项。
+- 新增 process-registry.ts、process-identity.ts、独立构建入口 process-host.ts。隐藏宿主先启动，核验 PID/OS 创建时间，processes.json 临时文件 fsync+rename 成功后才通过 IPC 下发命令。登记只保存 ID、kind、任务、PID、精确创建时间，不存命令/环境/凭据。主 git_inspect 与 worker git 的全部执行/预检已接入。
+- 宿主在 Windows 也 detached：libuv 默认父进程 Job 会杀直接子进程，但原生孙进程不一定被回收；保留根便于崩溃恢复。无命令的宿主失联会退出；已开始命令的宿主失联后保活/排空输出，正常完成也等管理端整树清理。Windows PowerShell 用 StartTime UTC ticks，杀树全程持有 Process.Handle 防 PID 复用；取消/恢复先 taskkill /T，5 秒后 /F；普通完成立即清理。核对不符（包括 PID 已复用为当前实例）只记跳过。taskkill 非零/无法确认/事实写失败保留登记，拒绝新命令，dispose 报错让 Supervisor 持锁至退出。
+- Supervisor 在 main.start、recoverInterrupted、调度/中继前清理登记；退出同时停止进程/会话并等 IPC。新增 process_stopped 事实。损坏登记拒绝启动，原文件保留。Git 元数据独立探测并行且 allSettled 收齐后再审批，避免逐次进程核验过慢；Windows 进程核验仍增加开销，Git 集成等待窗口已适配。
+- 最终验证：进程 9/9，Git 67/67、git_inspect 26/26、生产 Supervisor 78/78；完整 build 与最后应用 build、双端 tsc、diff --check 通过，根 typecheck 仍只有两个已知模型测试文件错误。Electron Node 模式分别运行构建宿主及 ASAR 内宿主，真实父进程强杀后恢复整树，2/2 通过；证据脚本 `.artifacts/process-lifecycle/check-electron.mjs` 不入库。没有真实 API/视觉验收或新依赖；NSIS 安装包/实际窗口退出仍待用户验证。
+- 下一批：把 shell 长命令接入此基础，完成 Q14 的 job_done、job_output/job_kill、占名额及终态清理，再实现服务。ProcessRegistry 目前是一次 run 到结束的 API，owner.kind 仅 git；作业需要独立运行句柄/日志/完成回调，不能让工具返回导致取消，也不能把注册表直接当作业业务状态。MCP/grep/find/原 Pi shell 未迁移；它们仍用既有清理机制，整体退出挂死与完整孤儿覆盖仍未解决。Linux 身份实现尚未实测，macOS 明确不支持；不要声称跨平台完整验证。
+
+## 上批交接（状态目录锁与退出收尾）
+
+- 持续目标 active；开始前要求的一次提交已完成 `978dc62`。其后状态/chat_search、事件分段、快照、主会话分段及本批状态锁均未提交，不重复提交或清理。
+- 新增 supervisor/state-lock.ts：node:sqlite 内置 DatabaseSync 在 state/writer-lock.sqlite 持有 BEGIN EXCLUSIVE。锁 DB 不存业务数据，原 JSONL/快照不迁移；真实路径与 junction 别名共用。不用心跳过期抢占，不删除/替换锁文件，进程死亡由 OS 释放，无新增依赖。项目 Node 24.11.1 与 Electron 45.2.3 内置 Node 24.22.2 均实测可用。
+- Supervisor 构造先拿锁，再读/修事件及恢复任务/内门；构造失败取消半建 snapshot timer/订阅、关闭事件、解锁。start 异常完成 dispose。dispose(pendingRequests?) 同时等待主/worker 会话与已受理 IPC 请求，保存快照后关闭事件并解锁；全程 allSettled 防提前释放，关闭错误汇总并持锁至进程退出。MainAgent/WorkerManager 不再把会话关闭失败只记日志后丢弃；worker 记录中断事实失败仍尝试关闭会话。
+- registerIpc 返回 stop，注销入口并等待已接请求；Electron before-quit 把该 Promise 交给 Supervisor.dispose，不能先 await stop 再 dispose（停止/压缩请求可能等 MCP 关闭，已加回归）。启动异常显示错误后退出；smoke 也需拿锁。EventLog.close/assertWritable、AuditLog 写前检查和已 dispose 快照防止旧对象继续写盘。
+- 验证：锁 6/6（真实子进程竞争、阻塞、强杀、junction、损坏文件、失败关闭持锁、Electron Node 模式），IPC 3/3，Supervisor 78/78（关闭补丁后相关 8/8），snapshot 7/7、event 8/8；完整 build、最终应用 build、双端 tsc、diff --check 通过；根 typecheck 仅两个既有模型测试文件错误。子进程不继承 API 密钥，未真实 API/视觉验收；实际 Electron 窗口退出/错误提示待用户验收。两条旧 Supervisor 用例已把伪重启改为先 dispose 再新建。
+- 下一步继续进程生命周期：后台作业/服务基础与持久 PID+创建时间登记，再落实孤儿清理和优雅关闭超时升级。现在还没有完整的 owned-process 注册表，不要用“Promise 超时后提前解锁”代替进程树终止；当前挂死会话仍可能阻塞退出。参考 04 §5/7、02 job/service 工具、Q12/Q14，检查 Pi shell/MCP/Git 现有 spawn/kill 路径后统一接线。状态锁不等于进程清理/完整恢复已完成。
+
+## 上批交接（主会话物理分段）
+
+- 持续目标 active，前置一次提交已完成 `978dc62`。其后的动态任务状态/chat_search、事件分段、TaskStore 快照、主会话物理分段均未提交；不重复提交或清理。
+- Pi SessionManager 新增 rotateCompactedSession：保留最新 compaction.firstKeptEntryId 到当前 leaf、有效 model/thinking 状态及 custom metadata；保留原 entry ID，重连 parentId，并验证轮转前后模型上下文完全相等。临时文件写入/fsync 后 rename 发布，再切换 manager，旧文件不改；header.parentSession 链接前段，segmentCompactionId 防同摘要重复轮转。新段 mtime/文件名保证正常连续轮转后可 continueRecent；发布失败保留旧 manager，可重试。
+- MainAgent 默认 20 MiB 或本段新增 10 次压缩，在启动、成功 compaction_end 和 agent_settled 检查。未有新的压缩摘要时不分段、不额外发摘要请求；文件不是严格 20 MiB 硬上限。沿用会话对象，pending relay 队列不重建；成功追加 segment_rotated 事件。全局 UI 历史/原话 ID 仍来自 EventLog。
+- 最终离线：session-segments 4/4；SessionManager file-operations 35/35、build-context 16/16；Supervisor 75/75，补 segment_rotated 事实后轮转子集 2/2。覆盖手动压缩/分段/快照重启后检索旧原话并实际授权记忆、自动压缩期间排队中继、启动大小阈值、连续轮转、空保留区间、上下文编辑、发布失败重试。完整 build、最后事件补丁后的应用 build、双端 tsc、diff --check 通过；根 typecheck 最终只有两个已知模型测试文件错误。未真实 API/视觉验收，无新提交。
+- 下一步继续恢复链路：状态目录跨进程锁、启动失败清理及优雅中止超时，再推进后台作业/服务/孤儿进程。Supervisor 构造即会创建/恢复 EventLog、失效内门和写事件，因此锁必须在构造前取得，清理完成与 snapshot 保存后再释放；Electron 目前仅 requestSingleInstanceLock。packages/coding-agent 已有 proper-lockfile 4.1.2，根直接依赖尚无；若采用，注意超时抢锁/活进程、compromised 处理和构造失败释放，勿仅用不含竞争保护的“读 PID 后 unlink”。没有为此新增实现或依赖。
+- 事件仍全量载入内存；快照只减少 TaskStore 重放；会话分段不表示完整恢复、跨进程锁、孤儿清理或断电全事务已完成。
+
+## 上批交接（TaskStore 快照）
+
+- task-snapshot.ts 仅从 EventLog 成功提交的事实生成紧凑重放缓存，保存最新 task、access、首次/最新 tool/message（保持列表顺序），不读取 live TaskStore 流式内容。每 200 事件微任务、30 秒及 dispose 完成会话清理后保存。snapshotSeq + version + prefixHash + checksum，坏/异源/超前快照回退完整重放；保存失败提示且可重试。prefixHash 随 EventLog load/append 计算，after(seq) 取尾部。
+- TaskStore 构造可接 recovery 记录；replay 对 task/access 深拷贝，修复恢复对象修改污染已提交事件。保留访问记录到 task 快照之间的补齐逻辑。ID 计数与历史问题依据来自最新 task 中的完整 runs/attentionHistory。
+- 本批离线 snapshot 7/7，event-log 8/8，Supervisor 73/73；生产跨分段压缩/重启用例验证 loadedSeq > 0。完整 build、双端 tsc、diff --check 通过；根 typecheck 仅两个已知模型测试文件错误。事件/主聊天/中继仍全历史内存加载。
+
+## 上批交接（事件流分段）
+
+- 用户持续目标仍 active：按 TODO 推进。开始前要求的一次提交已完成 `978dc62`；状态重注入/chat_search 和本批事件分段均在后续未提交增量中，不要重复提交或清理。
+- EventLog 默认 20 MiB 按字节轮转，独占创建 events-0002…，旧段不改；加载时检查缺段与 seq 连续性。单个超大事件不拆行。`eventsFile` 是首段，all/ofKind 跨全部段；activeFile/lastSeq 为诊断接口。SupervisorOptions.eventSegmentBytes 可为离线测试缩小阈值。
+- 短写/失败在当前进程内截断回写前长度，不发布事实/消费序号；回滚失败后拒绝写。Windows 用 r+ 加明确偏移替代 append fd，专项真实部分写入已验证。损坏 UTF-8/JSON 记录保留并计入 warnings，序号缺口或无效信封拒绝恢复；启动系统提示告警位置。当前末段末尾补换行，兼容旧版分隔过的 torn tail。
+- 最终验证：event-log 专项 8/8，中继 9/9，生产 Supervisor 73/73。中继恢复及生产压缩/重启查旧原话的用例强制跨段。完整 build、最终应用 build、双端 tsc 和 diff --check 通过；根 typecheck 最终仍两个已知模型测试文件错误。无真实 API/视觉验收，无新提交。
+- 下一步 TaskStore 快照与恢复（04 §6/7），然后主会话物理轮转（01 §6.3）。特别注意：TaskStore 的 recordAssistant(persist=false) 含尚未落盘流式内容，快照不能把它当已持久事实；若按事件触发快照，要在事件成功落盘及状态应用之后捕获，带 snapshotSeq，支持坏/旧快照回退重放。需要涵盖 tasks、activities、conversations、accesses、ID 计数和访问记录到 task 快照之间的崩溃窗口。当前 replay 直接引用 event.data.task，会发生内存对象别名，需核对后调整。
+- 主会话 `SessionManager.createBranchedSession` 保留完整根到 leaf 路径，不能当成压缩裁剪。AgentSession.sessionManager 是 readonly 成员（实例可操作），manual compact/auto_compaction_end 是潜在切入点。快照/分段尚不等于跨进程锁、全量历史内存优化、孤儿进程恢复或断电 fsync 保证。
+
+## 上批交接（状态重注入与 chat_search）
+
+- 当前用户目标：按 TODO 持续推进；本次开始前要求提交一次，已完成 `978dc62`（受控工具、资源设置、中继与 MEMORY 基线，含 icon.png）。随后开发增量未提交。目标保持 active，不以单批完成代替整个 TODO 完成。
+- 本批新增 `supervisor/rally-state.ts` 和 `chat-search.ts`：每次主模型调用重建全部开放任务、当前未决问题/有效内门、名额、审批模式与最近结束任务；临时注入不落 Pi，worker 隔离。chat_search 用事件恢复的主对话历史检索，返回原始全局消息 ID；全文/200 字预览、字面查询、时间边界、邻近窗口和稳定游标见工具规格。
+- 生产 Supervisor 73/73、chat-search 专项 4/4、state 专项 2/2；覆盖压缩重启后查旧原话并实际调用记忆工具、工具循环状态刷新、快照不落盘、worker 隔离。完整构建、最终双端 tsc 与 diff --check 通过。根 typecheck 仍两个已知模型测试文件错误。未真实 API/视觉验收。
+- 下一步推进物理会话/事件分段、TaskStore 快照及恢复。已初读 01 §6.3/04 §6：事件按大小分段且 seq 全局递增；快照带 snapshotSeq，建议每 200 事件或 30 秒；主会话建议 20MB 或累计压缩次数，保留最新摘要/近期消息并指向前段。当前 EventLog 仍只读单文件、全历史内存；MainAgent 历史与引用来自事件流，chat_search 不直接依赖 Pi 当前段。
+- `SessionManager.createBranchedSession` 会保留完整根到 leaf 路径，不是压缩后物理裁剪，不能直接称作分段实现。注意延迟持久化、半行尾部、失败写不发布、跨段引用与中继恢复。优先读实现再定接口，按单文件离线测试；不跑全量 vitest，不主动视觉验收。后续作业/服务、完整进程清理、联网等仍未完成。
+
+## 上批交接（简版 MEMORY）
 
 - 已读取 TODO、问答记录 Q23 及相关规格，继续完成上一批 MEMORY 草稿。遵守中文、原型样式、不主动视觉验收、单文件离线测试、不提交等规则。工作区仍有多批未提交修改，不要清理或回滚。
 - MemoryStore 已接 Supervisor；主会话注册 memory_append/remove，每次模型调用在 transformContext 重读文件（工具循环、中继、压缩后和重启均复用此入口），快照不持久化到 Pi；worker 无记忆工具且不自动注入。

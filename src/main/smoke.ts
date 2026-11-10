@@ -4,7 +4,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { CONFIG_DIR_NAME, createAgentSession, getAgentDir, SessionManager, VERSION } from "@rally/coding-agent";
-import type { RallyPaths } from "../shared/ipc";
+import type { RallyPaths } from "../shared/ipc.ts";
 
 /** Result printed as JSON by `RALLY_SMOKE=1`. */
 export interface SmokeResult {

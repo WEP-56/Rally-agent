@@ -132,7 +132,7 @@ export interface Tab {
 export interface AppCtx {
   config: Config;
   setConfig: (patch: Partial<Config>) => void;
-  openTab: (kind: Exclude<TabKind, "task">, opts?: { url?: string }) => void;
+  openTab: (kind: Exclude<TabKind, "task">, opts?: { url?: string; taskId?: string }) => void;
   openTask: (taskId: string) => void;
   openSettings: (section?: string) => void;
   rerunOnboarding: () => void;

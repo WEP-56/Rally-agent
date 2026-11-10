@@ -152,7 +152,7 @@ async function run(serverUrl: string, scenario: string): Promise<void> {
 				await signInMcpServer({
 					serverUrl: url,
 					store: credentials.forServer(entry.name, url),
-					settings: connection.oauthSettings(),
+					settings: await connection.oauthSettings(),
 					challenge: connection.challenge,
 					prompt: simulatedBrowser(),
 				});
