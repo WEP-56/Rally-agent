@@ -2,7 +2,7 @@
 
 import { join } from "node:path";
 import { app, BrowserWindow, nativeTheme, shell } from "electron";
-import { broadcastChat, broadcastTask, forwardWindowState, registerIpc } from "./ipc";
+import { broadcastChat, broadcastTask, broadcastWorkspace, forwardWindowState, registerIpc } from "./ipc";
 import { ensureRallyDirs, resolveRallyPaths } from "./paths";
 import { runSmoke } from "./smoke";
 import { Supervisor } from "./supervisor";
@@ -26,9 +26,20 @@ if (process.env.RALLY_SMOKE === "1") {
 	app.on("window-all-closed", () => app.quit());
 	void app.whenReady().then(() => {
 		ensureRallyDirs(paths);
-		const supervisor = new Supervisor(paths, { emitChat: broadcastChat, emitTask: broadcastTask });
+		const supervisor = new Supervisor(paths, { emitChat: broadcastChat, emitTask: broadcastTask, emitWorkspace: broadcastWorkspace });
 		registerIpc(paths, supervisor);
-		app.on("before-quit", () => supervisor.dispose());
+		let shutdownStarted = false;
+		let shutdownFinished = false;
+		app.on("before-quit", (event) => {
+			if (shutdownFinished) return;
+			event.preventDefault();
+			if (shutdownStarted) return;
+			shutdownStarted = true;
+			void supervisor.dispose().catch((error: unknown) => console.error("Rally shutdown failed", error)).finally(() => {
+				shutdownFinished = true;
+				app.quit();
+			});
+		});
 		void supervisor.start();
 		createMainWindow();
 	});

@@ -41,7 +41,6 @@ export function TitleBar({
   onMin,
   onMax,
   onClose,
-  center,
   onDoubleClick,
 }: {
   menus: Menu[];
@@ -50,7 +49,6 @@ export function TitleBar({
   onMin: () => void;
   onMax: () => void;
   onClose: () => void;
-  center?: React.ReactNode;
   onDoubleClick?: () => void;
 }) {
   const [open, setOpen] = useState<string | null>(null);
@@ -109,7 +107,6 @@ export function TitleBar({
         ))}
       </div>
 
-      <div className="pointer-events-none absolute inset-x-0 flex justify-center text-xs text-faint">{center}</div>
       <div className="flex-1" />
       <div onDoubleClick={(e) => e.stopPropagation()} className="no-drag h-full">
         <WindowControls maximized={maximized} onMin={onMin} onMax={onMax} onClose={onClose} />

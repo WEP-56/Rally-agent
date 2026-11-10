@@ -19,6 +19,9 @@ const KIND_TITLE: Record<Exclude<TabKind, "task">, string> = { workstation: "Ral
 
 export default function App() {
   const [config, setConfigState] = useState<Config>(loadConfig);
+  useEffect(() => {
+    void window.rally.memory.getState().then((state) => setConfigState((current) => ({ ...current, memoryPath: state.path }))).catch(() => {});
+  }, []);
   const [onboarded, setOnboarded] = useState(loadOnboarded);
   const [view, setView] = useState<"main" | "settings">("main");
   const [section, setSection] = useState("general");
@@ -275,6 +278,7 @@ export default function App() {
             <div ref={container} className="flex min-h-0 flex-1 px-1.5 pb-1.5">
               <div className="min-w-0 flex-1 overflow-hidden rounded-xl bg-panel shadow-card">
                 <ChatPanel
+                  questions={board.questions}
                   messages={chat.messages}
                   tasks={tasks}
                   busy={chat.busy}

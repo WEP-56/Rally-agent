@@ -1,8 +1,15 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import * as fs from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { isAbsolute, join, relative } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CONFIG_DIR_NAME } from "../src/config.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../src/core/trust-manager.ts";
+
+vi.mock("node:fs", async (importOriginal) => {
+	const actual = await importOriginal<typeof fs>();
+	return { ...actual, existsSync: vi.fn(actual.existsSync) };
+});
 
 describe("ProjectTrustStore", () => {
 	let tempDir: string;
@@ -15,9 +22,16 @@ describe("ProjectTrustStore", () => {
 		cwd = join(tempDir, "project");
 		mkdirSync(agentDir, { recursive: true });
 		mkdirSync(cwd, { recursive: true });
+		// Ancestor discovery must not inspect the developer's real ~/.agents/skills.
+		const exists = vi.mocked(fs.existsSync).getMockImplementation()!;
+		vi.mocked(fs.existsSync).mockImplementation((path) => {
+			const rel = relative(tempDir, String(path));
+			return !isAbsolute(rel) && rel !== ".." && !rel.startsWith("..\\") && !rel.startsWith("../") && exists(path);
+		});
 	});
 
 	afterEach(() => {
+		vi.mocked(fs.existsSync).mockReset();
 		rmSync(tempDir, { recursive: true, force: true });
 	});
 
@@ -32,6 +46,7 @@ describe("ProjectTrustStore", () => {
 		expect(store.get(childDir)).toBe(true);
 		store.set(childDir, false);
 		expect(store.get(childDir)).toBe(false);
+		expect(store.list()).toEqual(expect.arrayContaining([{ path: parentDir, decision: true }, { path: childDir, decision: false }]));
 		store.set(childDir, null);
 		expect(store.get(childDir)).toBe(true);
 	});
@@ -40,20 +55,20 @@ describe("ProjectTrustStore", () => {
 		const originalHome = process.env.HOME;
 		process.env.HOME = tempDir;
 		try {
-			mkdirSync(join(tempDir, ".pi", "agent"), { recursive: true });
+			mkdirSync(join(tempDir, CONFIG_DIR_NAME, "agent"), { recursive: true });
 			mkdirSync(join(tempDir, ".agents", "skills"), { recursive: true });
 			expect(hasTrustRequiringProjectResources(tempDir)).toBe(false);
 			expect(hasTrustRequiringProjectResources(cwd)).toBe(false);
 
-			writeFileSync(join(tempDir, ".pi", "settings.json"), "{}");
+			writeFileSync(join(tempDir, CONFIG_DIR_NAME, "settings.json"), "{}");
 			expect(hasTrustRequiringProjectResources(tempDir)).toBe(true);
-			rmSync(join(tempDir, ".pi", "settings.json"), { force: true });
+			rmSync(join(tempDir, CONFIG_DIR_NAME, "settings.json"), { force: true });
 
-			mkdirSync(join(cwd, ".pi"), { recursive: true });
-			writeFileSync(join(cwd, ".pi", "settings.json"), "{}");
+			mkdirSync(join(cwd, CONFIG_DIR_NAME), { recursive: true });
+			writeFileSync(join(cwd, CONFIG_DIR_NAME, "settings.json"), "{}");
 			expect(hasTrustRequiringProjectResources(cwd)).toBe(true);
 
-			rmSync(join(cwd, ".pi"), { recursive: true, force: true });
+			rmSync(join(cwd, CONFIG_DIR_NAME), { recursive: true, force: true });
 			mkdirSync(join(cwd, ".agents", "skills"), { recursive: true });
 			expect(hasTrustRequiringProjectResources(cwd)).toBe(true);
 		} finally {

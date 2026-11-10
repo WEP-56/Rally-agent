@@ -31,8 +31,13 @@ export type EventKind =
 	| "gate_requested"
 	| "gate_escalated"
 	| "gate_decided"
+	| "gate_timeout"
+	| "external_action"
 	| "relay_enqueued"
 	| "relay_delivered"
+	| "relay_started"
+	| "relay_failed"
+	| "relay_discarded"
 	| "notice_enqueued"
 	| "capacity"
 	| "waiting"
@@ -46,7 +51,9 @@ export type EventKind =
 	| "access_recorded"
 	| "audit_appended"
 	| "memory_changed"
-	| "usage_updated";
+	| "usage_updated"
+	| "tool_activity"
+	| "assistant_message";
 
 /** A persisted event. `data` stays loosely typed until the task schema lands in M1-B. */
 export interface LoggedEvent {
@@ -69,9 +76,10 @@ export class EventLog {
 
 	/** Append one event and return it. Synchronous so seq order matches disk order. */
 	append(kind: EventKind, data: Record<string, unknown>): LoggedEvent {
-		const event: LoggedEvent = { seq: ++this.seq, at: Date.now(), kind, data: structuredClone(data) };
-		this.entries.push(event);
+		const event: LoggedEvent = { seq: this.seq + 1, at: Date.now(), kind, data: structuredClone(data) };
 		appendFileSync(this.file, `${JSON.stringify(event)}\n`, "utf8");
+		this.seq = event.seq;
+		this.entries.push(event);
 		return event;
 	}
 
@@ -88,6 +96,8 @@ export class EventLog {
 	private load(): void {
 		if (!existsSync(this.file)) return;
 		const text = readFileSync(this.file, "utf8");
+		// Keep the next append separate from a torn final line after a crash.
+		if (text && !text.endsWith("\n")) appendFileSync(this.file, "\n", "utf8");
 		for (const line of text.split("\n")) {
 			if (!line.trim()) continue;
 			try {

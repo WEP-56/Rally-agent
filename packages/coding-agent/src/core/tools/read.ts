@@ -67,6 +67,11 @@ const defaultReadOperations: ReadOperations = {
 	detectImageMimeType: detectSupportedImageMimeTypeFromFile,
 };
 
+/** Local operations for hosts that decorate reads while retaining streaming and image detection. */
+export function createLocalReadOperations(): ReadOperations {
+	return { ...defaultReadOperations };
+}
+
 /**
  * Stream a local file the way fs.readFile reads it: a regular file up to its size when opened, so text
  * appended during the read is not counted and a growing file still ends; a file reporting size 0 (such

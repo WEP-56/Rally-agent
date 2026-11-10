@@ -8,6 +8,7 @@ import {
 	mkdtempSync,
 	openSync,
 	readFileSync,
+	rmdirSync,
 	rmSync,
 	writeFileSync,
 	writeSync,
@@ -16,6 +17,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { findMostRecentSession, loadEntriesFromFile, SessionManager } from "../../src/core/session-manager.ts";
+import { APP_NAME } from "../../src/config.ts";
 import { assistantMsg, readSessionFileRoles, userMsg } from "../utilities.ts";
 
 const HEADER_SCAN_LIMIT_BYTES = 1024 * 1024;
@@ -395,7 +397,7 @@ describe("SessionManager.setSessionFile with corrupted files", () => {
 		writeFileSync(noHeaderFile, originalContent);
 
 		expect(() => SessionManager.open(noHeaderFile, tempDir)).toThrow(
-			`Session file is not a valid pi session: ${noHeaderFile}`,
+			`Session file is not a valid ${APP_NAME} session: ${noHeaderFile}`,
 		);
 		expect(readFileSync(noHeaderFile, "utf-8")).toBe(originalContent);
 	});
@@ -406,7 +408,7 @@ describe("SessionManager.setSessionFile with corrupted files", () => {
 		writeFileSync(nonSessionFile, originalContent);
 
 		expect(() => SessionManager.open(nonSessionFile, tempDir)).toThrow(
-			`Session file is not a valid pi session: ${nonSessionFile}`,
+			`Session file is not a valid ${APP_NAME} session: ${nonSessionFile}`,
 		);
 		expect(readFileSync(nonSessionFile, "utf-8")).toBe(originalContent);
 	});
@@ -498,11 +500,13 @@ describe("SessionManager session file creation", () => {
 		const session = SessionManager.create(tempDir, sessionDir);
 		const modelChangeId = session.appendModelChange("anthropic", "claude-sonnet-4-5");
 
-		chmodSync(sessionDir, 0o555);
+		// A directory at the exact file path fails on Windows too, unlike POSIX directory modes.
+		const blockedFile = session.getSessionFile()!;
+		mkdirSync(blockedFile);
 		try {
 			expect(() => session.appendMessage(userMsg("first question"))).toThrow();
 		} finally {
-			chmodSync(sessionDir, 0o755);
+			rmdirSync(blockedFile);
 		}
 		expect(session.getLeafId()).toBe(modelChangeId);
 		expect(session.getEntries().map((entry) => entry.id)).toEqual([modelChangeId]);

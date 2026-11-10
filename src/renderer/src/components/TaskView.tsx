@@ -3,6 +3,8 @@ import type { Task } from "../data";
 import { useApp } from "../store";
 import { RichText } from "./RichText";
 import { ToolSteps } from "./ToolSteps";
+import { ToolActivity } from "./ToolActivity";
+import { AssistantContent } from "./AssistantContent";
 import { StatusBadge, clock } from "./status";
 import { RallyLogo } from "./ui";
 
@@ -33,6 +35,10 @@ export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task)
           {/* transcript */}
           <div className="mt-6 flex flex-col gap-5">
             {task.messages.map((m, i) => {
+              if (m.role === "assistant") return <div key={m.message.id} className="animate-rise text-sm leading-relaxed">
+                <AssistantContent blocks={m.message.blocks} calls={m.message.toolCalls} streaming={m.message.streaming} />
+                {m.message.streaming && !m.message.blocks.length && <div className="py-1 text-muted">正在思考…</div>}
+              </div>;
               if (m.role === "rally")
                 return (
                   <div key={i} className="animate-rise flex flex-col items-end">
@@ -57,6 +63,7 @@ export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task)
                 </div>
               );
             })}
+            {!task.messages.some((message) => message.role === "assistant") && task.toolCalls && task.toolCalls.length > 0 && <div><div className="mb-1 text-xs text-faint">最近工具调用（最多 20 条）</div><ToolActivity calls={task.toolCalls} /></div>}
             {task.status === "running" && (
               <div className="flex items-center gap-2 text-sm text-muted">
                 <span className="relative flex h-2 w-2">

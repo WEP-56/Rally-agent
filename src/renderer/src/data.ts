@@ -1,6 +1,10 @@
-export type StepKind = "cmd" | "read" | "write" | "edit" | "search" | "web" | "think";
+export type StepKind = "cmd" | "read" | "write" | "edit" | "delete" | "search" | "web" | "memory" | "think";
+import type { ToolCall } from "../../shared/tools";
+import type { AssistantBlock, AssistantMessageView } from "../../shared/conversation";
+import type { TaskGate } from "../../shared/gate";
 
 export interface ToolStep {
+	status?: ToolCall["status"];
   kind: StepKind;
   title: string; // e.g. "Check if remote repo exists"
   target: string; // command / file path / query
@@ -11,6 +15,8 @@ export interface ToolStep {
 }
 
 export interface ChatMsg {
+	blocks?: AssistantBlock[];
+	toolCalls?: ToolCall[];
   id: string;
   role: "user" | "assistant" | "system";
   text: string;
@@ -23,11 +29,15 @@ export interface ChatMsg {
 export type TaskStatus = "running" | "done" | "failed" | "queued" | "cancelled" | "dropped" | "needs_gate" | "needs_answer" | "interrupted" | "blocked" | "pending_approval";
 
 export type TaskMsg =
+	| { role: "assistant"; message: AssistantMessageView }
   | { role: "rally"; text: string }
   | { role: "agent"; text: string }
   | { role: "tools"; steps: ToolStep[] };
 
 export interface Task {
+	gates?: TaskGate[];
+	lastExternalAction?: { tool: string; at: number };
+	toolCalls?: ToolCall[];
   id: string;
   title: string;
   summary: string;

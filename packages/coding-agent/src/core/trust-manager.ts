@@ -225,6 +225,15 @@ export class ProjectTrustStore {
 		return this.getEntry(cwd)?.decision ?? null;
 	}
 
+	/** Explicit saved decisions, without expanding inheritance to child directories. */
+	list(): ProjectTrustStoreEntry[] {
+		return withTrustFileLock(this.trustPath, () =>
+			Object.entries(readTrustFile(this.trustPath)).flatMap(([path, decision]) =>
+				typeof decision === "boolean" ? [{ path, decision }] : [],
+			),
+		);
+	}
+
 	getEntry(cwd: string): ProjectTrustStoreEntry | null {
 		return withTrustFileLock(this.trustPath, () => {
 			const data = readTrustFile(this.trustPath);

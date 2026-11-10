@@ -164,6 +164,7 @@ export function Workstation({ tasks }: { tasks: Task[] }) {
                     <StatusBadge status={t.status} className="shrink-0" />
                   </div>
                   <div className="mt-0.5 truncate text-xs text-muted">{t.summary}</div>
+                  {t.lastExternalAction && <div className="mt-1 break-all rounded-md bg-amber-500/10 px-2 py-1 text-[11px] text-amber-600 dark:text-amber-400">有对外代价的调用 · {t.lastExternalAction.tool} · {clock(t.lastExternalAction.at)}</div>}
                   <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-faint">
                     <span className="font-mono">{t.id.toUpperCase()}</span>
                     <span>·</span>

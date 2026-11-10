@@ -1,9 +1,13 @@
 import { useState } from "react";
-import { ArrowLeft, UserRound, Brain, Server, Plug, Wand2, Palette, Info, Plus, Trash2, RefreshCw, CheckCircle2, Search, FolderInput, Sun, Moon, Monitor, Loader2, RotateCcw, ExternalLink } from "lucide-react";
-import { ACCENTS, uid, useApp, type McpServer } from "../store";
+import { ArrowLeft, UserRound, Brain, Server, Plug, Wand2, Palette, Info, RefreshCw, CheckCircle2, FolderInput, Sun, Moon, Monitor, Loader2, RotateCcw, ExternalLink } from "lucide-react";
+import { ACCENTS, useApp } from "../store";
 import { cn } from "../utils/cn";
-import { Button, Input, RallyLogo, Segmented, Toggle } from "./ui";
+import { Button, RallyLogo, Segmented } from "./ui";
 import { IdentityForm, MemoryForm, ProvidersForm } from "./forms";
+import { WorkspaceForm } from "./WorkspaceForm";
+import { SkillsSection } from "./SkillsSection";
+import { ProjectTrustSection } from "./ProjectTrustSection";
+import { McpSection } from "./McpSection";
 
 function Github({ size = 14 }: { size?: number }) {
   return (
@@ -15,10 +19,12 @@ function Github({ size = 14 }: { size?: number }) {
 
 export const SECTIONS = [
   { id: "general", label: "身份", icon: UserRound, desc: "名称、性格与工作方式" },
+  { id: "workspace", label: "项目与工作区", icon: FolderInput, desc: "主对话默认工作区与最近任务项目" },
   { id: "memory", label: "记忆", icon: Brain, desc: "长期记忆的存储位置与管理" },
   { id: "providers", label: "供应商", icon: Server, desc: "供应商、协议、模型与元数据（明文存于 ~/.rally）" },
   { id: "mcp", label: "MCP 服务器", icon: Plug, desc: "通过 Model Context Protocol 扩展工具" },
   { id: "skills", label: "Skills", icon: Wand2, desc: "可复用的能力包，按需加载" },
+  { id: "trust", label: "项目信任", icon: FolderInput, desc: "管理项目资源的加载权限" },
   { id: "appearance", label: "外观", icon: Palette, desc: "主题、强调色与字号" },
   { id: "about", label: "关于", icon: Info, desc: "版本信息与更新" },
 ];
@@ -46,112 +52,6 @@ function Row({ title, desc, children }: { title: React.ReactNode; desc?: React.R
       </div>
       {children}
     </div>
-  );
-}
-
-function McpSection() {
-  const { config, setConfig } = useApp();
-  const [view, setView] = useState<"list" | "json">("list");
-  const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState<Omit<McpServer, "id" | "tools" | "enabled">>({ name: "", transport: "stdio", command: "" });
-  const upd = (id: string, p: Partial<McpServer>) => setConfig({ mcp: config.mcp.map((m) => (m.id === id ? { ...m, ...p } : m)) });
-  const json = JSON.stringify(
-    { mcpServers: Object.fromEntries(config.mcp.map((m) => [m.name, m.transport === "http" ? { url: m.command, disabled: !m.enabled } : { command: m.command.split(" ")[0], args: m.command.split(" ").slice(1), disabled: !m.enabled }])) },
-    null,
-    2,
-  );
-  return (
-    <>
-      <div className="mb-4 flex items-center justify-between">
-        <Segmented value={view} onChange={setView} options={[{ value: "list", label: "列表" }, { value: "json", label: "JSON" }]} />
-        <Button size="sm" variant="primary" onClick={() => setAdding(true)}><Plus size={13} />添加服务器</Button>
-      </div>
-      {adding && (
-        <div className="animate-pop mb-5 rounded-2xl bg-sunken p-4">
-          <div className="grid grid-cols-[1fr_auto] gap-2">
-            <Input className="bg-panel dark:bg-raised" placeholder="名称，例如 postgres" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
-            <Segmented value={draft.transport} onChange={(v) => setDraft({ ...draft, transport: v })} options={[{ value: "stdio", label: "stdio" }, { value: "http", label: "HTTP" }]} />
-          </div>
-          <Input className="mt-2 bg-panel font-mono text-[12.5px] dark:bg-raised" placeholder={draft.transport === "stdio" ? "npx -y @modelcontextprotocol/server-postgres postgresql://…" : "https://example.com/mcp"} value={draft.command} onChange={(e) => setDraft({ ...draft, command: e.target.value })} />
-          <div className="mt-3 flex justify-end gap-2">
-            <Button size="sm" variant="ghost" onClick={() => setAdding(false)}>取消</Button>
-            <Button
-              size="sm"
-              variant="primary"
-              disabled={!draft.name || !draft.command}
-              onClick={() => {
-                setConfig({ mcp: [...config.mcp, { ...draft, id: uid(), enabled: true, tools: Math.floor(Math.random() * 12) + 2 }] });
-                setDraft({ name: "", transport: "stdio", command: "" });
-                setAdding(false);
-              }}
-            >
-              添加并连接
-            </Button>
-          </div>
-        </div>
-      )}
-      {view === "list" ? (
-        <Group title={`已配置 ${config.mcp.length} 个服务器`}>
-          {config.mcp.map((m) => (
-            <Row
-              key={m.id}
-              title={
-                <span className="flex items-center gap-2">
-                  <span className={cn("h-2 w-2 rounded-full", m.enabled ? "bg-accent" : "bg-press")} />
-                  <span className="font-medium">{m.name}</span>
-                  <span className="rounded bg-sunken px-1.5 text-[10px] uppercase text-faint">{m.transport}</span>
-                  {m.enabled && <span className="text-[11px] text-faint">{m.tools} 个工具</span>}
-                </span>
-              }
-              desc={<span className="block truncate font-mono">{m.command}</span>}
-            >
-              <button onClick={() => setConfig({ mcp: config.mcp.filter((x) => x.id !== m.id) })} className="rounded-md p-1.5 text-faint hover:bg-red-500/10 hover:text-red-500"><Trash2 size={14} /></button>
-              <Toggle checked={m.enabled} onChange={(v) => upd(m.id, { enabled: v })} />
-            </Row>
-          ))}
-        </Group>
-      ) : (
-        <pre className="selectable overflow-auto rounded-2xl bg-term p-4 font-mono text-[12px] leading-relaxed text-fg/85 shadow-soft">{json}</pre>
-      )}
-    </>
-  );
-}
-
-function SkillsSection() {
-  const { config, setConfig } = useApp();
-  const [q, setQ] = useState("");
-  const list = config.skills.filter((s) => (s.name + s.desc).toLowerCase().includes(q.toLowerCase()));
-  return (
-    <>
-      <div className="mb-4 flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
-          <Input className="pl-8" placeholder="搜索 skills" value={q} onChange={(e) => setQ(e.target.value)} />
-        </div>
-        <Button
-          onClick={() => setConfig({ skills: [...config.skills, { id: uid(), name: "my-skill-" + (config.skills.length + 1), desc: "从本地文件夹导入的 SKILL.md", source: "本地", enabled: true }] })}
-        >
-          <FolderInput size={14} />从文件夹导入
-        </Button>
-      </div>
-      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
-        {list.map((s) => (
-          <div key={s.id} className="flex items-start gap-3 rounded-2xl bg-sunken p-4 transition-shadow hover:shadow-soft">
-            <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", s.enabled ? "bg-accent-soft text-accent" : "bg-panel text-faint dark:bg-raised")}>
-              <Wand2 size={16} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="truncate font-mono text-[13px] font-medium">{s.name}</span>
-                <span className="rounded bg-panel px-1.5 text-[10px] text-faint dark:bg-raised">{s.source}</span>
-              </div>
-              <div className="mt-1 text-xs text-muted">{s.desc}</div>
-            </div>
-            <Toggle checked={s.enabled} onChange={(v) => setConfig({ skills: config.skills.map((x) => (x.id === s.id ? { ...x, enabled: v } : x)) })} />
-          </div>
-        ))}
-      </div>
-    </>
   );
 }
 
@@ -273,21 +173,12 @@ export function Settings({ section, setSection, onBack }: { section: string; set
           <h1 className="text-2xl font-semibold tracking-tight">{cur.label}</h1>
           <p className="mb-8 mt-1 text-sm text-muted">{cur.desc}</p>
           {cur.id === "general" && <IdentityForm />}
-          {cur.id === "memory" && (
-            <>
-              <MemoryForm />
-              <div className="mt-7">
-                <Group title="记忆管理">
-                  <Row title="已存储的记忆" desc="128 条事实 · 42 份任务摘要 · 3.2 MB"><Button size="sm">在资源管理器中打开</Button></Row>
-                  <Row title="自动整理" desc="每天空闲时合并重复记忆并清理过期内容"><Toggle checked onChange={() => {}} /></Row>
-                  <Row title="清空所有记忆" desc="此操作不可撤销"><Button size="sm" variant="danger">清空</Button></Row>
-                </Group>
-              </div>
-            </>
-          )}
+          {cur.id === "workspace" && <WorkspaceForm />}
+          {cur.id === "memory" && <MemoryForm />}
           {cur.id === "providers" && <ProvidersForm />}
           {cur.id === "mcp" && <McpSection />}
           {cur.id === "skills" && <SkillsSection />}
+          {cur.id === "trust" && <ProjectTrustSection />}
           {cur.id === "appearance" && <AppearanceSection />}
           {cur.id === "about" && <AboutSection />}
         </div>

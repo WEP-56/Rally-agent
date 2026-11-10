@@ -2495,6 +2495,12 @@ export class AgentSession {
 		}
 	}
 
+	/** Custom messages waiting for a turn or a safe history boundary, without consuming them. */
+	getPendingCustomMessages(): readonly CustomMessage[] {
+		return [...this._pendingNextTurnMessages, ...this._pendingCustomMessages,
+			...this.agent.peekQueuedMessages().filter((message): message is CustomMessage => message.role === "custom")];
+	}
+
 	private _appendCustomMessage(appMessage: CustomMessage): void {
 		this.sessionManager.appendCustomMessageEntry(
 			appMessage.customType,

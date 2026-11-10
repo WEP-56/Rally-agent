@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { TaskBoard, TaskView } from "../../shared/task";
+import { questionViews } from "../../shared/task";
 import type { Task, TaskMsg } from "./data";
 
 const api = window.rally.tasks;
@@ -29,7 +30,10 @@ export function useTasks(): TaskBoardState {
 				const tasks = exists
 					? current.tasks.map((task) => (task.id === event.task.id ? event.task : task))
 					: [...current.tasks, event.task];
-				return { ...current, tasks };
+				const open = tasks.filter((task) => !task.ended);
+				const ended = tasks.filter((task) => task.ended).sort((a, b) => b.ended!.at - a.ended!.at || Number(b.id.slice(2)) - Number(a.id.slice(2))).slice(0, 20);
+				const questions = [...(current.questions ?? []).filter((item) => item.taskId !== event.task.id), ...questionViews(event.task)];
+				return { ...current, tasks: [...open, ...ended], questions };
 			});
 		});
 		return () => {
@@ -53,6 +57,9 @@ function toTask(view: TaskView): Task {
 	const status = view.status;
 	return {
 		id: view.id,
+		toolCalls: view.toolCalls,
+		gates: view.gates,
+		lastExternalAction: view.lastExternalAction,
 		title: view.title,
 		summary: view.lastReport?.summary ?? view.statusText,
 		status,
@@ -74,7 +81,10 @@ function toTask(view: TaskView): Task {
 function messagesOf(view: TaskView): TaskMsg[] {
 	const messages: TaskMsg[] = view.quotes.map((quote) => ({ role: "rally", text: quote.text }));
 	if (view.note) messages.push({ role: "rally", text: `主 agent 备注：${view.note}` });
-	if (view.lastReport) messages.push({ role: "agent", text: `${view.lastReport.state}：${view.lastReport.summary}` });
+	for (const message of view.assistantMessages ?? []) {
+		if (message.blocks.length || message.streaming) messages.push({ role: "assistant", message });
+	}
+	if (!view.assistantMessages?.length && view.lastReport) messages.push({ role: "agent", text: `${view.lastReport.state}：${view.lastReport.summary}` });
 	if (view.changedFiles?.length) messages.push({ role: "agent", text: `改动文件：${view.changedFiles.join(", ")}` });
 	return messages;
 }

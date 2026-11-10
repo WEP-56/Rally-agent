@@ -54,6 +54,7 @@ export {
 	type PowerShellToolOptions,
 } from "./powershell.ts";
 export {
+	createLocalReadOperations,
 	createReadTool,
 	createReadToolDefinition,
 	type ReadOperations,

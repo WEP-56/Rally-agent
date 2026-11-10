@@ -1,0 +1,25 @@
+{
+	"irreversible": {
+		"reset": ["hard"],
+		"checkout": ["force", "patch", "pathspec-from-file", "force-create"],
+		"switch": ["force", "discard-changes", "force-create"],
+		"push": ["force", "force-with-lease", "force-if-includes", "delete", "mirror", "prune"],
+		"branch": ["force-delete"],
+		"gc": ["prune"],
+		"always": ["clean"],
+		"stash": ["drop", "clear"],
+		"reflog": ["expire", "delete", "drop"]
+	},
+	"external": ["push"],
+	"options": {
+		"fetch": ["all", "multiple", "append|a", "atomic", "depth=", "deepen=", "shallow-since=", "shallow-exclude=", "unshallow", "update-shallow", "negotiation-tip=", "negotiate-only", "dry-run|n", "write-fetch-head", "keep|k", "force|f", "prefetch", "prune|p", "prune-tags|P", "tags|t", "refmap=", "refetch", "recurse-submodules?", "jobs|j=", "set-upstream", "submodule-prefix=", "recurse-submodules-default=", "update-head-ok|u", "upload-pack=", "server-option|o=", "quiet|q", "verbose|v", "progress", "ipv4|4", "ipv6|6", "filter=", "auto-maintenance", "auto-gc", "write-commit-graph", "stdin"],
+		"pull": ["all", "append|a", "atomic", "depth=", "deepen=", "shallow-since=", "shallow-exclude=", "unshallow", "update-shallow", "negotiation-tip=", "dry-run|n", "keep|k", "force|f", "prune|p", "tags|t", "refmap=", "refetch", "recurse-submodules?", "jobs|j=", "set-upstream", "update-head-ok|u", "upload-pack=", "server-option|o=", "quiet|q", "verbose|v", "progress", "ipv4|4", "ipv6|6", "filter=", "rebase|r?", "ff", "ff-only", "autostash", "commit", "edit|e", "cleanup=", "signoff", "stat", "log?", "squash", "verify", "strategy|s=", "strategy-option|X=", "gpg-sign|S?", "verify-signatures", "allow-unrelated-histories"],
+		"gc": ["prune?", "aggressive", "auto", "quiet|q", "force", "keep-largest-pack", "detach", "cruft", "max-cruft-size=", "expire-to="],
+		"reset": ["hard", "soft", "mixed", "merge", "keep", "patch|p", "quiet|q", "refresh", "intent-to-add|N", "recurse-submodules?", "pathspec-from-file=", "pathspec-file-nul"],
+		"checkout": ["force|f", "force-create|B=", "create|b=", "orphan=", "detach|d", "quiet|q", "progress", "guess", "track|t?", "merge|m", "conflict=", "ours|2", "theirs|3", "patch|p", "overlay", "ignore-skip-worktree-bits", "ignore-other-worktrees", "overwrite-ignore", "recurse-submodules?", "pathspec-from-file=", "pathspec-file-nul", "unified|U=", "inter-hunk-context=", "reflog|l"],
+		"switch": ["force|f", "discard-changes", "force-create|C=", "create|c=", "orphan=", "detach|d", "quiet|q", "progress", "guess", "track|t?", "merge|m", "conflict=", "ignore-other-worktrees", "overwrite-ignore", "recurse-submodules?"],
+		"restore": ["source|s=", "staged|S", "worktree|W", "quiet|q", "progress", "ours|2", "theirs|3", "merge|m", "conflict=", "patch|p", "overlay", "ignore-unmerged", "ignore-skip-worktree-bits", "recurse-submodules?", "pathspec-from-file=", "pathspec-file-nul", "unified|U=", "inter-hunk-context="],
+		"push": ["repo=", "all", "branches", "mirror", "delete|d", "tags", "follow-tags", "signed?", "atomic", "dry-run|n", "force|f", "force-with-lease?", "force-if-includes", "recurse-submodules=", "thin", "receive-pack=", "exec=", "set-upstream|u", "push-option|o=", "progress", "prune", "verify", "ipv4|4", "ipv6|6", "quiet|q", "verbose|v", "porcelain"],
+		"branch": ["delete|d", "force-delete|D", "force|f", "move|m", "force-move|M", "copy|c", "force-copy|C", "list|l", "all|a", "remotes|r", "verbose|v", "quiet|q", "contains?", "merged?", "points-at=", "format=", "sort=", "color?", "column?", "ignore-case|i", "abbrev?", "omit-empty", "show-current", "track|t?", "set-upstream-to|u=", "unset-upstream", "create-reflog", "edit-description", "recurse-submodules"]
+	}
+}

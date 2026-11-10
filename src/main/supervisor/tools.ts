@@ -2,24 +2,31 @@
 // Validation lives here; the store only records facts.
 
 import { existsSync, statSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import type { AgentToolResult, ToolDefinition } from "@rally/coding-agent";
 import { type Static, Type } from "typebox";
 import type { Quote, QuoteRef, ReportState, TaskBoard } from "../../shared/task.ts";
 import { taskView } from "../../shared/task.ts";
 import { ensureDir, normalizePath, resolveScope, TaskError, type TaskStore } from "./task-store.ts";
+import { page, readTask, TaskReadSchema, type TaskReadParams } from "./task-read.ts";
 
 /** What task tools may ask the supervisor to do. Keeps the tools free of Pi/Electron imports. */
 export interface TaskToolHost {
 	readonly store: TaskStore;
 	readonly workspaceDir: string;
-	currentProject(): string | null;
 	autoApprove(): boolean;
 	quote(ref: QuoteRef): Quote | null;
 	tick(): void;
-	deliverSteer(taskId: string, text: string): void;
-	deliverAnswer(taskId: string, text: string): void;
+	deliverSteer(taskId: string, text: string): InputDelivery;
+	deliverAnswer(taskId: string, text: string): InputDelivery;
 	abortWorker(taskId: string): void;
 	board(): TaskBoard;
+}
+
+export type InputDelivery = "queued_with_first_message" | "steered" | "woke_worker" | "queued_for_worker";
+
+function dispatchState(task: Parameters<typeof taskView>[0]) {
+	return { taskId: task.id, status: taskView(task).status, approval: task.approval.state, queuedReason: task.queue?.reason, outputDir: task.outputDir };
 }
 
 export function createMainTaskTools(host: TaskToolHost): ToolDefinition[] {
@@ -71,7 +78,7 @@ function dispatchTool(host: TaskToolHost): ToolDefinition {
 		title: Type.String({ description: "short task title, <= 40 chars" }),
 		quotes: Type.Array(QuoteRefSchema, { minItems: 1 }),
 		note: Type.Optional(NoteSchema),
-		cwd: Type.Optional(Type.String({ description: "working directory; defaults to the current project" })),
+		cwd: Type.String({ description: "Explicit absolute worker working directory chosen by the router from the user's request and current directory context." }),
 		mode: Type.Union([Type.Literal("write"), Type.Literal("readonly")]),
 		scope: Type.Optional(
 			Type.Array(Type.String(), { description: "paths this task will write; overlap only warns" }),
@@ -91,8 +98,12 @@ function dispatchTool(host: TaskToolHost): ToolDefinition {
 				if (!title) return fail("TITLE_REQUIRED: 标题不能为空");
 				if ([...title].length > 40) return fail("TITLE_TOO_LONG: 标题超过 40 字");
 				if (countWords(params.note ?? "") > 30) return fail("NOTE_TOO_LONG: 备注超过 30 个词");
-				const base = host.currentProject() ?? host.workspaceDir;
-				const cwd = normalizePath(params.cwd ?? base, base);
+				const dispatchKey = JSON.stringify([[...new Set(quotes.map((quote) => quote.messageId))].sort(), title]);
+				const duplicate = host.store.list().find((task) => task.dispatchKey === dispatchKey && Date.now() - task.createdAt >= 0 && Date.now() - task.createdAt < 60000);
+				if (duplicate) return result(JSON.stringify({ ...dispatchState(duplicate), reused: true }), { taskId: duplicate.id, reused: true });
+				if (!params.cwd || !isAbsolute(params.cwd)) return fail("CWD_REQUIRED: router 必须明确指定 worker 的绝对工作目录");
+				const base = host.workspaceDir;
+				const cwd = normalizePath(params.cwd, base);
 				if (!existsSync(cwd) || !statSync(cwd).isDirectory()) return fail(`CWD_NOT_FOUND: ${cwd}`);
 				const dependsOn = params.dependsOn ?? [];
 				for (const id of dependsOn) {
@@ -101,6 +112,7 @@ function dispatchTool(host: TaskToolHost): ToolDefinition {
 				if (detectCycle(host.store, dependsOn, new Set())) return fail("DEP_CYCLE: 依赖成环");
 				const scope = resolveScope(params.scope, cwd);
 				const task = host.store.create({
+					dispatchKey,
 					title,
 					quotes,
 					note: params.note?.trim(),
@@ -112,7 +124,6 @@ function dispatchTool(host: TaskToolHost): ToolDefinition {
 				});
 				const taskId = task.task.id;
 				ensureDir(task.task.outputDir);
-				const view = taskView(task.task);
 				const warnings = task.warnings.map(
 					(warning) =>
 						`${warning.withTaskId} 正在写 ${warning.paths.join("、")}，与本任务 scope 重叠（仍会并行，请确认是否需要串行）`,
@@ -120,10 +131,7 @@ function dispatchTool(host: TaskToolHost): ToolDefinition {
 				host.tick();
 				return result(
 					JSON.stringify({
-						taskId,
-						status: view.status,
-						approval: host.autoApprove() ? "approved" : "pending",
-						outputDir: task.task.outputDir,
+						...dispatchState(task.task),
 						warnings,
 					}),
 					{ taskId, warnings: warnings.length },
@@ -157,6 +165,7 @@ function approveTool(host: TaskToolHost): ToolDefinition {
 				return result(
 					JSON.stringify({
 						taskId: params.taskId,
+						status: taskView(task).status,
 						approval: "approved",
 						basis: quotes.map((quote) => quote.messageId),
 					}),
@@ -198,7 +207,8 @@ function updateTool(host: TaskToolHost): ToolDefinition {
 				}
 				if (params.note !== undefined) patch.note = params.note;
 				if (params.cwd !== undefined) {
-					const base = host.currentProject() ?? host.workspaceDir;
+					if (!isAbsolute(params.cwd)) return fail("CWD_REQUIRED: router 必须明确指定 worker 的绝对工作目录");
+					const base = host.workspaceDir;
 					const cwd = normalizePath(params.cwd, base);
 					if (!existsSync(cwd) || !statSync(cwd).isDirectory()) return fail(`CWD_NOT_FOUND: ${cwd}`);
 					patch.cwd = cwd;
@@ -211,8 +221,9 @@ function updateTool(host: TaskToolHost): ToolDefinition {
 					patch.dependsOn = params.dependsOn;
 				}
 				const updated = host.store.update(params.taskId, patch);
+				const warnings = host.store.warnOverlaps(params.taskId, "update");
 				return result(
-					JSON.stringify({ taskId: params.taskId, title: updated.title, status: taskView(updated).status }),
+					JSON.stringify({ taskId: params.taskId, title: updated.title, status: taskView(updated).status, warnings }),
 				);
 			} catch (error) {
 				return fail(messageOf(error));
@@ -240,8 +251,8 @@ function steerTool(host: TaskToolHost): ToolDefinition {
 				const quotes = freezeQuotes(host, params.quotes);
 				checkNote(params.note);
 				host.store.steer(params.taskId, quotes, undefined, params.note);
-				host.deliverSteer(params.taskId, formatInput(quotes, params.note));
-				return result(JSON.stringify({ taskId: params.taskId, state: task.ended ? "ended" : "steered" }));
+				const delivery = host.deliverSteer(params.taskId, formatInput(quotes, params.note));
+				return result(JSON.stringify({ taskId: params.taskId, delivery }));
 			} catch (error) {
 				return fail(messageOf(error));
 			}
@@ -267,19 +278,20 @@ function answerTool(host: TaskToolHost): ToolDefinition {
 				const task = host.store.get(params.taskId);
 				if (!task) return fail(`TASK_NOT_FOUND: ${params.taskId}`);
 				if (!task.attention) return fail("NO_QUESTION: 该任务没有待回答的问题");
-				if (task.attention.id !== params.questionId) return fail("QUESTION_STALE: 问题已被替换");
+				if (task.attention.id !== params.questionId || task.attention.answer) return fail("QUESTION_STALE: 问题已被回答或替换");
 				const quotes = freezeQuotes(host, params.quotes);
 				checkNote(params.note);
 				const questionId = task.attention.id;
 				const body = formatInput(quotes, params.note);
 				host.store.answerAttention(
 					params.taskId,
+					questionId,
 					body,
 					"main",
 					quotes.map((quote) => quote.messageId),
 				);
-				host.deliverAnswer(params.taskId, body);
-				return result(JSON.stringify({ taskId: params.taskId, questionId }));
+				const delivery = host.deliverAnswer(params.taskId, body);
+				return result(JSON.stringify({ taskId: params.taskId, questionId, delivery }));
 			} catch (error) {
 				return fail(messageOf(error));
 			}
@@ -310,8 +322,9 @@ function resumeTool(host: TaskToolHost): ToolDefinition {
 				const scope = params.scope ? resolveScope(params.scope, task.cwd) : undefined;
 				const nextRun = task.runs.length + 1;
 				host.store.resume(params.taskId, { note: params.note, quotes, mode: params.mode, scope, autoApprove: host.autoApprove() });
+				const warnings = host.store.warnOverlaps(params.taskId, "resume");
 				host.tick();
-				return result(JSON.stringify({ taskId: params.taskId, run: nextRun, approval: task.approval.state }));
+				return result(JSON.stringify({ taskId: params.taskId, runN: nextRun, status: taskView(task).status, approval: task.approval.state, warnings }));
 			} catch (error) {
 				return fail(messageOf(error));
 			}
@@ -335,11 +348,14 @@ function cancelTool(host: TaskToolHost): ToolDefinition {
 			try {
 				const task = host.store.get(params.taskId);
 				if (!task) return fail(`TASK_NOT_FOUND: ${params.taskId}`);
-				freezeQuotes(host, params.quotes);
+				if (task.ended && task.ended.outcome !== "cancelled") return fail("TASK_ENDED: 任务已结束，不能更改为取消");
+				const quotes = freezeQuotes(host, params.quotes);
+				host.store.cancelRunning(params.taskId, "main", { actor: "main", basis: quotes.map((quote) => quote.messageId) });
 				host.abortWorker(params.taskId);
-				host.store.cancelRunning(params.taskId, "main");
 				host.tick();
-				return result(JSON.stringify({ taskId: params.taskId, state: "cancelled" }));
+				const affected = host.store.list().filter((item) => item.queue?.reason === "dependency_failed" && item.queue.holder === task.id)
+					.map((item) => ({ taskId: item.id, status: "dependency_failed" }));
+				return result(JSON.stringify({ taskId: params.taskId, outcome: "cancelled", affected, coverage: { jobs: "not_implemented" } }));
 			} catch (error) {
 				return fail(messageOf(error));
 			}
@@ -348,59 +364,23 @@ function cancelTool(host: TaskToolHost): ToolDefinition {
 }
 
 function readTool(host: TaskToolHost): ToolDefinition {
-	const schema = Type.Object({
-		taskId: Type.Optional(Type.String()),
-		view: Type.Object({
-			card: Type.Optional(Type.Boolean()),
-			report: Type.Optional(Type.Boolean()),
-			runs: Type.Optional(Type.Boolean()),
-			otherTasks: Type.Optional(Type.Boolean()),
-			files: Type.Optional(Type.Boolean()),
-		}),
-		limit: Type.Optional(Type.Number()),
-	});
-	type Params = Static<typeof schema>;
 	return {
 		name: "task_read",
 		label: "读取任务",
-		description: "Read task state, the last worker report, runs, or the whole board.",
-		parameters: schema,
-		async execute(_toolCallId: string, params: Params) {
+		description: "Read board/card/report/runs/files/timeline. Defaults to board without taskId, otherwise card. offset/limit page lists (20 by default, max 100). Never returns worker transcripts. Files includes observed file-tool access and shell cwd/command; shell effects remain unknown; see coverage for gaps.",
+		parameters: TaskReadSchema,
+		async execute(_toolCallId: string, params: TaskReadParams) {
 			try {
-				const view = params.view;
-				if (view.otherTasks) {
+				const view = params.view ?? (params.taskId ? "card" : "board");
+				if (view === "board") {
 					const board = host.board();
-					const limit = Math.max(1, Math.min(params.limit ?? 10, 30));
-					return result(
-						JSON.stringify({ tasks: board.tasks.slice(0, limit), active: board.active, limit: board.limit }),
-					);
+					const { items, ...paging } = page(board.tasks.map(({ toolCalls: _toolCalls, assistantMessages: _assistantMessages, ...card }) => card), params);
+					return result(JSON.stringify({ tasks: items, active: board.active, limit: board.limit, ...paging }));
 				}
-				if (!params.taskId) return fail("TASK_NOT_FOUND: 需要 taskId 或 view.otherTasks");
+				if (!params.taskId) return fail("TASK_NOT_FOUND: 该视图需要 taskId");
 				const task = host.store.get(params.taskId);
 				if (!task) return fail(`TASK_NOT_FOUND: ${params.taskId}`);
-				const payload: Record<string, unknown> = {};
-				if (view.card !== false) payload.card = taskView(task);
-				if (view.card !== false) {
-					payload.note = task.note;
-					payload.scope = task.scope;
-					payload.outputDir = task.outputDir;
-				}
-				if (view.report) {
-					const lastRun = task.runs[task.runs.length - 1];
-					payload.report = lastRun?.lastReport ?? null;
-					payload.changedFiles = task.changedFiles ?? [];
-				}
-				if (view.runs)
-					payload.runs = task.runs.map((run) => ({
-						id: run.id,
-						n: run.n,
-						trigger: run.trigger,
-						startedAt: run.startedAt,
-						endedAt: run.endedAt,
-						endReason: run.endReason,
-					}));
-				if (view.files) payload.changedFiles = task.changedFiles ?? [];
-				return result(JSON.stringify(payload));
+				return result(JSON.stringify(readTask(host.store, task, params)));
 			} catch (error) {
 				return fail(messageOf(error));
 			}
@@ -413,9 +393,9 @@ export interface WorkerToolHost {
 	report(
 		state: ReportState,
 		summary: string,
-		question?: string,
+		question?: string | null,
 		options?: string[],
-	): { taskId: string; ended: boolean; attentionId?: string };
+	): { taskId: string; ended: boolean; notifiedMain: boolean; attentionId?: string; answer?: string };
 	store: TaskStore;
 	taskId: string;
 	dependsOn: string[];
@@ -431,8 +411,8 @@ export function createWorkerTools(host: WorkerToolHost): ToolDefinition[] {
 			Type.Literal("dropped"),
 		]),
 		summary: Type.String({ description: "outcome or progress in a few sentences; quote numbers and paths" }),
-		question: Type.Optional(Type.String()),
-		options: Type.Optional(Type.Array(Type.String())),
+		question: Type.Optional(Type.Union([Type.String({ minLength: 1 }), Type.Null()])),
+		options: Type.Optional(Type.Array(Type.String({ maxLength: 40 }), { minItems: 2, maxItems: 4 })),
 	});
 	type ReportParams = Static<typeof reportSchema>;
 	const report: ToolDefinition = {
@@ -443,6 +423,7 @@ export function createWorkerTools(host: WorkerToolHost): ToolDefinition[] {
 		parameters: reportSchema,
 		async execute(_toolCallId: string, params: ReportParams) {
 			try {
+				if (params.options && typeof params.question !== "string") return fail("OPTIONS_INVALID: options 仅在 question 为字符串时有效");
 				const outcome = host.report(params.state, params.summary, params.question, params.options);
 				const note =
 					params.state === "ready"
@@ -452,51 +433,27 @@ export function createWorkerTools(host: WorkerToolHost): ToolDefinition[] {
 							: params.state === "failed" || params.state === "dropped"
 								? "任务已结束。不要再调用工具。"
 								: "已记录进展，继续工作。";
-				return result(JSON.stringify(outcome), { note });
+				return result(JSON.stringify({ ...outcome, recorded: true, taskEnded: outcome.ended }), { note });
 			} catch (error) {
 				return fail(messageOf(error));
 			}
 		},
 	};
-	const readSchema = Type.Object({
-		taskId: Type.Optional(Type.String()),
-		view: Type.Object({
-			card: Type.Optional(Type.Boolean()),
-			report: Type.Optional(Type.Boolean()),
-			upstream: Type.Optional(Type.Boolean()),
-			files: Type.Optional(Type.Boolean()),
-		}),
-	});
-	type ReadParams = Static<typeof readSchema>;
 	const read: ToolDefinition = {
 		name: "task_read",
 		label: "读取任务",
-		description: "Read your own task, or the tasks you depend on. Other tasks are not visible.",
-		parameters: readSchema,
-		async execute(_toolCallId: string, params: ReadParams) {
+		description: "Read card/report/runs/files/timeline for your task (default) or direct upstream tasks, with offset/limit paging. Board and unrelated tasks are not visible. Files records observed file-tool access; shell effects and other gaps are explicit in coverage.",
+		parameters: TaskReadSchema,
+		async execute(_toolCallId: string, params: TaskReadParams) {
 			try {
+				if (params.view === "board") return fail("NOT_VISIBLE: worker 不能读取全局任务板");
 				const target = params.taskId ?? host.taskId;
 				if (target !== host.taskId && !host.dependsOn.includes(target)) {
 					return fail("NOT_VISIBLE: 该任务不在你的可见范围");
 				}
 				const task = host.store.get(target);
 				if (!task) return fail(`TASK_NOT_FOUND: ${target}`);
-				const payload: Record<string, unknown> = {};
-				if (params.view.card !== false) payload.card = taskView(task);
-				if (params.view.report) {
-					const lastRun = task.runs[task.runs.length - 1];
-					payload.report = lastRun?.lastReport ?? null;
-				}
-				if (params.view.upstream) {
-					payload.upstream = host.dependsOn.map((id) => {
-						const upstream = host.store.get(id);
-						return upstream
-							? { card: taskView(upstream), report: upstream.runs[upstream.runs.length - 1]?.lastReport ?? null }
-							: { id, missing: true };
-					});
-				}
-				if (params.view.files) payload.changedFiles = task.changedFiles ?? [];
-				return result(JSON.stringify(payload));
+				return result(JSON.stringify(readTask(host.store, task, params)));
 			} catch (error) {
 				return fail(messageOf(error));
 			}

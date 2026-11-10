@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Download, Eye, EyeOff, FolderOpen, Info, Loader2, Plus, Trash2 } from "lucide-react";
+import { Download, Eye, EyeOff, Info, Loader2, Plus, Trash2 } from "lucide-react";
 import {
 	type ModelEntry,
 	type ProviderEntry,
@@ -43,37 +43,7 @@ export function IdentityForm() {
   );
 }
 
-export function MemoryForm() {
-  const { config, setConfig } = useApp();
-  const [picking, setPicking] = useState(false);
-  return (
-    <div className="flex flex-col gap-3">
-      <Field label="记忆存储路径">
-        <div className="flex gap-2">
-          <Input className="font-mono text-[13px]" value={config.memoryPath} onChange={(e) => setConfig({ memoryPath: e.target.value })} />
-          <Button
-            onClick={() => {
-              setPicking(true);
-              setTimeout(() => {
-                setPicking(false);
-                setConfig({ memoryPath: "D:\\Rally\\memory" });
-              }, 700);
-            }}
-          >
-            {picking ? <Loader2 size={14} className="animate-spin" /> : <FolderOpen size={14} />}浏览…
-          </Button>
-        </div>
-      </Field>
-      <div className="flex gap-2.5 rounded-xl bg-sunken px-3.5 py-3 text-xs leading-relaxed text-muted">
-        <Info size={14} className="mt-0.5 shrink-0 text-faint" />
-        <div>
-          Rally 会在此目录下保存长期记忆（偏好、项目事实、任务摘要），以 Markdown 与向量索引两种形式存储。你可以随时用任何编辑器查看或删除。
-          <div className="mt-1.5 font-mono text-[11px] text-faint">{config.memoryPath}\facts.md · \tasks\ · \index.sqlite</div>
-        </div>
-      </div>
-    </div>
-  );
-}
+export { MemoryForm } from "./MemoryForm";
 
 const PROTOCOLS: { value: ProviderProtocol; label: string }[] = [
 	{ value: "messages", label: "messages" },

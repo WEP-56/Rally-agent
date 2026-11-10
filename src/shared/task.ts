@@ -1,5 +1,8 @@
 // Task domain shared by the supervisor and the renderer (docs 01 section 2 / 3).
 // Facts only: approval, runs, reports, attention, gates, endings. Display status is derived.
+import type { ToolCall } from "./tools.ts";
+import type { AssistantMessageView } from "./conversation.ts";
+import type { TaskGate } from "./gate.ts";
 
 export type TaskMode = "write" | "readonly";
 export type ReportState = "progress" | "ready" | "blocked" | "failed" | "dropped";
@@ -40,6 +43,7 @@ export interface TaskInput {
 	quotes?: Quote[];
 	note?: string;
 	body?: string;
+	questionId?: string;
 	at: number;
 	deliveredAt?: number;
 	readAt?: number;
@@ -53,13 +57,34 @@ export interface TaskAttention {
 	askedAt: number;
 	escalatedAt?: number;
 	answer?: { by: "main" | "user"; basis: string[]; text: string; at: number };
+	closed?: { reason: "replaced" | "cleared" | "task_ended" | "run_ended"; at: number };
 }
 
 export interface TaskUsage {
+	/** All input tokens, including cache reads and writes. */
 	inputTokens: number;
 	outputTokens: number;
+	cacheReadTokens?: number;
+	cacheWriteTokens?: number;
 	costUsd?: number;
+	/** Some requests have no price/billing data; costUsd then covers only known requests. */
+	costIncomplete?: boolean;
 	toolCalls: number;
+}
+
+/** Observed tool access, never inferred by parsing shell commands. */
+export interface TaskAccess {
+	toolCallId: string;
+	runId: string;
+	tool: string;
+	at: number;
+	kind: "fs_read" | "fs_write" | "fs_delete" | "shell" | "net";
+	target: string;
+	created?: boolean;
+	command?: string;
+	/** A Git repository scope is not an exact changed file. */
+	coverage?: "command_scope";
+	outcome?: "attempt";
 }
 
 export interface Task {
@@ -84,15 +109,22 @@ export interface Task {
 	runs: TaskRun[];
 	inputs: TaskInput[];
 	attention?: TaskAttention;
+	attentionHistory?: TaskAttention[];
+	gates?: TaskGate[];
+	lastExternalAction?: { tool: string; at: number };
 	ended?: { at: number; outcome: TaskOutcome; by: "worker" | "main" | "system"; reason?: string };
 	usage: TaskUsage;
 	/** Files touched by tools, collected from tool events (04 §2.2). */
 	changedFiles?: string[];
+	dispatchKey?: string;
 	/** Derived queue facts, written by the scheduler. */
 	queue?: { reason: QueueReason; holder?: string };
 }
 
 export interface TaskView {
+	durationMs: number;
+	assistantMessages?: AssistantMessageView[];
+	toolCalls?: ToolCall[];
 	id: string;
 	title: string;
 	status: TaskDisplayStatus;
@@ -107,7 +139,10 @@ export interface TaskView {
 	updatedAt: number;
 	approval: Task["approval"];
 	queue?: Task["queue"];
-	attention?: { id: string; question: string; escalated: boolean };
+	attention?: TaskAttention;
+	attentionHistory?: TaskAttention[];
+	gates?: TaskGate[];
+	lastExternalAction?: Task["lastExternalAction"];
 	lastReport?: { state: ReportState; summary: string; at: number };
 	ended?: Task["ended"];
 	changedFiles?: string[];
@@ -130,9 +165,23 @@ export type TaskDisplayStatus =
 /** Tasks the board shows: open ones plus the most recent ended ones. */
 export interface TaskBoard {
 	tasks: TaskView[];
+	/** Main-chat question records outlive the board's 20-ended-task window. */
+	questions?: TaskQuestionView[];
 	active: number;
 	limit: number;
 	autoApprove: boolean;
+}
+
+export interface TaskQuestionView {
+	taskId: string;
+	title: string;
+	question: TaskAttention;
+}
+
+export function questionViews(task: Pick<Task, "id" | "title" | "attention" | "attentionHistory">): TaskQuestionView[] {
+	return [...(task.attentionHistory ?? []), ...(task.attention ? [task.attention] : [])]
+		.filter((question) => question.escalatedAt !== undefined || question.answer)
+		.map((question) => ({ taskId: task.id, title: task.title, question }));
 }
 
 /** Derive the coarse status exactly as docs 01 section 3 orders the table. */
@@ -140,6 +189,7 @@ export function taskView(task: Task, now = Date.now()): TaskView {
 	const lastRun = task.runs[task.runs.length - 1];
 	const { status, statusText } = derive(task, lastRun, now);
 	return {
+		durationMs: task.runs.reduce((total, run) => total + Math.max(0, (run.endedAt ?? task.ended?.at ?? now) - run.startedAt), 0),
 		id: task.id,
 		title: task.title,
 		status,
@@ -154,9 +204,10 @@ export function taskView(task: Task, now = Date.now()): TaskView {
 		updatedAt: task.updatedAt,
 		approval: task.approval,
 		queue: task.queue,
-		attention: task.attention
-			? { id: task.attention.id, question: task.attention.question, escalated: Boolean(task.attention.escalatedAt) }
-			: undefined,
+		gates: task.gates,
+		lastExternalAction: task.lastExternalAction,
+		attention: task.attention,
+		attentionHistory: task.attentionHistory,
 		lastReport: lastRun?.lastReport,
 		ended: task.ended,
 		changedFiles: task.changedFiles,
@@ -181,6 +232,8 @@ function derive(
 				return { status: "failed", statusText: "失败" };
 		}
 	}
+	const gate = task.gates?.find((item) => !item.decision);
+	if (gate) return { status: "needs_gate", statusText: `${gate.escalatedAt ? "等你确认" : "等待主 agent 确认"} · ${gate.id}` };
 	if (task.attention?.escalatedAt && !task.attention.answer) {
 		return { status: "needs_answer", statusText: `等你回答 · ${task.attention.id}` };
 	}

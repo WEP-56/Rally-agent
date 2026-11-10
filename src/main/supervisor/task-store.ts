@@ -14,9 +14,15 @@ import type {
 	TaskMode,
 	TaskOutcome,
 	TaskRun,
+	TaskAccess,
+	TaskUsage,
 } from "../../shared/task.ts";
-import { taskView } from "../../shared/task.ts";
+import { questionViews, taskView } from "../../shared/task.ts";
+import type { ToolCall } from "../../shared/tools.ts";
+import type { AssistantMessageView } from "../../shared/conversation.ts";
+import type { TaskGate } from "../../shared/gate.ts";
 import type { EventKind, EventLog } from "./event-log.ts";
+import type { AuditLog } from "./audit.ts";
 
 export interface CreateTaskInput {
 	title: string;
@@ -27,6 +33,7 @@ export interface CreateTaskInput {
 	mode: TaskMode;
 	dependsOn: string[];
 	autoApprove: boolean;
+	dispatchKey?: string;
 }
 
 export interface ScopeWarning {
@@ -36,14 +43,19 @@ export interface ScopeWarning {
 
 export class TaskStore {
 	private readonly tasks = new Map<string, Task>();
-	private readonly workspaceDir: string;
+	private readonly workspaceDir: string | (() => string);
 	private readonly events: EventLog;
+	private readonly audit?: AuditLog;
 	private readonly onChange: (task: Task, kind: string) => void;
 	private nextTask = 1045;
 	private nextAttention = 1;
+	private readonly activities = new Map<string, ToolCall[]>();
+	private readonly conversations = new Map<string, AssistantMessageView[]>();
+	private readonly accesses = new Map<string, TaskAccess[]>();
 
-	constructor(events: EventLog, workspaceDir: string, onChange: (task: Task, kind: string) => void) {
+	constructor(events: EventLog, workspaceDir: string | (() => string), onChange: (task: Task, kind: string) => void, audit?: AuditLog) {
 		this.events = events;
+		this.audit = audit;
 		this.workspaceDir = workspaceDir;
 		this.onChange = onChange;
 		this.replay();
@@ -58,20 +70,109 @@ export class TaskStore {
 		return this.tasks.get(id);
 	}
 
+	recordGate(taskId: string, gate: TaskGate, kind: "gate_requested" | "gate_escalated" | "gate_decided"): void {
+		const task = this.require(taskId);
+		const gates = task.gates ??= [];
+		const index = gates.findIndex((item) => item.id === gate.id);
+		if (index === -1) gates.push(structuredClone(gate));
+		else gates[index] = structuredClone(gate);
+		this.commit(task, kind, { gateId: gate.id });
+	}
+
+	recordExternalAction(taskId: string, tool: string): void {
+		const task = this.require(taskId);
+		task.lastExternalAction = { tool, at: Date.now() };
+		this.commit(task, "external_action");
+	}
+
 	board(active: number, limit: number, now = Date.now()): TaskBoard {
 		const open = this.list().filter((task) => !task.ended);
 		const ended = this.list()
 			.filter((task) => task.ended)
-			.slice(0, 8);
-		return { tasks: [...open, ...ended].map((task) => taskView(task, now)), active, limit, autoApprove: false };
+			.sort((a, b) => b.ended!.at - a.ended!.at || Number(b.id.slice(2)) - Number(a.id.slice(2)))
+			.slice(0, 20);
+		return { tasks: [...open, ...ended].map((task) => this.view(task, now)), questions: this.list().flatMap(questionViews), active, limit, autoApprove: false };
+	}
+
+	view(task: Task, now = Date.now()) {
+		return { ...taskView(task, now), toolCalls: this.timeline(task.id).slice(-20), assistantMessages: this.assistantMessages(task.id) };
+	}
+
+	assistantMessages(taskId: string): AssistantMessageView[] {
+		const calls = new Map(this.timeline(taskId).map((call) => [call.id, call]));
+		const task = this.require(taskId);
+		return (this.conversations.get(taskId) ?? []).map((message) => ({ ...message,
+			blocks: message.blocks.map((block) => ({ ...block })),
+			streaming: message.streaming && !task.ended && !task.runs.find((run) => run.id === message.runId)?.endedAt,
+			toolCalls: message.blocks.flatMap((block) => { const call = block.type === "tool" ? calls.get(block.toolCallId) : undefined; return call ? [{ ...call }] : []; }),
+		}));
+	}
+
+	recordAssistant(taskId: string, message: AssistantMessageView, persist: boolean): void {
+		const task = this.require(taskId);
+		this.applyAssistant(taskId, message);
+		if (persist) this.events.append("assistant_message", { taskId, message });
+		this.onChange(task, "assistant_message");
+	}
+
+	private applyAssistant(taskId: string, message: AssistantMessageView): void {
+		const messages = this.conversations.get(taskId) ?? [];
+		const index = messages.findIndex((item) => item.id === message.id);
+		const copy = structuredClone(message);
+		if (index === -1) messages.push(copy);
+		else messages[index] = copy;
+		this.conversations.set(taskId, messages);
+	}
+
+	timeline(taskId: string): ToolCall[] {
+		const task = this.require(taskId);
+		return (this.activities.get(taskId) ?? []).map((call) => ({ ...call, status: call.status === "running" && (task.ended || task.runs.find((run) => run.id === call.runId)?.endedAt || task.runs.every((run) => run.endedAt)) ? "interrupted" as const : call.status }));
+	}
+
+	recordTool(taskId: string, call: ToolCall): void {
+		const task = this.require(taskId);
+		this.applyTool(taskId, call);
+		this.events.append("tool_activity", { taskId, call });
+		this.onChange(task, "tool_activity");
+	}
+
+	private applyTool(taskId: string, call: ToolCall): void {
+		const calls = this.activities.get(taskId) ?? [];
+		const index = calls.findIndex((item) => item.id === call.id);
+		if (index === -1) calls.push({ ...call });
+		else calls[index] = { ...call };
+		this.activities.set(taskId, calls);
+	}
+
+	access(taskId: string): TaskAccess[] {
+		this.require(taskId);
+		return structuredClone(this.accesses.get(taskId) ?? []);
+	}
+
+	recordAccess(taskId: string, access: TaskAccess): void {
+		const task = this.require(taskId);
+		const entries = this.accesses.get(taskId) ?? [];
+		if (entries.some((item) => item.toolCallId === access.toolCallId && item.kind === access.kind && item.target === access.target)) return;
+		this.events.append("access_recorded", { taskId, access });
+		entries.push({ ...access });
+		this.accesses.set(taskId, entries);
+		if ((access.kind === "fs_write" || access.kind === "fs_delete") && access.coverage !== "command_scope") this.recordChangedFiles(taskId, [access.target]);
+		else this.onChange(task, "access_recorded");
+	}
+
+	warnOverlaps(taskId: string, phase: "update" | "resume" | "start"): ScopeWarning[] {
+		const warnings = this.overlapWarnings(this.require(taskId));
+		for (const warning of warnings) this.events.append("task_scope_overlap", { taskId, ...warning, phase });
+		return warnings;
 	}
 
 	create(input: CreateTaskInput): { task: Task; warnings: ScopeWarning[] } {
 		const now = Date.now();
 		const id = `T-${this.nextTask++}`;
-		const outputDir = taskOutputDir(this.workspaceDir, id, input.title);
+		const outputDir = taskOutputDir(typeof this.workspaceDir === "function" ? this.workspaceDir() : this.workspaceDir, id, input.title);
 		const task: Task = {
 			id,
+			dispatchKey: input.dispatchKey,
 			title: input.title,
 			quotes: input.quotes,
 			note: input.note,
@@ -104,6 +205,7 @@ export class TaskStore {
 		const task = this.require(taskId);
 		if (task.ended) throw new TaskError("ALREADY_ENDED", "任务已结束");
 		if (task.approval.state !== "pending") return this.snapshot(task);
+		this.audit?.append("approve", { taskId, actor: by, basis });
 		task.approval = { state: "approved", by, basis, at: Date.now() };
 		this.commit(task, "task_approved", { by, basis });
 		return this.snapshot(task);
@@ -112,6 +214,7 @@ export class TaskStore {
 	cancel(taskId: string, by: "main" | "system", reason?: string): Task {
 		const task = this.require(taskId);
 		if (task.ended) return this.snapshot(task);
+		this.audit?.append("cancel", { taskId, actor: by, basis: [], reason });
 		task.approval = { ...task.approval, state: "cancelled" };
 		this.end(task, "cancelled", by, reason);
 		return this.snapshot(task);
@@ -133,7 +236,7 @@ export class TaskStore {
 		if (!task.ended && last?.endReason !== "interrupted" && last?.lastReport?.state !== "blocked") throw new TaskError("NOT_ENDED", "任务尚未结束，请用 task_steer");
 		if (last && !last.endedAt) this.endRun(task, last, "blocked");
 		task.ended = undefined;
-		task.attention = undefined;
+		this.archiveAttention(task, "run_ended");
 		if (input.mode) task.mode = input.mode;
 		if (input.scope) task.scope = input.scope;
 		task.approval = input.autoApprove
@@ -173,14 +276,51 @@ export class TaskStore {
 		this.commit(task, "input_delivered", { inputId });
 	}
 
-	answerAttention(taskId: string, text: string, by: "main" | "user", basis: string[]): Task {
+	escalateAttention(taskId: string, questionId: string): void {
 		const task = this.require(taskId);
-		if (!task.attention) throw new TaskError("NO_QUESTION", "该任务没有待回答的问题");
-		const questionId = task.attention.id;
-		task.attention.answer = { by, basis, text, at: Date.now() };
-		this.addInput(task, "answer", { body: text });
+		const attention = this.pendingAttention(task, questionId);
+		if (attention.escalatedAt !== undefined) return;
+		attention.escalatedAt = Date.now();
+		this.commit(task, "attention_escalated", { questionId });
+	}
+
+	/** Only questions actually delivered in the settled main turn are eligible. */
+	fallbackQuestions(ids: string[]): void {
+		for (const task of this.tasks.values()) {
+			const attention = task.attention;
+			if (!attention || !ids.includes(attention.id) || task.ended || attention.answer || attention.closed || attention.escalatedAt !== undefined) continue;
+			if (!task.runs.some((run) => run.id === attention.runId && !run.endedAt)) continue;
+			this.escalateAttention(task.id, attention.id);
+		}
+	}
+
+	answerAttention(taskId: string, questionId: string, text: string, by: "main" | "user", basis: string[]): Task {
+		const task = this.require(taskId);
+		const attention = this.pendingAttention(task, questionId);
+		if (by === "user" && (attention.escalatedAt === undefined || !attention.options?.includes(text)))
+			throw new TaskError("ANSWER_INVALID", "只能选择已上升问题中的原始选项；自由回答请使用主对话输入框");
+		if (by === "main" && basis.length === 0) throw new TaskError("QUOTES_REQUIRED", "代答必须引用用户原话");
+		this.audit?.append("answer", { taskId, questionId, actor: by, basis, text });
+		attention.answer = { by, basis: [...basis], text, at: Date.now() };
+		this.archiveAttention(task);
+		this.addInput(task, "answer", { body: text, questionId });
 		this.commit(task, "attention_answered", { questionId });
 		return this.snapshot(task);
+	}
+
+	private pendingAttention(task: Task, questionId: string): TaskAttention {
+		const attention = task.attention;
+		if (task.ended || !attention || attention.id !== questionId || attention.answer || attention.closed ||
+			!task.runs.some((run) => run.id === attention.runId && !run.endedAt))
+			throw new TaskError("QUESTION_STALE", "问题已被回答、替换或失效");
+		return attention;
+	}
+
+	private archiveAttention(task: Task, reason?: NonNullable<TaskAttention["closed"]>["reason"]): void {
+		if (!task.attention) return;
+		if (reason && !task.attention.answer) task.attention.closed = { reason, at: Date.now() };
+		(task.attentionHistory ??= []).push(structuredClone(task.attention));
+		task.attention = undefined;
 	}
 
 	startRun(taskId: string, trigger: TaskRun["trigger"], model: string): TaskRun {
@@ -212,34 +352,46 @@ export class TaskStore {
 		runId: string,
 		state: ReportState,
 		summary: string,
-		question?: string,
+		question?: string | null,
 		options?: string[],
-	): { task: Task; attention?: TaskAttention; ended: boolean } {
+	): { task: Task; attention?: TaskAttention; attentionOpened: boolean; ended: boolean } {
 		const task = this.require(taskId);
 		const run = task.runs.find((item) => item.id === runId);
 		if (!run) throw new TaskError("RUN_NOT_FOUND", "运行不存在");
 		if (task.ended || run.endedAt) throw new TaskError("ALREADY_ENDED", "任务或运行已结束，不能再汇报");
 		run.lastReport = { state, summary, at: Date.now() };
 		let attention: TaskAttention | undefined;
+		let attentionOpened = false;
 		if (state === "progress" || state === "blocked") {
+			if (question === null) this.archiveAttention(task, "cleared");
 			if (question?.trim()) {
-				attention = {
-					id: `Q-${this.nextAttention++}`,
-					question: question.trim(),
-					options,
-					runId,
-					askedAt: Date.now(),
-				};
-				task.attention = attention;
+				const previous = task.attention ?? task.attentionHistory?.findLast((item) => item.answer && item.runId === runId && item.question === question &&
+					(options === undefined || JSON.stringify(item.options) === JSON.stringify(options)));
+				const same = previous?.runId === runId && previous.question === question &&
+					(options === undefined || JSON.stringify(previous.options) === JSON.stringify(options));
+				if (same) attention = previous;
+				else {
+					this.archiveAttention(task, "replaced");
+					attention = {
+						id: `Q-${this.nextAttention++}`,
+						question,
+						options: options ? [...options] : undefined,
+						runId,
+						askedAt: Date.now(),
+					};
+					task.attention = attention;
+					attentionOpened = true;
+				}
 			}
 		}
-		this.commit(task, "task_report", { runId, state, summary, question });
-		if (attention) this.events.append("attention_opened", { task, attention });
+		this.commit(task, "task_report", { runId, state, summary, question, attentionId: attention?.id, attentionOpened });
+		if (attentionOpened) this.events.append("attention_opened", { task, attention });
 		if (state === "ready" || state === "failed" || state === "dropped") {
+			this.archiveAttention(task, "task_ended");
 			this.endRun(task, run, state);
 			this.end(task, state === "ready" ? "done" : state, "worker", summary);
 		}
-		return { task: this.snapshot(task), attention, ended: Boolean(task.ended) };
+		return { task: this.snapshot(task), attention, attentionOpened, ended: Boolean(task.ended) };
 	}
 
 	endRunInterrupted(taskId: string, reason: "interrupted" | "stalled" | "cancelled"): void {
@@ -249,9 +401,11 @@ export class TaskStore {
 		this.endRun(task, run, reason);
 	}
 
-	cancelRunning(taskId: string, by: "main" | "system"): Task {
+	cancelRunning(taskId: string, by: "main" | "system", authorization: { actor: "main" | "user" | "system"; basis: string[] } = { actor: by, basis: [] }): Task {
 		const task = this.require(taskId);
 		if (task.ended) return this.snapshot(task);
+		this.audit?.append("cancel", { taskId, actor: authorization.actor, basis: authorization.basis });
+		this.archiveAttention(task, "task_ended");
 		const run = task.runs.find((item) => !item.endedAt);
 		if (run) this.endRun(task, run, "cancelled");
 		this.end(task, "cancelled", by);
@@ -281,13 +435,18 @@ export class TaskStore {
 		this.commit(task, "task_files_changed", { files: task.changedFiles });
 	}
 
-	recordUsage(taskId: string, usage: { inputTokens: number; outputTokens: number; toolCalls: number }): void {
+	recordUsage(taskId: string, usage: TaskUsage): void {
 		const task = this.tasks.get(taskId);
 		if (!task) return;
 		task.usage.inputTokens += usage.inputTokens;
 		task.usage.outputTokens += usage.outputTokens;
 		task.usage.toolCalls += usage.toolCalls;
-		// Usage is high-frequency; keep it in the snapshot without an extra event per delta.
+		for (const key of ["cacheReadTokens", "cacheWriteTokens", "costUsd"] as const) {
+			if (usage[key] !== undefined) task.usage[key] = (task.usage[key] ?? 0) + usage[key];
+		}
+		if (usage.costIncomplete) task.usage.costIncomplete = true;
+		// The final reply/tool often arrives after task_ended: persist and publish every delta.
+		this.commit(task, "usage_updated");
 	}
 
 	/** Find tasks whose declared scope overlaps another running task. */
@@ -309,7 +468,7 @@ export class TaskStore {
 	private addInput(
 		task: Task,
 		kind: TaskInputKind,
-		payload: { note?: string; body?: string; quotes?: Quote[] },
+		payload: { note?: string; body?: string; quotes?: Quote[]; questionId?: string },
 	): TaskInput {
 		const input: TaskInput = {
 			id: `I-${task.inputs.length + 1}`,
@@ -317,21 +476,23 @@ export class TaskStore {
 			quotes: payload.quotes,
 			note: payload.note,
 			body: payload.body,
+			questionId: payload.questionId,
 			at: Date.now(),
 		};
 		task.inputs.push(input);
 		this.commit(task, "task_input", { inputId: input.id, kind });
-		if (task.attention?.answer) task.attention = undefined;
 		return input;
 	}
 
 	private endRun(task: Task, run: TaskRun, reason: NonNullable<TaskRun["endReason"]>): void {
+		if (task.attention?.runId === run.id) this.archiveAttention(task, "run_ended");
 		run.endedAt = Date.now();
 		run.endReason = reason;
 		this.events.append("run_ended", { task, runId: run.id, endReason: reason });
 	}
 
 	private end(task: Task, outcome: TaskOutcome, by: "worker" | "main" | "system", reason?: string): void {
+		this.archiveAttention(task, "task_ended");
 		task.ended = { at: Date.now(), outcome, by, reason };
 		task.queue = undefined;
 		this.events.append("task_ended", { task, outcome, by, changedFiles: task.changedFiles ?? [] });
@@ -356,16 +517,36 @@ export class TaskStore {
 
 	private replay(): void {
 		for (const event of this.events.all()) {
+			if (event.kind === "access_recorded" && typeof event.data.taskId === "string" && event.data.access) {
+				const entries = this.accesses.get(event.data.taskId) ?? [];
+				entries.push(event.data.access as TaskAccess);
+				this.accesses.set(event.data.taskId, entries);
+				continue;
+			}
+			if (event.kind === "assistant_message" && typeof event.data.taskId === "string" && event.data.message) {
+				this.applyAssistant(event.data.taskId, { ...event.data.message as AssistantMessageView, streaming: false });
+				continue;
+			}
+			if (event.kind === "tool_activity" && typeof event.data.taskId === "string" && event.data.call) {
+				this.applyTool(event.data.taskId, event.data.call as ToolCall);
+				continue;
+			}
 			const candidate = event.data.task as Task | undefined;
 			if (!candidate || typeof candidate.id !== "string" || !Array.isArray(candidate.runs)) continue;
 			this.tasks.set(candidate.id, candidate);
 			const numeric = Number(candidate.id.slice(2));
 			if (Number.isFinite(numeric)) this.nextTask = Math.max(this.nextTask, numeric + 1);
-			const attention = candidate.attention?.id;
-			if (attention) {
-				const n = Number(attention.slice(2));
+			for (const attention of [...(candidate.attentionHistory ?? []), ...(candidate.attention ? [candidate.attention] : [])]) {
+				const n = Number(attention.id.slice(2));
 				if (Number.isFinite(n)) this.nextAttention = Math.max(this.nextAttention, n + 1);
 			}
+		}
+		// A crash may occur between access_recorded and the following task snapshot.
+		for (const [taskId, entries] of this.accesses) {
+			const task = this.tasks.get(taskId);
+			if (!task) continue;
+			const writes = entries.filter((entry) => (entry.kind === "fs_write" || entry.kind === "fs_delete") && entry.coverage !== "command_scope").map((entry) => entry.target);
+			if (writes.length) task.changedFiles = [...new Set([...(task.changedFiles ?? []), ...writes])];
 		}
 	}
 }

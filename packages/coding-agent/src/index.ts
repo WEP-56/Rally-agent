@@ -381,6 +381,7 @@ export {
 	type PowerShellToolInput,
 	type PowerShellToolOptions,
 	type ReadOperations,
+	createLocalReadOperations,
 	type ReadToolDetails,
 	type ReadToolInput,
 	type ReadToolOptions,
@@ -415,6 +416,8 @@ export {
 export { type CodemodeExtensionOptions, createCodemodeExtension } from "./extensions/codemode/index.ts";
 export type { CodemodeStoreEntryData, CodemodeToolDetails } from "./extensions/codemode/tool.ts";
 export type { LoadedMcpConfig, McpExposure, McpServerConfig, McpServerEntry } from "./extensions/mcp/config.ts";
+export { loadMcpConfig } from "./extensions/mcp/config.ts";
+export { validateMcpServerConfig } from "./core/mcp-servers.ts";
 export { createMcpExtension, type McpExtensionOptions, type McpTransportFactory } from "./extensions/mcp/index.ts";
 export { createToolSearchExtension } from "./extensions/tool-search/index.ts";
 // Main entry point

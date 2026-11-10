@@ -2,12 +2,17 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowUp, PanelRightClose, PanelRightOpen, Paperclip, SquarePen, ShieldCheck, ChevronRight, Square, AtSign } from "lucide-react";
 import type { ModelSummary, ThinkingLevelName } from "../../../shared/models";
 import type { ChatMsg, Task } from "../data";
+import type { TaskQuestionView } from "../../../shared/task";
 import { useApp } from "../store";
 import { cn } from "../utils/cn";
 import { IconButton, RallyLogo } from "./ui";
 import { ModelPicker } from "./ModelPicker";
 import { RichText } from "./RichText";
 import { ToolSteps } from "./ToolSteps";
+import { ToolActivity } from "./ToolActivity";
+import { AssistantContent } from "./AssistantContent";
+import { GateCard } from "./GateCard";
+import { QuestionCard } from "./QuestionCard";
 import { StatusIcon, StatusBadge } from "./status";
 
 function UserBubble({ text }: { text: string }) {
@@ -57,6 +62,7 @@ function TaskCard({ task }: { task: Task }) {
 export function ChatPanel({
 	messages,
 	tasks,
+	questions = [],
 	busy,
 	onSend,
 	onStop,
@@ -72,6 +78,7 @@ export function ChatPanel({
 	onAutoApprove,
 }: {
 	messages: ChatMsg[];
+	questions?: TaskQuestionView[];
 	tasks: Task[];
 	busy: boolean;
 	onSend: (t: string) => void;
@@ -94,6 +101,7 @@ export function ChatPanel({
 	const scroller = useRef<HTMLDivElement>(null);
 	const ta = useRef<HTMLTextAreaElement>(null);
 	const running = tasks.filter((t) => t.status === "running").length;
+	const visibleMessages = messages.filter((message) => message.text.trim() || message.blocks?.length || message.steps?.length || message.toolCalls?.length || message.taskRef || (message.role === "assistant" && message.streaming));
 
   useEffect(() => {
     if (inject?.n) {
@@ -104,7 +112,7 @@ export function ChatPanel({
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
-  }, [messages]);
+  }, [messages, questions.length]);
 
   useLayoutEffect(() => {
     if (ta.current) {
@@ -143,7 +151,7 @@ export function ChatPanel({
       {/* messages */}
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-[760px] flex-col gap-6 px-6 pb-6 pt-4">
-          {messages.length === 0 && (
+          {visibleMessages.length === 0 && (
             <div className="animate-rise flex flex-col items-center pt-[14vh] text-center">
               <RallyLogo size={52} />
               <div className="mt-5 text-xl font-semibold">今天要一起推进什么？</div>
@@ -157,7 +165,7 @@ export function ChatPanel({
               </div>
             </div>
           )}
-          {messages.map((m) =>
+          {visibleMessages.map((m) =>
             m.role === "system" ? (
               <div key={m.id} className="animate-rise whitespace-pre-wrap text-center text-[12px] leading-relaxed text-faint">
                 {m.text}
@@ -168,8 +176,12 @@ export function ChatPanel({
               </div>
             ) : (
               <div key={m.id} className="animate-rise text-sm leading-relaxed">
-                {m.steps && m.steps.length > 0 && <ToolSteps steps={m.steps} />}
-                {m.streaming && !m.text ? (
+                {m.blocks?.length ? <AssistantContent blocks={m.blocks} calls={m.toolCalls} streaming={m.streaming} /> : <>
+                  {m.steps && m.steps.length > 0 && <ToolSteps steps={m.steps} />}
+                  {m.toolCalls && m.toolCalls.length > 0 && <ToolActivity calls={m.toolCalls} />}
+                  {m.text.trim() && <RichText text={m.text} className="text-fg" />}
+                </>}
+                {m.streaming && !m.blocks?.length && !m.text.trim() && !m.steps?.length && !m.toolCalls?.length && (
                   <div className="flex items-center gap-2 py-1 text-sm text-muted">
                     <span className="flex gap-1">
                       {[0, 1, 2].map((i) => (
@@ -178,8 +190,6 @@ export function ChatPanel({
                     </span>
                     正在规划…
                   </div>
-                ) : (
-                  <RichText text={m.text} className="text-fg" />
                 )}
                 {m.taskRef && tasks.find((t) => t.id === m.taskRef) && <TaskCard task={tasks.find((t) => t.id === m.taskRef)!} />}
               </div>
@@ -200,6 +210,8 @@ export function ChatPanel({
               </div>
             </div>
           ))}
+          {tasks.flatMap((task) => (task.gates ?? []).filter((gate) => gate.escalatedAt || gate.decision).map((gate) => <GateCard key={gate.id} taskId={task.id} gate={gate} decide={(value) => window.rally.gates.decide(gate.id, value)} />))}
+          {[...questions].sort((a, b) => a.question.askedAt - b.question.askedAt || Number(a.question.id.slice(2)) - Number(b.question.id.slice(2))).map(({ taskId, title, question }) => <QuestionCard key={question.id} taskId={taskId} title={title} question={question} answer={(option) => window.rally.tasks.answerOption(taskId, question.id, option)} />)}
           {actionError && <div role="alert" className="text-xs text-red-500">{actionError}</div>}
         </div>
       </div>

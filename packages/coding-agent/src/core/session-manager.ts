@@ -1164,9 +1164,10 @@ export class SessionManager {
 	 * closing pi without chatting leaves no file behind. Starting at the user message (not the
 	 * first assistant reply) keeps the prompt on disk if the first turn never completes (#10000).
 	 */
+	// Custom messages can start a model turn without a user prompt. Persist them before that call too.
 	private _hasConversation(): boolean {
 		return this.fileEntries.some(
-			(e) => e.type === "message" && (e.message.role === "user" || e.message.role === "assistant"),
+			(e) => e.type === "custom_message" || (e.type === "message" && (e.message.role === "user" || e.message.role === "assistant")),
 		);
 	}
 

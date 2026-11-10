@@ -1,17 +1,13 @@
 // One Pi session per task (docs 04 §4). The worker only talks to the supervisor through tools;
 // every tool event is translated into task facts (changed files, usage) on the way through.
 
-import { existsSync, lstatSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import {
 	type AgentSession,
 	type AgentSessionEvent,
 	createBashToolDefinition,
 	createPowerShellToolDefinition,
-	createReadToolDefinition,
-	createWriteToolDefinition,
-	createEditToolDefinition,
 	createFindToolDefinition,
 	createGrepToolDefinition,
 	createLsToolDefinition,
@@ -19,30 +15,44 @@ import {
 	type ToolDefinition,
 } from "@rally/coding-agent";
 import type { Static, TSchema } from "typebox";
+import type { AssistantMessage } from "@rally/ai";
 import type { RallyPaths } from "../../shared/ipc.ts";
-import type { Quote, ReportState, Task, TaskInput, TaskRun } from "../../shared/task.ts";
+import type { Quote, ReportState, Task, TaskAccess, TaskInput, TaskRun } from "../../shared/task.ts";
+import { toolInput, toolOutput } from "../../shared/tools.ts";
+import { assistantContent, type AssistantMessageView } from "../../shared/conversation.ts";
 import { WORKER_SYSTEM_PROMPT } from "../prompts.ts";
 import type { ModelStore } from "../model-store.ts";
-import { createRoleSession } from "./session.ts";
+import { closeRoleSession, createRoleSession } from "./session.ts";
+import { workerMcpExtensions } from "./mcp.ts";
 import type { TaskStore } from "./task-store.ts";
+import type { GateService } from "./gates.ts";
+import type { AuditLog } from "./audit.ts";
+import { createVersionedFileTools, FileVersions } from "./file-versions.ts";
+import { resolveToolPath as resolveWritePath, withinOutput } from "./file-paths.ts";
+import { createFileDeleteTool } from "./file-delete.ts";
+import { createGitTool } from "./git-tool.ts";
 
 export interface ReportResult {
 	taskId: string;
 	ended: boolean;
+	notifiedMain: boolean;
 	attentionId?: string;
+	answer?: string;
 }
 
 export interface WorkerManagerOptions {
 	paths: RallyPaths;
 	store: TaskStore;
 	models: ModelStore;
+	gates: GateService;
+	audit: AuditLog;
 	createTools(task: Task): ToolDefinition[];
 	report(
 		task: Task,
 		runId: string,
 		state: ReportState,
 		summary: string,
-		question?: string,
+		question?: string | null,
 		options?: string[],
 	): ReportResult;
 	/** Called whenever a worker session starts or stops streaming, so the scheduler can re-count slots. */
@@ -56,18 +66,23 @@ interface Worker {
 	unsubscribe: () => void;
 	streaming: boolean;
 	lastText: string;
+	messageSequence: number;
+	message?: AssistantMessageView;
 	toolCalls: number;
+	priced: boolean;
 	reportedThisTurn: boolean;
 	reportedState?: ReportState;
 	nudged: boolean;
-	starts: Map<string, { toolName: string; args: unknown }>;
 	disposed: boolean;
 }
 
 export class WorkerManager {
 	private readonly workers = new Map<string, Worker>();
+	private readonly starting = new Set<Promise<void>>();
+	private readonly closing = new Map<string, Promise<void>>();
 	private readonly options: WorkerManagerOptions;
 	private disposed = false;
+	private disposal?: Promise<void>;
 
 	constructor(options: WorkerManagerOptions) {
 		this.options = options;
@@ -87,16 +102,24 @@ export class WorkerManager {
 	}
 
 	/** Create the task session and send the assignment message (docs 03 §5.1). */
-	async start(task: Task, run: TaskRun): Promise<void> {
+	start(task: Task, run: TaskRun): Promise<void> {
+		if (this.disposed) return Promise.resolve();
+		const pending = this.startWorker(task, run).finally(() => this.starting.delete(pending));
+		this.starting.add(pending);
+		return pending;
+	}
+
+	private async startWorker(task: Task, run: TaskRun): Promise<void> {
 		const { paths, store } = this.options;
 		// A terminal report can be resumed before the old turn's final sentence settles.
-		if (this.workers.has(task.id)) await this.abort(task.id);
+		await this.abort(task.id);
 		const file = join(paths.sessionsTasksDir, `${task.id}.jsonl`);
 		const runtime = await this.options.models.whenReady();
 		if (this.disposed || task.ended || run.endedAt) return;
 		const selection = this.options.models.selection("worker");
 		if (!runtime || !selection) throw new WorkerError("NO_MODEL", "尚未配置任务 agent 的模型，请在设置 → 供应商中选择任务 agent 模型与思考强度");
 		const sessionManager = SessionManager.open(file, paths.sessionsTasksDir, task.cwd);
+		const versions = new FileVersions(sessionManager);
 		const { session } = await createRoleSession({
 			cwd: task.cwd,
 			agentDir: paths.agentDir,
@@ -106,18 +129,26 @@ export class WorkerManager {
 			thinkingLevel: selection.thinkingLevel,
 			rolePrompt: WORKER_SYSTEM_PROMPT,
 			loadProjectContext: true,
+			loadProjectSkills: true,
+			...workerMcpExtensions(paths.agentDir, task, run, () => !this.disposed && !task.ended && !run.endedAt, {
+				gates: this.options.gates, audit: this.options.audit,
+				external: (tool) => store.recordExternalAction(task.id, tool),
+			}),
 			tools: [],
-			customTools: [...this.options.createTools(task), ...buildTools(task)].map((tool) => this.guardTool(task, run, tool)),
+			customTools: [...this.options.createTools(task), ...buildTools(task, versions, (path) => this.assertWritable(task, run, path)),
+				headless(createFileDeleteTool({ task, run, store, versions, gates: this.options.gates, isActive: () => !this.disposed && !task.ended && !run.endedAt })),
+				createGitTool({ task, run, store, gates: this.options.gates, audit: this.options.audit, isActive: () => !this.disposed && !task.ended && !run.endedAt }),
+			].map((tool) => this.guardTool(task, run, tool)),
 		});
 		if (this.disposed || task.ended || run.endedAt) {
-			session.dispose();
+			await closeRoleSession(session);
 			return;
 		}
 		store.setRunModel(task.id, run.id, `${selection.model.provider}/${selection.model.id}`);
 
 		const label = session.model ? `${session.model.provider}/${session.model.id}` : "";
 		if (!label || label.startsWith("unknown/")) {
-			session.dispose();
+			await closeRoleSession(session);
 			throw new WorkerError("NO_MODEL", "尚未配置任务 agent 的模型");
 		}
 
@@ -128,10 +159,11 @@ export class WorkerManager {
 			unsubscribe: () => {},
 			streaming: true,
 			lastText: "",
+			messageSequence: 0,
 			toolCalls: 0,
+			priced: Object.values(selection.model.cost).some((price) => typeof price === "number" && price > 0),
 			reportedThisTurn: false,
 			nudged: false,
-			starts: new Map(),
 			disposed: false,
 		};
 		worker.unsubscribe = session.subscribe((event) => this.handle(worker, event));
@@ -200,32 +232,42 @@ export class WorkerManager {
 			if (tool.name === "write" || tool.name === "edit") {
 				if (!params || typeof params !== "object" || !("path" in params) || typeof params.path !== "string") throw new WorkerError("PATH_REQUIRED", "缺少文件路径");
 				const path = resolveWritePath(params.path, task.cwd);
-				if (task.mode === "readonly" && !withinOutput(task.outputDir, path)) {
-					throw new WorkerError("READONLY_TASK", "只读任务不能写项目目录；需要改动请汇报 blocked 说明原因");
-				}
+				this.assertWritable(task, run, path);
 				input = { ...params, path };
 			}
-			return tool.execute(id, input, signal, onUpdate, ctx);
+			const access = toolAccess(task, run, tool.name, id, input);
+			// Shell may fail after touching files; record the attempt without inferring its effects.
+			if (access?.kind === "shell") this.options.store.recordAccess(task.id, access);
+			const result = await tool.execute(id, input, signal, onUpdate, ctx);
+			if (!result.isError && access && access.kind !== "shell") this.options.store.recordAccess(task.id, access);
+			return result;
 		} };
 	}
 
-	/** Abort the current turn, then release the session (docs 01 §4.7 / 04 §5.3). */
-	async abort(taskId: string): Promise<void> {
-		const worker = this.workers.get(taskId);
-		if (!worker) return;
-		try {
-			await worker.session.abort();
-		} catch {
-			// A session that is already idle has nothing to abort.
+	private assertWritable(task: Task, run: TaskRun, path: string): void {
+		if (this.disposed || task.ended || run.endedAt) throw new WorkerError("TASK_ENDED", "任务或运行已结束，不能再调用工具");
+		if (task.mode === "readonly" && !withinOutput(task.outputDir, path)) {
+			throw new WorkerError("READONLY_TASK", "只读任务不能写项目目录；需要改动请汇报 blocked 说明原因");
 		}
-		this.disposeWorker(worker);
+	}
+
+	/** Stop the turn and its MCP transports together, including a connection still starting. */
+	abort(taskId: string): Promise<void> {
+		const worker = this.workers.get(taskId);
+		return worker ? this.disposeWorker(worker) : this.closing.get(taskId) ?? Promise.resolve();
 	}
 
 	/** Jack out every session without touching task facts; startup recovery marks the runs interrupted. */
-	dispose(): void {
+	dispose(): Promise<void> {
+		if (this.disposal) return this.disposal;
 		this.disposed = true;
-		for (const worker of this.workers.values()) this.disposeWorker(worker);
-		this.workers.clear();
+		for (const worker of this.workers.values()) void this.disposeWorker(worker);
+		// A startup that finishes after this point closes its own newly created session.
+		this.disposal = Promise.all([
+			...this.closing.values(),
+			...Array.from(this.starting, (pending) => pending.catch(() => {})),
+		]).then(() => {});
+		return this.disposal;
 	}
 
 	private handle(worker: Worker, event: AgentSessionEvent): void {
@@ -235,26 +277,37 @@ export class WorkerManager {
 				this.options.onBusyChange();
 				return;
 			case "message_start":
-				if (event.message.role === "assistant") worker.lastText = "";
+				if (event.message.role === "assistant") {
+					this.finishMessage(worker);
+					worker.lastText = "";
+					worker.message = { id: `${worker.runId}:assistant:${++worker.messageSequence}`, runId: worker.runId, at: Date.now(), streaming: true, ...assistantContent(event.message, `${worker.runId}:`) };
+					this.options.store.recordAssistant(worker.taskId, worker.message, false);
+				}
 				return;
 			case "message_update":
-				if (event.message.role === "assistant") worker.lastText = extractText(event.message);
+				if (event.message.role === "assistant") this.updateMessage(worker, event.message);
 				return;
 			case "message_end":
 				if (event.message.role === "assistant") {
-					worker.lastText = extractText(event.message);
+					this.updateMessage(worker, event.message);
+					this.finishMessage(worker);
 					this.countUsage(worker, event.message);
 					if (event.message.stopReason === "error") this.fail(worker, event.message.errorMessage ?? "模型调用失败");
 				}
 				return;
 			case "tool_execution_start":
-				worker.starts.set(event.toolCallId, { toolName: event.toolName, args: event.args });
+				this.options.store.recordTool(worker.taskId, { id: `${worker.runId}:${event.toolCallId}`, runId: worker.runId, name: event.toolName, input: toolInput(event.args), status: "running", startedAt: Date.now() });
 				return;
 			case "tool_execution_end":
-				this.finishTool(worker, event.toolCallId, event.toolName, event.isError);
+				{
+					const call = this.options.store.timeline(worker.taskId).find((item) => item.id === `${worker.runId}:${event.toolCallId}`);
+					if (call) this.options.store.recordTool(worker.taskId, { ...call, status: event.isError ? "error" : "ok", endedAt: Date.now(), output: toolOutput(event.result) });
+				}
+				this.finishTool(worker);
 				return;
 			case "agent_end":
 				if (event.willRetry) return;
+				this.finishMessage(worker);
 				this.turnEnded(worker);
 				return;
 			case "agent_settled":
@@ -264,27 +317,43 @@ export class WorkerManager {
 		}
 	}
 
-	private countUsage(worker: Worker, message: unknown): void {
-		const usage = (message as { usage?: { input?: number; output?: number; cost?: { total?: number } } }).usage;
+	private updateMessage(worker: Worker, message: unknown): void {
+		const content = assistantContent(message, `${worker.runId}:`);
+		worker.lastText = content.text;
+		if (!worker.message) return;
+		Object.assign(worker.message, content);
+		this.options.store.recordAssistant(worker.taskId, worker.message, false);
+	}
+
+	private finishMessage(worker: Worker): void {
+		if (!worker.message) return;
+		worker.message.streaming = false;
+		this.options.store.recordAssistant(worker.taskId, worker.message, true);
+		worker.message = undefined;
+	}
+
+	private countUsage(worker: Worker, message: AssistantMessage): void {
+		const usage = message.usage;
 		if (!usage) return;
+		const input = Math.max(0, usage.input ?? 0);
+		const cacheRead = Math.max(0, usage.cacheRead ?? 0);
+		const cacheWrite = Math.max(0, usage.cacheWrite ?? 0);
+		const output = Math.max(0, usage.output ?? 0);
+		const costKnown = worker.priced || usage.cost?.totalFromProvider === true || (usage.cost?.total ?? 0) > 0;
 		this.options.store.recordUsage(worker.taskId, {
-			inputTokens: Math.max(0, usage.input ?? 0),
-			outputTokens: Math.max(0, usage.output ?? 0),
+			inputTokens: input + cacheRead + cacheWrite,
+			outputTokens: output,
+			cacheReadTokens: cacheRead,
+			cacheWriteTokens: cacheWrite,
+			costUsd: costKnown ? Math.max(0, usage.cost?.total ?? 0) : undefined,
+			costIncomplete: !costKnown && input + cacheRead + cacheWrite + output > 0,
 			toolCalls: 0,
 		});
 	}
 
-	private finishTool(worker: Worker, toolCallId: string, toolName: string, isError: boolean): void {
-		const start = worker.starts.get(toolCallId);
-		worker.starts.delete(toolCallId);
+	private finishTool(worker: Worker): void {
 		worker.toolCalls++;
 		this.options.store.recordUsage(worker.taskId, { inputTokens: 0, outputTokens: 0, toolCalls: 1 });
-		if (isError || (toolName !== "write" && toolName !== "edit")) return;
-		const path = (start?.args as { path?: unknown } | undefined)?.path;
-		if (typeof path === "string" && path.trim()) {
-			const task = this.options.store.get(worker.taskId);
-			if (task) this.options.store.recordChangedFiles(task.id, [resolveWritePath(path, task.cwd)]);
-		}
 	}
 
 	private turnEnded(worker: Worker): void {
@@ -327,18 +396,24 @@ export class WorkerManager {
 		this.disposeWorker(worker);
 	}
 
-	private disposeWorker(worker: Worker): void {
-		if (worker.disposed) return;
+	private disposeWorker(worker: Worker): Promise<void> {
+		if (worker.disposed) return this.closing.get(worker.taskId) ?? Promise.resolve();
+		this.finishMessage(worker);
 		worker.disposed = true;
 		worker.unsubscribe();
-		try {
-			worker.session.dispose();
-		} catch {
-			// Disposing twice is harmless.
+		for (const call of this.options.store.timeline(worker.taskId)) {
+			if (call.runId === worker.runId && call.endedAt === undefined && (call.status === "running" || call.status === "interrupted")) {
+				this.options.store.recordTool(worker.taskId, { ...call, status: "interrupted", endedAt: Date.now() });
+			}
 		}
+		const closing = closeRoleSession(worker.session)
+			.catch((error: unknown) => console.error("Worker session shutdown failed", error))
+			.finally(() => { if (this.closing.get(worker.taskId) === closing) this.closing.delete(worker.taskId); });
+		this.closing.set(worker.taskId, closing);
 		if (this.workers.get(worker.taskId) === worker) this.workers.delete(worker.taskId);
 		worker.streaming = false;
 		this.options.onBusyChange();
+		return closing;
 	}
 
 	/** The task's own session is the only session for it; a resume reopens the same file. */
@@ -348,13 +423,14 @@ export class WorkerManager {
 }
 
 /** Per-task shell env: build scripts get a stable task id and their own output directory (04 §2.3). */
-function buildTools(task: Task): ToolDefinition[] {
+function buildTools(task: Task, versions: FileVersions, assertWritable: (path: string) => void): ToolDefinition[] {
 	const taskEnv = { RALLY_TASK_ID: task.id, RALLY_OUTPUT_DIR: task.outputDir };
 	const spawnHook = (context: { command: string; cwd: string; env: NodeJS.ProcessEnv }) => ({
 		...context,
 		env: { ...context.env, ...taskEnv },
 	});
-	return [headless(createReadToolDefinition(task.cwd)), headless(createWriteToolDefinition(task.cwd)), headless(createEditToolDefinition(task.cwd)),
+	const [read, write, edit] = createVersionedFileTools(task.cwd, versions, assertWritable);
+	return [headless(read), headless(write), headless(edit),
 		headless(createGrepToolDefinition(task.cwd)), headless(createFindToolDefinition(task.cwd)), headless(createLsToolDefinition(task.cwd)),
 		headless(createBashToolDefinition(task.cwd, { spawnHook })), headless(createPowerShellToolDefinition(task.cwd, { spawnHook }))];
 }
@@ -366,28 +442,19 @@ function headless<P extends TSchema, R, S>(tool: ToolDefinition<P, R, S>): ToolD
 		execute: (id, params, signal, onUpdate, ctx) => tool.execute(id, params as Static<P>, signal, onUpdate, ctx) };
 }
 
-function resolveWritePath(input: string, cwd: string): string {
-	let path = input.replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, " ").replace(/^@/, "");
-	if (/^~([\\/]|$)/.test(path)) path = join(homedir(), path.slice(1));
-	return resolve(cwd, path);
-}
-
-/** Resolve the closest existing ancestor too, so junctions/symlinks cannot escape the output dir. */
-function canonicalTarget(path: string): string {
-	if (existsSync(path)) return realpathSync(path);
-	try {
-		if (lstatSync(path).isSymbolicLink()) throw new Error("不能写入悬空符号链接");
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+function toolAccess(task: Task, run: TaskRun, name: string, id: string, params: unknown): TaskAccess | undefined {
+	if (!params || typeof params !== "object") return;
+	const base = { toolCallId: `${run.id}:${id}`, runId: run.id, tool: name, at: Date.now() };
+	if ((name === "bash" || name === "powershell") && "command" in params && typeof params.command === "string") {
+		return { ...base, kind: "shell", target: task.cwd, command: params.command };
 	}
-	const parent = dirname(path);
-	if (parent === path) return path;
-	return resolve(canonicalTarget(parent), relative(parent, path));
-}
-
-function withinOutput(output: string, path: string): boolean {
-	const rel = relative(canonicalTarget(output), canonicalTarget(path));
-	return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
+	if (!["read", "grep", "find", "ls", "write", "edit"].includes(name)) return;
+	const path = "path" in params && typeof params.path === "string" ? params.path : undefined;
+	if (!path && (name === "read" || name === "write" || name === "edit")) return;
+	const target = resolveWritePath(path ?? ".", task.cwd);
+	return name === "write" || name === "edit"
+		? { ...base, kind: "fs_write", target, created: !existsSync(target) }
+		: { ...base, kind: "fs_read", target };
 }
 
 export class WorkerError extends Error {
@@ -465,18 +532,4 @@ function clock(at: number): string {
 
 function truncate(text: string, max: number): string {
 	return [...text].length > max ? `${[...text].slice(0, max).join("")}…` : text;
-}
-
-function extractText(message: unknown): string {
-	const content = (message as { content?: unknown } | null)?.content;
-	if (typeof content === "string") return content;
-	if (!Array.isArray(content)) return "";
-	return content
-		.map((part) => {
-			if (typeof part === "string") return part;
-			const type = (part as { type?: unknown } | null)?.type;
-			const text = (part as { text?: unknown } | null)?.text;
-			return type === "text" && typeof text === "string" ? text : "";
-		})
-		.join("");
 }

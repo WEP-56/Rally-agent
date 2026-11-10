@@ -1,37 +1,47 @@
 import { useState } from "react";
-import { ChevronRight, FilePen, FilePlus2, Glasses, Globe, Search, Sparkles, SquareTerminal, Copy, Check } from "lucide-react";
+import { Brain, ChevronRight, FilePen, FilePlus2, FileX2, Glasses, Globe, Search, Sparkles, SquareTerminal, Copy, Check } from "lucide-react";
 import type { StepKind, ToolStep } from "../data";
 import { cn } from "../utils/cn";
 
 const ICON: Record<StepKind, typeof Glasses> = {
+  memory: Brain,
   cmd: SquareTerminal,
   read: Glasses,
   write: FilePlus2,
   edit: FilePen,
+  delete: FileX2,
   search: Search,
   web: Globe,
   think: Sparkles,
 };
 
 const VERB: Record<StepKind, string> = {
+  memory: "记忆工具",
   cmd: "命令已执行",
   read: "已读取",
   write: "已创建",
   edit: "已编辑",
+  delete: "删除工具",
   search: "已搜索",
   web: "已调用工具",
   think: "已思考",
 };
 
 export function summarize(steps: ToolStep[]) {
+	if (steps.some((step) => step.status)) {
+		const labels = { running: "执行中", ok: "已完成", error: "失败", interrupted: "已中断" };
+		return Object.entries(labels).map(([status, label]) => { const count = steps.filter((step) => step.status === status).length; return count ? `${label} ${count} 次工具调用` : ""; }).filter(Boolean).join("，");
+	}
   const c = (k: StepKind) => steps.filter((s) => s.kind === k).length;
   const parts: string[] = [];
   if (c("write")) parts.push(`已创建 ${c("write")} 个文件`);
   if (c("edit")) parts.push(`编辑 ${c("edit")} 个文件`);
+  if (c("delete")) parts.push(`调用 ${c("delete")} 次删除工具`);
   if (c("read")) parts.push(`读取 ${c("read")} 个文件`);
   if (c("search")) parts.push(`搜索 ${c("search")} 次文件`);
   if (c("cmd")) parts.push(`执行 ${c("cmd")} 条命令`);
   if (c("web")) parts.push(`调用 ${c("web")} 次工具`);
+  if (c("memory")) parts.push(`调用 ${c("memory")} 次记忆工具`);
   if (c("think")) parts.push(`思考 ${c("think")} 次`);
   const s = parts.join("，");
   return s.startsWith("已") ? s : "已" + s;
@@ -39,7 +49,7 @@ export function summarize(steps: ToolStep[]) {
 
 function StepLine({ s, rich, open, onClick }: { s: ToolStep; rich?: boolean; open?: boolean; onClick?: () => void }) {
   const Icon = ICON[s.kind];
-  const isFile = s.kind === "read" || s.kind === "write" || s.kind === "edit";
+  const isFile = s.kind === "read" || s.kind === "write" || s.kind === "edit" || s.kind === "delete";
   return (
     <button
       onClick={onClick}
@@ -50,8 +60,8 @@ function StepLine({ s, rich, open, onClick }: { s: ToolStep; rich?: boolean; ope
       )}
     >
       <Icon size={15} strokeWidth={1.7} className="shrink-0 text-faint" />
-      <span className="shrink-0 text-fg/80">{s.kind === "cmd" ? VERB.cmd : s.title || VERB[s.kind]}</span>
-      {s.kind === "cmd" ? (
+      <span className="shrink-0 text-fg/80">{s.status ? s.title : s.kind === "cmd" ? VERB.cmd : s.title || VERB[s.kind]}</span>
+      {s.kind === "cmd" && !s.status ? (
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="truncate">{s.title}</span>
           <span className="text-faint">·</span>
@@ -62,6 +72,7 @@ function StepLine({ s, rich, open, onClick }: { s: ToolStep; rich?: boolean; ope
       )}
       {rich && (
         <span className="ml-auto flex shrink-0 items-center gap-2 pl-2">
+          {s.status && <span className={cn("text-[11px]", s.status === "error" ? "text-red-500" : "text-faint")}>{{ running: "执行中", ok: "完成", error: "失败", interrupted: "中断" }[s.status]}</span>}
           {s.exit !== undefined && (
             <span className={cn("rounded px-1.5 text-[11px] font-medium", s.exit === 0 ? "bg-accent-soft text-accent" : "bg-red-500/10 text-red-500")}>
               {s.exit === 0 ? "exit 0" : `exit ${s.exit}`}
@@ -123,7 +134,7 @@ function StepDetail({ s }: { s: ToolStep }) {
   return (
     <div className="animate-fade ml-7 mr-1 mb-2 mt-1 overflow-hidden rounded-xl bg-term shadow-soft">
       <div className="flex items-center justify-between bg-deep/60 px-3 py-1.5 text-xs text-muted dark:bg-black/20">
-        <span className="truncate font-mono">{s.kind === "cmd" ? "PS C:\\work> " + s.target : s.target}</span>
+        <span className="truncate font-mono">{s.target}</span>
         <CopyBtn text={s.output} />
       </div>
       <pre className="selectable max-h-64 overflow-auto px-3 py-2.5 font-mono text-[12px] leading-[1.65] text-fg/85">{s.output}</pre>
