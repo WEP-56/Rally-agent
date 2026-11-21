@@ -1,14 +1,10 @@
+import { businessHandlers } from "./business.ts";
+import type { WorkspaceState } from "../shared/workspace.ts";
 // Main-process IPC handlers. Every channel is declared in src/shared/ipc.ts.
 
 import { app, BrowserWindow, dialog, shell, type IpcMainEvent, type IpcMainInvokeEvent, ipcMain } from "electron";
 import { type AppInfo, type ChatEvent, IpcChannel, IpcEvent, type RallyPaths, type TaskEvent } from "../shared/ipc.ts";
-import type { FetchModelsInput, ProviderEntry, SelectModelInput } from "../shared/models.ts";
 import type { Supervisor } from "./supervisor/index.ts";
-import type { WorkspacePatch, WorkspaceState } from "../shared/workspace.ts";
-import { SkillStore } from "./skill-store.ts";
-import { projectTrustState, setProjectTrust } from "./project-trust.ts";
-import { McpStore } from "./mcp-store.ts";
-import type { McpExposure, McpRiskTier } from "../shared/mcp.ts";
 import type { ServicesState } from "../shared/services.ts";
 import { BrowserManager } from "./browser.ts";
 import type { BrowserLayout, BrowserAction } from "../shared/browser.ts";
@@ -16,7 +12,6 @@ import { httpAddress } from "../shared/browser.ts";
 import type { TerminalSize } from "../shared/terminal.ts";
 import { TerminalManager } from "./terminal.ts";
 import type { TaskNotifications } from "./notifications.ts";
-import type { FeishuCredentials, ImBotCredentials, QqMailCredentials } from "../shared/connections.ts";
 import type { IdentityState } from "../shared/identity.ts";
 import { readAvatar } from "./identity-avatar.ts";
 
@@ -76,30 +71,14 @@ export function registerIpc(paths: RallyPaths, supervisor: Supervisor, notificat
 		handle(IpcChannel.browserAction, (event, id: string, action: BrowserAction) => browser.action(browser.owner(event), id, action));
 		handle(IpcChannel.browserLayout, (event, layout: BrowserLayout) => browser.layout(browser.owner(event), layout));
 		handle(IpcChannel.browserClose, (event, id: string) => browser.close(browser.owner(event), id));
-		const chat = supervisor.main;
+		const needsOwner = new Set<string>([IpcChannel.qqMailState, IpcChannel.qqMailSave, IpcChannel.qqMailVerify, IpcChannel.qqMailDisconnect, IpcChannel.qqBotState, IpcChannel.qqBotSave, IpcChannel.qqBotRetry, IpcChannel.qqBotPair, IpcChannel.qqBotDisconnect, IpcChannel.feishuState, IpcChannel.feishuSave, IpcChannel.feishuRetry, IpcChannel.feishuPair, IpcChannel.feishuTools, IpcChannel.feishuDisconnect, IpcChannel.identityState, IpcChannel.identityInitialize, IpcChannel.identityUpdate, IpcChannel.identityResetAvatar, IpcChannel.schedulesState, IpcChannel.schedulesUpdate, IpcChannel.mcpSaveServer, IpcChannel.mcpExposure, IpcChannel.gateDecide, IpcChannel.chatNewConversation, IpcChannel.tasksArchive, IpcChannel.tasksDelete]);
+		for (const [channel, handler] of Object.entries(businessHandlers(paths, supervisor, (name, data) => {
+			for (const win of BrowserWindow.getAllWindows()) win.webContents.send(name, data);
+		}))) handle(channel, (event, ...args) => { if(needsOwner.has(channel)) browser.owner(event); return Reflect.apply(handler, undefined, args); });
 		const publishIdentity = (state: IdentityState) => {
 			for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed()) win.webContents.send(IpcEvent.identity, state);
 			return state;
 		};
-		handle(IpcChannel.qqMailState, event => { browser.owner(event); return supervisor.qqMail.state(); });
-		handle(IpcChannel.qqMailSave, (event, input: QqMailCredentials) => { browser.owner(event); return supervisor.qqMail.save(input); });
-		handle(IpcChannel.qqMailVerify, event => { browser.owner(event); return supervisor.qqMail.verify(); });
-		handle(IpcChannel.qqMailDisconnect, event => { browser.owner(event); return supervisor.qqMail.disconnect(); });
-		handle(IpcChannel.qqBotState, event => { browser.owner(event); return supervisor.qqBot.state(); });
-		handle(IpcChannel.qqBotSave, (event, input: ImBotCredentials) => { browser.owner(event); return supervisor.qqBot.save(input); });
-		handle(IpcChannel.qqBotRetry, event => { browser.owner(event); return supervisor.qqBot.start(); });
-		handle(IpcChannel.qqBotPair, event => { browser.owner(event); return supervisor.qqBot.pair(); });
-		handle(IpcChannel.qqBotDisconnect, event => { browser.owner(event); return supervisor.qqBot.disconnect(); });
-		handle(IpcChannel.feishuState, event => { browser.owner(event); return supervisor.feishu.state(); });
-		handle(IpcChannel.feishuSave, (event, input: FeishuCredentials) => { browser.owner(event); return supervisor.feishu.save(input); });
-		handle(IpcChannel.feishuRetry, event => { browser.owner(event); return supervisor.feishu.start(); });
-		handle(IpcChannel.feishuPair, event => { browser.owner(event); return supervisor.feishu.pair(); });
-		handle(IpcChannel.feishuTools, (event, enabled: boolean) => { browser.owner(event); return supervisor.feishu.setTools(enabled); });
-		handle(IpcChannel.feishuDisconnect, event => { browser.owner(event); return supervisor.feishu.disconnect(); });
-		handle(IpcChannel.identityState, event => { browser.owner(event); return supervisor.identity.state(); });
-		handle(IpcChannel.identityInitialize, (event, legacy: unknown) => { browser.owner(event); return publishIdentity(supervisor.identity.initialize(legacy)); });
-		handle(IpcChannel.identityUpdate, (event, patch: unknown) => { browser.owner(event); return publishIdentity(supervisor.identity.update(patch)); });
-		handle(IpcChannel.identityResetAvatar, event => { browser.owner(event); return publishIdentity(supervisor.identity.setAvatar(null)); });
 		handle(IpcChannel.identityPickAvatar, async event => {
 			const owner = browser.owner(event);
 			const selected = await dialog.showOpenDialog(owner, { title: "选择头像", filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "webp"] }], properties: ["openFile"] });
@@ -108,16 +87,6 @@ export function registerIpc(paths: RallyPaths, supervisor: Supervisor, notificat
 			browser.owner(event);
 			return publishIdentity(supervisor.identity.setAvatar(readAvatar(selected.filePaths[0])));
 		});
-		handle(IpcChannel.schedulesState, (event) => { browser.owner(event); return supervisor.schedules.list(); });
-		handle(IpcChannel.schedulesUpdate, (event, id: string, enabled: boolean | null) => { browser.owner(event); return supervisor.schedules.update(id, enabled); });
-		handle(IpcChannel.servicesState, () => supervisor.services.state());
-		handle(IpcChannel.servicesStop, async (_event, id: unknown) => {
-			if (typeof id !== "string" || !/^S-\d+$/.test(id)) throw new Error("SERVICE_NOT_FOUND");
-			await supervisor.services.stop(id, "user");
-			return supervisor.services.state();
-		});
-		handle(IpcChannel.memoryState, () => supervisor.memory.state());
-		handle(IpcChannel.memoryPath, (_event, path: unknown) => supervisor.memory.updatePath(path));
 		handle(IpcChannel.memoryOpen, async () => {
 			const error = await shell.openPath(supervisor.memory.prepareOpen());
 			if (error) throw new Error(error);
@@ -127,37 +96,6 @@ export function registerIpc(paths: RallyPaths, supervisor: Supervisor, notificat
 			const win = senderWindow(event);
 			const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
 			return result.canceled ? null : result.filePaths[0] ?? null;
-		});
-		const mcp = new McpStore(paths.agentDir);
-		handle(IpcChannel.mcpState, () => mcp.state());
-		handle(IpcChannel.mcpSave, (_event, json: string) => mcp.save(json));
-		handle(IpcChannel.mcpSaveServer, (event, name: string, json: string, originalName?: string) => { browser.owner(event); return mcp.saveServer(name, json, originalName); });
-		handle(IpcChannel.mcpUpdate, (_event, name: string, enabled: boolean | null) => mcp.update(name, enabled));
-		handle(IpcChannel.mcpTier, (_event, name: string, tier: McpRiskTier) => mcp.setTier(name, tier));
-		handle(IpcChannel.mcpExposure, (event, name: string, exposure: McpExposure | null, tool?: string) => {
-			browser.owner(event); return mcp.setExposure(name, exposure, tool);
-		});
-		handle(IpcChannel.gateDecide, (event, id: string, decision: "allow" | "deny") => {
-			browser.owner(event);
-			supervisor.gates.decide(id, decision, "user", [], "用户点击确认卡片");
-			return supervisor.board();
-		});
-		const skills = new SkillStore(paths.agentDir);
-		const skillProjects = () => [paths.mainCwd, supervisor.workspace.base(), ...supervisor.workspace.state().recentProjects];
-		const trustState = () => projectTrustState(paths.agentDir, [supervisor.workspace.base(), ...supervisor.workspace.state().recentProjects]);
-		handle(IpcChannel.trustState, trustState);
-		handle(IpcChannel.trustSet, (_event, path: string, trusted: boolean) => {
-			setProjectTrust(paths.agentDir, path, trusted);
-			return trustState();
-		});
-		handle(IpcChannel.skillsState, () => skills.state(skillProjects()));
-		handle(IpcChannel.skillsImport, async (_event, path: string) => {
-			skills.importDirectory(path);
-			return skills.state(skillProjects());
-		});
-		handle(IpcChannel.skillsEnable, async (_event, path: string, enabled: boolean) => {
-			await skills.setEnabled(path, enabled, skillProjects());
-			return skills.state(skillProjects());
 		});
 		handle(
 			IpcChannel.appInfo,
@@ -184,18 +122,6 @@ export function registerIpc(paths: RallyPaths, supervisor: Supervisor, notificat
 		on(IpcChannel.windowClose, (event) => senderWindow(event)?.close());
 		handle(IpcChannel.windowIsMaximized, (event) => senderWindow(event)?.isMaximized() ?? false);
 
-		handle(IpcChannel.chatState, () => chat.state());
-		handle(IpcChannel.chatSend, (_event, text: unknown) => chat.send(typeof text === "string" ? text : ""));
-		handle(IpcChannel.chatAbort, () => chat.abort());
-		handle(IpcChannel.chatReset, () => chat.reset());
-		handle(IpcChannel.chatNewConversation, event => { browser.owner(event); return chat.newConversation(); });
-		handle(IpcChannel.workspaceState, () => supervisor.workspace.state());
-		handle(IpcChannel.workspaceUpdate, (_event, patch: WorkspacePatch) => {
-			if (!patch || typeof patch !== "object" || Object.keys(patch).some((key) => key !== "defaultWorkspace") || (patch.defaultWorkspace !== undefined && typeof patch.defaultWorkspace !== "string")) throw new Error("只可设置主对话默认工作区");
-			const state = supervisor.workspace.update(patch);
-			for (const win of BrowserWindow.getAllWindows()) win.webContents.send(IpcEvent.workspace, state);
-			return state;
-		});
 		handle(IpcChannel.workspacePick, async (event) => {
 			const win = senderWindow(event);
 			const options = { title: "选择目录", properties: ["openDirectory", "createDirectory"] as ("openDirectory" | "createDirectory")[] };
@@ -203,35 +129,6 @@ export function registerIpc(paths: RallyPaths, supervisor: Supervisor, notificat
 			return result.canceled ? null : result.filePaths[0] ?? null;
 		});
 
-		handle(IpcChannel.tasksState, () => supervisor.board());
-		handle(IpcChannel.tasksApprove, (_event, taskId: unknown) => supervisor.approve(String(taskId)));
-		handle(IpcChannel.tasksCancel, (_event, taskId: unknown) => supervisor.cancel(String(taskId)));
-		handle(IpcChannel.tasksArchive, (event, taskId: string, archived: boolean) => { browser.owner(event); return supervisor.archive(taskId, archived); });
-		handle(IpcChannel.tasksDelete, (event, taskId: unknown) => {
-			browser.owner(event);
-			if (typeof taskId !== "string") throw new Error("无效任务编号");
-			return supervisor.deleteArchived(taskId);
-		});
-		handle(IpcChannel.tasksAnswerOption, (_event, taskId: unknown, questionId: unknown, option: unknown) => {
-			if (typeof taskId !== "string" || typeof questionId !== "string" || typeof option !== "string") throw new Error("ANSWER_INVALID: 回答参数无效");
-			return supervisor.answerOption(taskId, questionId, option);
-		});
-		handle(IpcChannel.tasksApprovalMode, (_event, enabled: unknown) => supervisor.setAutoApprove(enabled === true));
-
-		handle(IpcChannel.modelsState, () => supervisor.models.state());
-		handle(IpcChannel.modelsSave, async (_event, providers: unknown) => {
-			const state = await supervisor.models.save(Array.isArray(providers) ? (providers as ProviderEntry[]) : []);
-			// Provider edits (URL/key) must reach the live session too, not just the next selection.
-			await supervisor.main.reapplyActiveModel();
-			return state;
-		});
-		handle(IpcChannel.modelsFetch, (_event, input: unknown) =>
-			supervisor.models.fetchModels(input as FetchModelsInput),
-		);
-		handle(IpcChannel.modelsSelect, (_event, input: unknown) =>
-			chat.selectModel(input as SelectModelInput),
-		);
-		handle(IpcChannel.modelsSelectWorker, (_event, input: unknown) => supervisor.models.selectWorker(input as SelectModelInput));
 	} catch (error) { void stop(); throw error; }
 	return stop;
 }

@@ -6,7 +6,9 @@ directories:
   output: release
   buildResources: build
 files:
-  - out/**/*
+  - out/main/**/*
+  - out/preload/**/*
+  - out/renderer/**/*
   - package.json
   - LICENSE
   - THIRD_PARTY_NOTICES/**/*

@@ -1,5 +1,9 @@
 import { createContext, useContext } from "react";
 import { DEFAULT_IDENTITY } from "../../shared/identity";
+import type { IdentityState } from "../../shared/identity";
+import type { MemoryState } from "../../shared/memory";
+import { IpcChannel } from "../../shared/ipc";
+import { cloudRead } from "./cloud-cache";
 
 export interface Provider {
   id: string;
@@ -83,17 +87,18 @@ const KEY = "rally.config.v1";
 const OB_KEY = "rally.onboarded.v1";
 
 export function loadConfig(): Config {
+  const remote = window.runtime?.mode === "cloud" ? { ...cloudRead<IdentityState>(IpcChannel.identityState), memoryPath: cloudRead<MemoryState>(IpcChannel.memoryState)?.path ?? "正在同步…" } : {};
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+    if (raw) return { ...DEFAULT_CONFIG, ...JSON.parse(raw), ...remote };
   } catch {
     /* ignore */
   }
-  return DEFAULT_CONFIG;
+  return { ...DEFAULT_CONFIG, ...remote };
 }
 export function saveConfig(c: Config) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(c));
+    localStorage.setItem(KEY, JSON.stringify(window.runtime?.mode==="cloud"?{theme:c.theme,accent:c.accent,fontSize:c.fontSize,density:c.density}:c));
   } catch {
     /* ignore */
   }

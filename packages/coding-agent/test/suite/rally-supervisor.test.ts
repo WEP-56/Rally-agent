@@ -644,7 +644,8 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 				expect(getCurrentSystemPrompt(context.messages)).toContain("task agent");
 				expect(getCurrentSystemPrompt(context.messages)).toContain("RALLY_PROJECT_INSTRUCTIONS_SENTINEL");
 				expect(getCurrentSystemPrompt(context.messages)).toContain("fixture-skill");
-				expect(toolNames(context)).toEqual(expect.arrayContaining(["task_report", "task_read", "bash", "powershell"]));
+				expect(toolNames(context)).toEqual(expect.arrayContaining(["task_report", "task_read", "bash", ...(process.platform === "win32" ? ["powershell"] : [])]));
+				if (process.platform !== "win32") expect(toolNames(context)).not.toContain("powershell");
 				expect(toolNames(context)).not.toContain("task_dispatch");
 				expect(toolNames(context)).not.toContain("memory_append");
 				expect(toolNames(context)).not.toContain("memory_remove");

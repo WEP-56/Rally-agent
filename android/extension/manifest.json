@@ -1,0 +1,8 @@
+{
+  "manifest_version": 2,
+  "name": "Rally bundled client",
+  "version": "0.0.0",
+  "browser_specific_settings": { "gecko": { "id": "client@rally.local" } },
+  "permissions": ["nativeMessaging", "geckoViewAddons"],
+  "content_security_policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'"
+}

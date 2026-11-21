@@ -44,7 +44,11 @@ export function IdentityForm() {
   return (
     <div>
     <div className="glass-strong divide-y divide-line overflow-hidden rounded-[24px]">
-      <div className="flex items-center gap-4 px-5 py-4"><AgentAvatar size={56} /><div className="min-w-0 flex-1"><div className="text-[14px] font-medium">头像</div><div className="mt-0.5 text-[12.5px] text-muted">PNG、JPEG 或 WebP，5 MiB 以内；居中裁成正方形</div></div><div className="flex flex-wrap justify-end gap-2"><Button size="sm" disabled={!identityReady || busy} onClick={() => void action(() => window.rally.identity.pickAvatar())}>选择图片</Button>{config.avatar && <Button size="sm" disabled={busy} onClick={() => void action(() => window.rally.identity.resetAvatar())}>恢复默认</Button>}</div></div>
+      <div className="identity-avatar-field grid grid-cols-[56px_minmax(0,1fr)] items-center gap-x-4 gap-y-3 px-5 py-4">
+        <AgentAvatar size={56} />
+        <div className="min-w-0"><div className="text-[14px] font-medium">头像</div><div className="mt-0.5 text-[12.5px] leading-relaxed text-muted">PNG、JPEG 或 WebP，5 MiB 以内；居中裁成正方形</div></div>
+        <div className="identity-avatar-actions col-span-2 flex flex-wrap gap-2"><Button size="sm" disabled={!identityReady || busy} onClick={() => void action(() => window.rally.identity.pickAvatar())}>选择图片</Button>{config.avatar && <Button size="sm" disabled={busy} onClick={() => void action(() => window.rally.identity.resetAvatar())}>恢复默认</Button>}</div>
+      </div>
       {([
         { key: "name", label: "名称", hint: "会显示在名片与对话中", rows: 0 },
         { key: "personality", label: "性格", hint: "说话的语气与态度", rows: 2 },
@@ -56,7 +60,7 @@ export function IdentityForm() {
     </div>
     <div className="mt-4 flex items-center justify-between gap-3 px-1"><p className="text-[12px] text-muted">保存后从主对话下一次模型请求生效。权限与审批规则保持有效。</p><Button variant="primary" disabled={loading || busy || (!dirty && !identityError) || !draft.name.trim()} onClick={() => void action(() => window.rally.identity.update(draft))}>{busy ? "保存中…" : "保存人设"}</Button></div>
     {(error || identityError) && <div role="alert" className="mt-3 text-xs text-danger">{error || identityError}{identityError && <Button size="sm" onClick={reloadIdentity}>重试加载</Button>}</div>}
-    {saved && !dirty && <p role="status" className="mt-2 text-xs text-ok">已保存到本机</p>}
+    {saved && !dirty && <p role="status" className="mt-2 text-xs text-ok">{window.runtime.mode === "cloud" ? "已保存到服务器" : "已保存到本机"}</p>}
     </div>
   );
 }
@@ -209,8 +213,10 @@ function ProviderCard({
 		}
 		setLoading(true);
 		setNote(null);
-		const result = await fetchModels({ protocol: provider.protocol, baseUrl: provider.baseUrl, apiKey: provider.apiKey });
-		setLoading(false);
+		let result;
+		try { result = await fetchModels({ protocol: provider.protocol, baseUrl: provider.baseUrl, apiKey: provider.apiKey }); }
+		catch (error) { setNote(String(error)); return; }
+		finally { setLoading(false); }
 		if (!result.ok) {
 			setNote(`拉取失败：${result.error}。可在下方手工填写模型名。`);
 			return;
@@ -264,14 +270,15 @@ function ProviderCard({
 					<Input
 						className="bg-panel pr-9 font-mono text-[12.5px] dark:bg-raised"
 						type={show ? "text" : "password"}
-						placeholder="API Key（本地服务可留空）"
-						value={provider.apiKey}
+						placeholder={provider.apiKey.startsWith("已保存:") ? "密钥已保存在服务器；输入以替换" : "API Key（本地服务可留空）"}
+						value={provider.apiKey.startsWith("已保存:") ? "" : provider.apiKey}
 						onChange={(e) => onChange({ apiKey: e.target.value })}
 					/>
 					<button onClick={() => setShow((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-faint hover:text-fg">
 						{show ? <EyeOff size={14} /> : <Eye size={14} />}
 					</button>
 				</div>
+				{provider.apiKey.startsWith("已保存:") && <button className="text-right text-xs text-muted" onClick={() => onChange({ apiKey: "" })}>清除已保存密钥</button>}
 			</div>
 			<div className="mt-3 flex flex-wrap items-center gap-2">
 				<Button size="sm" onClick={() => void pull()} className="bg-panel shadow-soft dark:bg-raised">
@@ -310,16 +317,17 @@ function ProviderCard({
 }
 
 export function ProvidersForm() {
-	const { state, save, select, selectWorker } = useModels();
+	const { state, save, select, selectWorker, reload } = useModels();
 	const [draft, setDraft] = useState<ProviderEntry[]>(state?.providers ?? []);
 	const [dirty, setDirty] = useState(false);
 	const [saving, setSaving] = useState(false);
 	const [message, setMessage] = useState<string | null>(null);
 	const dirtyRef = useRef(false);
+	const revision = useRef(state?.revision);
 
 	useEffect(() => {
 		// Don't overwrite in-progress edits when another window saves.
-		if (!dirtyRef.current && state) setDraft(state.providers);
+		if (!dirtyRef.current && state) { setDraft(state.providers); revision.current = state.revision; }
 	}, [state]);
 
 	const edit = (next: ProviderEntry[]) => {
@@ -333,7 +341,8 @@ export function ProvidersForm() {
 		setSaving(true);
 		setMessage(null);
 		try {
-			const result = await save(draft);
+			const result = await save(draft, revision.current);
+			revision.current = result.revision;
 			dirtyRef.current = false;
 			setDirty(false);
 			setDraft(result.providers);
@@ -355,11 +364,13 @@ export function ProvidersForm() {
 				</span>
 				<div className="flex-1" />
 				{dirty && <span className="text-[11px] text-amber-600">未保存</span>}
+				{window.runtime.mode === "cloud" && <Button size="sm" disabled={saving} onClick={() => { if (dirty) { setMessage("有未保存修改，点击「放弃修改并刷新」后重新编辑。"); return; } void reload().catch(error => setMessage(String(error))); }}>刷新</Button>}
 				<Button size="sm" variant="primary" onClick={() => void commit()} disabled={saving}>
 					{saving && <Loader2 size={13} className="animate-spin" />}保存配置
 				</Button>
 			</div>
 			{message && <div className="px-1 text-[11px] text-muted">{message}</div>}
+			{dirty && window.runtime.mode === "cloud" && <p className="text-xs text-muted">{state?.revision !== revision.current ? "服务器配置已更新。" : "当前修改仅在保存后生效。"}<button className="ml-2 text-accent" onClick={() => { dirtyRef.current=false;setDirty(false);void reload().catch(error=>setMessage(String(error))); }}>放弃修改并刷新</button></p>}
 			{errors.length > 0 && (
 				<div className="flex gap-2 rounded-xl bg-red-500/5 px-3 py-2 text-[11px] leading-relaxed text-red-500">
 					<Info size={13} className="mt-0.5 shrink-0" />

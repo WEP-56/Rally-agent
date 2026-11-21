@@ -29,7 +29,7 @@ function Launcher({ onPick, tasks }: { onPick: (k: NewKind) => void; tasks: Task
   return (
     <div>
       <div className="flex flex-col gap-0.5">
-        {(Object.keys(KIND_META) as NewKind[]).map((k) => {
+        {(Object.keys(KIND_META) as NewKind[]).filter(k=>window.runtime.mode!=="cloud"||(k!=="terminal"&&k!=="browser")).map((k) => {
           const M = KIND_META[k];
           return (
             <button

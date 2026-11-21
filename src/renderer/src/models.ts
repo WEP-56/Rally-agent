@@ -3,6 +3,8 @@
 // without each component refetching over IPC.
 
 import { useCallback, useEffect, useState } from "react";
+import { IpcChannel } from "../../shared/ipc";
+import { cloudRead } from "./cloud-cache";
 import type {
 	FetchModelsInput,
 	FetchModelsResult,
@@ -13,6 +15,7 @@ import type {
 
 let cache: ModelsState | null = null;
 const listeners = new Set<(state: ModelsState) => void>();
+let pending: Promise<ModelsState> | undefined;
 
 function publish(state: ModelsState): void {
 	cache = state;
@@ -20,14 +23,14 @@ function publish(state: ModelsState): void {
 }
 
 async function reload(): Promise<ModelsState> {
-	const state = await window.rally.models.getState();
-	publish(state);
-	return state;
+	if (pending) return pending;
+	pending = window.rally.models.getState().then(state => { publish(state); return state; });
+	try { return await pending; } finally { pending = undefined; }
 }
 
 export interface ModelsController {
 	state: ModelsState | null;
-	save(providers: ProviderEntry[]): Promise<ModelsState>;
+	save(providers: ProviderEntry[], revision?: string): Promise<ModelsState>;
 	fetchModels(input: FetchModelsInput): Promise<FetchModelsResult>;
 	select(input: SelectModelInput): Promise<void>;
 	selectWorker(input: SelectModelInput): Promise<void>;
@@ -35,22 +38,26 @@ export interface ModelsController {
 }
 
 export function useModels(): ModelsController {
+	cache ??= cloudRead<ModelsState>(IpcChannel.modelsState) ?? null;
 	const [state, setState] = useState<ModelsState | null>(cache);
 
 	useEffect(() => {
 		// Every mounted consumer subscribes to one cache so a save in settings refreshes the picker.
 		const listener = (next: ModelsState) => setState(next);
 		listeners.add(listener);
+		const changed = (event: Event) => { if ((event as CustomEvent<string>).detail === "models") void reload().catch(() => {}); };
+		window.addEventListener("rally-configuration", changed);
 		if (cache === null) {
 			void reload().catch((error: unknown) => console.error("models.getState failed", error));
 		}
 		return () => {
 			listeners.delete(listener);
+			window.removeEventListener("rally-configuration", changed);
 		};
 	}, []);
 
-	const save = useCallback(async (providers: ProviderEntry[]) => {
-		const next = await window.rally.models.save(providers);
+	const save = useCallback(async (providers: ProviderEntry[], revision?: string) => {
+		const next = await window.rally.models.save(providers, revision);
 		publish(next);
 		return next;
 	}, []);

@@ -11,7 +11,7 @@ import { WindowControls } from "./TitleBar";
 const STEPS = [
   { key: "welcome" },
   { key: "identity", title: "认识一下你的 Agent", desc: "给它起个名字，设定性格和工作方式。这些都可以稍后在设置中修改。", skippable: true },
-  { key: "memory", title: "记忆存放在哪里", desc: "Rally 会把长期记忆保存在本地目录，完全由你掌控。", skippable: true },
+  { key: "memory", title: "记忆存放在哪里", desc: "记忆保存在运行 Agent 的设备上。云端模式使用服务器上的目录。", skippable: true },
   { key: "providers", title: "添加模型供应商", desc: "填写 Base URL 与 API Key，获取可用模型。支持添加多个供应商；模型可在对话框底部切换。", skippable: true },
   { key: "done" },
 ];
@@ -32,6 +32,12 @@ export function Onboarding({ onDone, maximized, onMin, onMax, onClose }: { onDon
   const prev = () => setStep((s) => Math.max(0, s - 1));
 
   useEffect(() => {
+    const back = (event: Event) => { event.preventDefault(); event.stopImmediatePropagation(); if (step > 0) prev(); else onDone(); };
+    window.addEventListener("rally-back", back, true);
+    return () => window.removeEventListener("rally-back", back, true);
+  }, [step, onDone]);
+
+  useEffect(() => {
     const k = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).tagName === "TEXTAREA" || (e.target as HTMLElement).tagName === "INPUT") return;
       if (e.key === "ArrowRight" && step > 0 && step < last) next();
@@ -44,7 +50,7 @@ export function Onboarding({ onDone, maximized, onMin, onMax, onClose }: { onDon
   const s = STEPS[step];
 
   return (
-    <div className="absolute inset-0 z-[100] flex flex-col overflow-hidden bg-app">
+    <div className="rally-onboarding absolute inset-0 z-[100] flex flex-col overflow-hidden bg-app">
       {/* ambient */}
       <div className="pointer-events-none absolute -left-40 -top-40 h-[520px] w-[520px] rounded-full opacity-60 blur-3xl transition-all duration-700" style={{ background: "radial-gradient(circle, var(--c-accent-soft), transparent 70%)", transform: `translate(${step * 60}px, ${step * 20}px)` }} />
       <div className="pointer-events-none absolute -bottom-52 -right-40 h-[560px] w-[560px] rounded-full opacity-70 blur-3xl transition-all duration-700" style={{ background: "radial-gradient(circle, var(--c-accent-soft), transparent 70%)", transform: `translate(${-step * 40}px, 0)` }} />
@@ -54,7 +60,7 @@ export function Onboarding({ onDone, maximized, onMin, onMax, onClose }: { onDon
           <RallyLogo size={16} />
           Rally · 首次启动设置
         </div>
-        <div className="no-drag h-full"><WindowControls maximized={maximized} onMin={onMin} onMax={onMax} onClose={onClose} /></div>
+        <div className="desktop-bar no-drag h-full"><WindowControls maximized={maximized} onMin={onMin} onMax={onMax} onClose={onClose} /></div>
       </div>
 
       {/* slides */}
@@ -62,7 +68,7 @@ export function Onboarding({ onDone, maximized, onMin, onMax, onClose }: { onDon
         <div className="flex h-full transition-transform duration-500 ease-[cubic-bezier(.2,.8,.2,1)]" style={{ transform: `translateX(-${step * 100}%)` }}>
           {STEPS.map((st, i) => (
             <div key={st.key} className={cn("h-full w-full shrink-0 overflow-y-auto transition-opacity duration-500", i === step ? "opacity-100" : "pointer-events-none opacity-0")}>
-              <div className="mx-auto flex min-h-full max-w-[560px] flex-col justify-center px-8 py-10">
+              <div className="onboarding-slide mx-auto flex min-h-full max-w-[560px] flex-col justify-center px-8 py-10">
                 {st.key === "welcome" && (
                   <div className="flex flex-col items-center text-center">
                     <div className="relative">
@@ -71,7 +77,7 @@ export function Onboarding({ onDone, maximized, onMin, onMax, onClose }: { onDon
                     </div>
                     <div className="mt-9 text-[13px] font-medium tracking-[0.3em] text-faint">WELCOME</div>
                     <h1 className="mt-3 text-[34px] font-semibold tracking-tight">欢迎使用 Rally agent</h1>
-                    <p className="mt-3 max-w-sm text-sm leading-relaxed text-muted">一个会规划、会派发、会汇报的桌面 AI 伙伴。花一分钟完成设置，让它按你的方式工作。</p>
+                    <p className="mt-3 max-w-sm text-sm leading-relaxed text-muted">一个会规划、会派发、会汇报的 AI 伙伴。花一分钟完成设置，让它按你的方式工作。</p>
                     <div className="mt-10 flex flex-col items-center gap-2">
                       <Button variant="primary" size="lg" className="w-56" onClick={next}>
                         <Sparkles size={15} />开始引导
@@ -128,7 +134,7 @@ export function Onboarding({ onDone, maximized, onMin, onMax, onClose }: { onDon
       </div>
 
       {/* footer nav */}
-      <div className={cn("relative flex h-20 shrink-0 items-center justify-between px-8 transition-opacity duration-300", step === 0 && "pointer-events-none opacity-0")}>
+      <div className={cn("onboarding-footer relative flex h-20 shrink-0 items-center justify-between px-8 transition-opacity duration-300", step === 0 && "pointer-events-none opacity-0")}>
         <div className="w-40">
           {step > 1 && (
             <Button variant="ghost" onClick={prev}>

@@ -19,6 +19,8 @@ export default defineConfig({
 		},
 	},
 	renderer: {
+		// Shared renderer targets both the desktop Chromium and the bundled Android Gecko.
+		build: { target: "es2022", cssTarget: "firefox150" },
 		plugins: [react(), tailwindcss()],
 	},
 });

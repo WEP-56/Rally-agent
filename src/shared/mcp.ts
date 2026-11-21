@@ -11,6 +11,7 @@ export interface McpServerSettings {
 }
 
 export interface McpConfigurationState {
+	revision?: string;
 	json: string;
 	servers: McpServerSettings[];
 	errors: string[];

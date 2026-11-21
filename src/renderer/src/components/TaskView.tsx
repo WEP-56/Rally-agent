@@ -93,7 +93,7 @@ export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task)
           <div className="min-w-0 flex-1 text-xs text-muted">
             这段对话由 <span className="font-medium text-fg">{config.name || "Rally"}</span> 管理。要调整，请在左侧主对话里告诉它。
           </div>
-          <button title="在此目录打开终端" onClick={() => openTab("terminal", { taskId: task.id })} className="flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-fg/[0.06] px-3 text-xs font-medium hover:bg-fg/[0.1]"><SquareTerminal size={13} />终端</button>
+          {window.runtime.mode!=="cloud" && <button title="在此目录打开终端" onClick={() => openTab("terminal", { taskId: task.id })} className="flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-fg/[0.06] px-3 text-xs font-medium hover:bg-fg/[0.1]"><SquareTerminal size={13} />终端</button>}
           <button
             onClick={() => onMention(task)}
             className="flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-ink px-3.5 text-xs font-medium text-white transition-transform hover:scale-[1.03] active:scale-95 dark:bg-white dark:text-ink"

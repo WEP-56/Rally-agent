@@ -1,0 +1,76 @@
+name: Rally release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  client-and-server:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-2022, target: windows }
+          - { os: ubuntu-24.04, target: linux }
+          - { os: ubuntu-24.04, target: android }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24.11.1', cache: npm }
+      - shell: bash
+        run: test "$GITHUB_REF_NAME" = "v$(node -p 'require("./package.json").version')"
+      - run: npm ci --ignore-scripts
+      - run: npm run hydrate:model-data
+      - run: node node_modules/typescript/bin/tsc --noEmit -p tsconfig.node.json
+      - run: node node_modules/typescript/bin/tsc --noEmit -p tsconfig.web.json
+      - run: node --test tests/cloud/profiles.test.mjs
+      - run: node --test tests/cloud/cache.test.mjs
+      - if: matrix.target == 'windows'
+        run: npm run dist
+      - if: matrix.target == 'linux'
+        run: npm run build:server && bash scripts/cloud/package-linux.sh
+      - if: matrix.target == 'windows'
+        working-directory: packages/coding-agent
+        run: node ../../node_modules/vitest/dist/cli.js --run test/suite/rally-ipc-lifecycle.test.ts
+      - if: matrix.target == 'android'
+        uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - if: matrix.target == 'android'
+        shell: bash
+        env:
+          STORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          sdkmanager 'platforms;android-37.2' 'build-tools;36.0.0'
+          test -n "$STORE" && test -n "$ANDROID_KEY_ALIAS" && test -n "$ANDROID_STORE_PASSWORD" && test -n "$ANDROID_KEY_PASSWORD"
+          umask 077
+          export ANDROID_KEYSTORE="$RUNNER_TEMP/rally.p12"
+          printf %s "$STORE" | base64 -d > "$ANDROID_KEYSTORE"
+          npm run dist:android
+          node --experimental-vm-modules --test tests/cloud/renderer.test.mjs
+      - if: always() && matrix.target == 'android'
+        shell: bash
+        run: rm -f -- "$RUNNER_TEMP/rally.p12"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          if-no-files-found: error
+          path: |
+            release/*-setup.exe
+            release/*-android.apk
+            release/rally-server-*.tar.gz
+  draft:
+    needs: client-and-server
+    runs-on: ubuntu-24.04
+    permissions: { contents: write }
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - working-directory: dist
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          sha256sum *.exe *.apk *.tar.gz > SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --generate-notes *.exe *.apk *.tar.gz SHA256SUMS

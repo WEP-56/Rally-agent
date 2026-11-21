@@ -105,7 +105,7 @@ export function ChatPanel({
 	questions?: TaskQuestionView[];
 	tasks: Task[];
 	busy: boolean;
-	onSend: (t: string) => void;
+	onSend: (t: string) => void | Promise<void>;
 	onStop: () => void;
 	onNewChat: () => void;
 	onCompactChat: () => void;
@@ -167,22 +167,23 @@ export function ChatPanel({
     }
   }, [draft]);
 
-  const send = () => {
-    if (!draft.trim()) return;
+  const sending = useRef(false);
+  const send = async () => {
+    if (!draft.trim() || sending.current) return;
     followTail.current = true;
-    onSend(draft);
-    setDraft("");
+    sending.current=true;
+    try {await onSend(draft);setDraft(current=>current===draft?"":current);setActionError(null);}catch(e){setActionError(String(e));}finally{sending.current=false;}
   };
 
   return (
     <div className="left-ambient relative flex h-full min-w-0 flex-col">
-      <div className="drag relative z-10 flex h-16 shrink-0 items-center justify-between gap-2 px-3">
-        <div className="no-drag flex gap-2">
+      <div className="chat-mobile-header drag relative z-10 flex h-16 shrink-0 items-center justify-between gap-2 px-3">
+        <div className="chat-session-actions no-drag flex gap-2">
           {header.showNewConversation && <RoundButton size={36} title="新建会话 (Ctrl+N)" onClick={onNewChat}><SquarePen size={15} strokeWidth={1.8} /></RoundButton>}
           {header.showCompact && <RoundButton size={36} title="整理上下文 (Ctrl+Shift+N)" onClick={onCompactChat}><ListRestart size={15} strokeWidth={1.8} /></RoundButton>}
         </div>
         <button onClick={() => openTab("workstation")} title="打开 Rally 的工位" className={cn(
-          "no-drag glass-strong absolute left-1/2 flex h-[42px] -translate-x-1/2 items-center gap-1.5 rounded-full py-1 pl-1 pr-2.5",
+          "chat-identity no-drag glass-strong flex h-[42px] items-center gap-1.5 rounded-full py-1 pl-1 pr-2.5 md:absolute md:left-1/2 md:-translate-x-1/2",
           rightOpen ? "max-w-[min(45%,calc(100%_-_196px))]" : "max-w-[min(45%,calc(100%_-_272px))]",
         )}>
           <AgentAvatar size={32} />
@@ -205,12 +206,12 @@ export function ChatPanel({
       }} className="chat-scroll relative z-10 min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
         <div className="mx-auto flex min-w-0 max-w-[760px] flex-col gap-4 px-4 pb-6 pt-4">
           {visibleMessages.length === 0 && (
-            <div className="animate-rise flex flex-col items-center pt-[14vh] text-center">
+            <div className="chat-welcome animate-rise flex flex-col items-center pt-[14vh] text-center">
               <AgentAvatar size={52} />
               <div className="mt-5 text-xl font-semibold">今天要一起推进什么？</div>
               <div className="mt-2 max-w-sm text-sm text-muted">我会规划、拆解，并把工作派发到工位上并行完成。你可以随时在右侧查看每个任务的进展。</div>
               <div className="mt-6 grid w-full max-w-md grid-cols-2 gap-2">
-                {["分析一个 GitHub 仓库的架构", "启动本地服务并预览页面", "整理本周 issue 生成周报", "运行测试并修复失败用例"].map((s) => (
+                {["分析一个 GitHub 仓库的架构", window.runtime.mode === "cloud" ? "检查服务器上的项目" : "启动本地服务并预览页面", "整理本周 issue 生成周报", "运行测试并修复失败用例"].map((s) => (
                   <button key={s} onClick={() => setDraft(s)} className="rounded-xl bg-sunken px-3.5 py-3 text-left text-[13px] text-muted transition-all hover:bg-deep hover:text-fg dark:hover:bg-raised">
                     {s}
                   </button>
@@ -256,14 +257,14 @@ export function ChatPanel({
       </div>
 
       {/* composer */}
-      <div className="relative z-10 shrink-0 px-3 pb-3.5">
+      <div className="chat-composer relative z-10 shrink-0 px-3 pb-3.5">
         <div className="glass-strong mx-auto max-w-[760px] rounded-[28px] p-2 transition-shadow focus-within:shadow-pop">
           <textarea
             ref={ta}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && (window.runtime.platform !== "android" || e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
                 send();
               }

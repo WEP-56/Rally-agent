@@ -12,7 +12,13 @@ export function McpSection() {
 	const [toolName, setToolName] = useState("");
 	const [tier, setTier] = useState<McpRiskTier>("reversible");
 	const [editor, setEditor] = useState<{ originalName?: string; name: string; json: string } | null>(null);
+	const [changed, setChanged] = useState(false);
 	const dirty = state !== null && json !== state.json;
+	useEffect(() => {
+		const change = (event: Event) => { if ((event as CustomEvent<string>).detail === "mcp") setChanged(true); };
+		window.addEventListener("rally-configuration", change);
+		return () => window.removeEventListener("rally-configuration", change);
+	}, []);
 	useEffect(() => {
 		let mounted = true;
 		void window.rally.mcp.getState().then((next) => { if (mounted) { setState(next); setJson(next.json); } })
@@ -22,7 +28,7 @@ export function McpSection() {
 	}, []);
 	async function change(action: () => Promise<McpConfigurationState>) {
 		setBusy(true); setError("");
-		try { const next = await action(); setState(next); setJson(next.json); return true; }
+		try { const next = await action(); setState(next); setJson(next.json); setChanged(false); return true; }
 		catch (reason) { setError(String(reason)); }
 		finally { setBusy(false); }
 		return false;
@@ -32,6 +38,8 @@ export function McpSection() {
 		catch (error) { setError(String(error)); }
 	};
 	return <>
+		{changed && <p className="mb-3 text-xs text-warn">服务器 MCP 配置有更新，请刷新后查看。当前未保存的内容仍保留。</p>}
+		{window.runtime.mode === "cloud" && <p className="mb-3 text-xs text-muted">已存配置的密钥与命令参数留在服务器。JSON 中的 rallySaved 表示沿用原配置；要替换时填写完整配置。</p>}
 		<div className="mb-4 flex items-center justify-between gap-2">
 			<Segmented value={view} onChange={value => { if (!editor) setView(value); }} options={[{ value: "list", label: "列表" }, { value: "json", label: "JSON" }]} />
 			<div className="flex gap-2"><Button disabled={busy || dirty || editor !== null} onClick={() => void change(() => window.rally.mcp.getState())}><RefreshCw size={13} />刷新</Button><Button variant="primary" disabled={busy || dirty || editor !== null} onClick={() => { setView("list"); setError(""); setEditor({ name: "", json: '{\n  "command": "",\n  "args": []\n}' }); }}><Plus size={13} />添加服务器</Button></div>
@@ -45,12 +53,12 @@ export function McpSection() {
 			<label className="text-xs text-muted">服务器名称<input aria-label="服务器名称" value={editor.name} onChange={event => setEditor({ ...editor, name: event.target.value })} className="my-2 block w-full rounded-lg bg-panel px-3 py-2 text-sm" /></label>
 			<p className="mb-2 text-xs leading-relaxed text-muted">填写单个服务器的 JSON 配置：stdio 使用 command、args，HTTP 使用 url；可选 description 简述用途。</p>
 			<textarea aria-label="单个 MCP 服务器配置" spellCheck={false} value={editor.json} onChange={event => setEditor({ ...editor, json: event.target.value })} className="selectable min-h-56 w-full rounded-xl bg-term p-3 font-mono text-xs leading-relaxed" />
-			<div className="mt-3 flex justify-end gap-2"><Button onClick={() => { setEditor(null); setError(""); }}>取消</Button><Button variant="primary" disabled={!editor.name.trim()} onClick={async () => { if (await change(() => window.rally.mcp.saveServer(editor.name.trim(), editor.json, editor.originalName))) setEditor(null); }}>保存服务器</Button></div>
+				<div className="mt-3 flex justify-end gap-2"><Button onClick={() => { setEditor(null); setError(""); }}>取消</Button><Button variant="primary" disabled={!editor.name.trim()} onClick={async () => { if (await change(() => window.rally.mcp.saveServer(editor.name.trim(), editor.json, editor.originalName, state?.revision))) setEditor(null); }}>保存服务器</Button></div>
 		</fieldset>}
 		{view === "json" ? <>
 			<p className="mb-2 text-xs text-faint">在 mcpServers 中按名称添加服务器。stdio 使用 command 与 args 数组，HTTP 使用 url；可保留 env、headers 和其他 Pi 支持的字段。</p>
 			<textarea aria-label="MCP JSON 配置" spellCheck={false} disabled={busy} className="selectable min-h-80 w-full rounded-2xl bg-term p-4 font-mono text-xs leading-relaxed text-fg/85 outline-none" value={json} onChange={(event) => setJson(event.target.value)} />
-			<div className="mt-3 flex justify-end"><Button variant="primary" disabled={busy || !dirty} onClick={() => void change(() => window.rally.mcp.save(json))}>保存配置</Button></div>
+			<div className="mt-3 flex justify-end gap-2"><Button disabled={busy || !dirty} onClick={() => void change(() => window.rally.mcp.getState())}>放弃修改并刷新</Button><Button variant="primary" disabled={busy || !dirty} onClick={() => void change(() => window.rally.mcp.save(json, state?.revision))}>保存配置</Button></div>
 		</> : <fieldset disabled={busy || dirty || editor !== null} className="flex min-w-0 flex-col gap-2.5">
 			{state?.servers.map((server) => <ServerSettings key={server.name} server={server} change={change} edit={() => editServer(server.name)} />)}
 			{state?.servers.length === 0 && <p className="p-4 text-xs text-faint">尚未配置 MCP 服务器</p>}

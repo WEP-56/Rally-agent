@@ -1,6 +1,63 @@
 # Rally 开发交接（更新 2026-11-21）
 
-## 当前交接点（2026-11-21，主对话顶部）
+## 当前交接点（2026-11-21，VPS 云端、Android GeckoView、移动布局与缓存）
+
+**先读本节和“下一对话任务”。下方旧交接是历史记录，其中“云端暂缓”“尚未提交”“仍只支持本地”等表述不代表当前状态。**产品决定仍以 `docs/superagent/00-问答记录.md` 为准，视觉沿用现有原型、品牌和 token。当前用户要求收尾提交并推送本轮代码；下列四项留给新对话，不在本轮展开实现。
+
+### 已实现与用户验收
+
+- Windows 支持本地/云端模式，云端不启动本机 Supervisor；Android 只提供云端前端。Agent、Worker、任务、文件、调度、MCP 和连接器在 VPS 执行。云端暂缓用户终端、内嵌浏览器、私有服务预览与系统通知。
+- 管理网页仅提供部署控制台：管理密钥登录、生成一次性设备接入密钥、设备列表/吊销、配对开关。模型、MCP 等业务配置由已连接客户端操作。管理密钥与设备令牌分离，服务端保存凭据摘要；业务配置中的提供商密钥/MCP 私密字段不会回传明文。
+- Windows 模式/连接凭据由原生层持有，`safeStorage` 加密；本地和不同服务器使用独立 session partition。Android 以 Keystore 加密连接令牌，Gecko context ID 隔离不同 profile。换服先验证，旧请求停止并拒绝迟到响应；本地与云端历史不自动迁移。
+- Android 已按用户明确选择内置 **GeckoView `160.0.20261116130455`**，不再依赖系统 WebView。与 Windows 打包相同 renderer；Java 原生网络桥持有 URL 和令牌。Gradle wrapper/依赖锁已纳入代码，许可证及对应源代码信息在 `THIRD_PARTY_NOTICES/geckoview-*`。
+- 移动端设置目录/详情、聊天、全屏右侧工作台、输入法避让、返回键、模型选择器、首次引导已适配。最新截图反馈修复：头像居中位移只用于桌面；头像格式说明和操作按钮在窄屏分行；身份卡增高、路径保留底部空间，云端显示 `CLOUD`。
+- 云端新增 IndexedDB 读取缓存：按 URL/实例隔离，原子保存状态与 epoch/seq，先显示缓存再接收增量；连接确认前拒绝写入且不自动重发。复用首份快照，不再丢弃后重复拉取。缓存上限 4M UTF-16 字符；超限只留人设/记忆路径摘要并清除游标。**服务重启或 256 条/8 MiB 的事件窗口过期仍需完整快照；会话分页、归档分页和任务详情按需加载尚未实现。**
+- **用户已真实验收**：各类配置、对话、连接器（含飞书等）、任务查看、Windows/Android 秒级同步。无需为这些已验收功能再调用真实供应商。最新移动布局和缓存体验仍由用户继续截图/使用反馈。
+
+### 当前文件入口
+
+| 范围 | 文件 |
+| --- | --- |
+| 模式与 Windows 分区 | `src/main/connection-host.ts`、`connection-profiles.ts`、`src/shared/connection.ts` |
+| 共用业务/API | `src/main/business.ts`、`src/shared/client-api.ts`、`src/shared/ipc.ts` |
+| VPS | `src/main/cloud/{runtime,server,commands,access,requests,vault}.ts`、`src/console/` |
+| renderer 连接/缓存 | `src/renderer/src/{connection,cloud-cache}.ts`、`src/shared/cloud-state.ts` |
+| 模式表单/引导 | `src/renderer/src/components/{ConnectionForm,Onboarding,Settings}.tsx`、`src/renderer/src/main.tsx` |
+| Android 壳 | `android/src/dev/rally/mobile/MainActivity.java`、`android/extension/`、`android/build.gradle` |
+| 构建/部署 | `scripts/cloud/`、`deploy/linux/`、`.github/workflows/release.yml` |
+| 方案与部署说明 | `docs/云端模式与安卓客户端-最小改动方案.md`、`deploy/linux/README.md` |
+
+### 构建、部署与验证事实
+
+- 本地 `release/` 已生成 `Rally-0.1.0-setup.exe`、`Rally-0.1.0-android-debug.apk`（约 256 MiB，三 ABI 通用包）、`rally-server-0.1.0-linux-x64.tar.gz` 和 `SHA256SUMS`；这些安装包不入 Git。最新 APK 已通过用户提供的 ADB 连接覆盖安装，保留配对和服务器配置。
+- Android 需要 JDK 17、SDK Platform 37.2、Build Tools 36.0.0；AGP 9.5.2、Gradle 9.8.0。开发机使用 `.artifacts/gradle-home` 隔离 Gradle 缓存。调试签名位于忽略目录 `.artifacts/android-debug.p12`，保留后才能覆盖测试包。正式签名及 ABI 分包工作见下一任务。
+- `npm run dist`、Android Gradle 构建和 APK 资源/ZIP/内核检查通过；Linux 包在 Ubuntu 22.04 x64 实机完成构建与离线协议、faux-provider 完整 Agent 任务验证。类型检查：`tsconfig.node.json` / `tsconfig.web.json` 通过；根 `npm run typecheck` 仍只有已知 `packages/ai/test/fireworks-models.test.ts` 和 `anthropic-empty-thinking-signature-compat.test.ts` 模型数据错误，不得报告为全仓通过。
+- 新增测试位于 `tests/cloud/`：协议与分区、离线 Agent、缓存 4 项、实际构建 renderer 启动 3 项（含缓存先显示/离线不发送）。此前指定本地 IPC/关闭回归亦通过。不要跑全量 Vitest，测试不得继承真实供应商密钥。
+- 实际设备运行 Gecko 160；ADB 功能检查确认头像左边界 12 CSS px、按钮 44×44、身份卡 320×268、路径底部余量 22 px、无页面横向溢出，IndexedDB 已落盘并成功重启。没有额外启动截图视觉验收。
+- 用户 Ubuntu VPS 已运行 `rally-runtime` + `rally-control`，当前按用户要求测试 HTTP IP:端口直连。代码在 `/opt/rally/current`，数据在 `/var/lib/rally` 与 `/var/lib/rally-control`，服务配置在 `/etc/rally`，更新前备份在 `/var/backups/rally`。用户已有真实配置/会话/任务；后续部署先检查是否繁忙，禁止清空现有数据或重新初始化凭据。
+- 机器接入资料、ADB/SSH 辅助脚本、部署凭据和签名仅留本机忽略目录或用户指定文件，不写入公开仓库。此工作区 `.artifacts/vps.py` / `.artifacts/vps-access.txt` 可供已获授权的后续运维使用，不输出其中密钥。ADB 设备标识为 `127.0.0.1:5555`，调试工具使用明确设备选择。
+- **当前 GitHub workflow 已有**：匹配 package 版本的 `v*` tag 触发 Windows/Linux/Android 构建并创建草稿 Release、附 SHA256SUMS；当前 Android 仍为通用包。未发 tag、未发布 Release、未声称 GitHub 执行成功；正式 Android 签名需仓库 Secrets `ANDROID_KEYSTORE_BASE64` / `ANDROID_KEY_ALIAS` / `ANDROID_STORE_PASSWORD` / `ANDROID_KEY_PASSWORD`。
+
+### 下一对话任务（用户明确指定，按顺序推进）
+
+1. **Windows 首次引导和运行模式 UI。**把本地/云端选择纳入完整首次体验；设置 → 运行模式应清楚显示当前模式、当前连接与两种模式的切换入口。现有 `ConnectionForm` 只是基础功能表单，用户认为非常粗糙。保持现有风格；Android 始终只有云端。不要为了改 UI 破坏已验收的模式隔离、换服验证或本地任务退出行为。
+2. **完整附件系统，先精细设计再实现。**覆盖 Windows 本地图片粘贴/拖拽；Windows 和 Android 云端文件上传；Agent 接收、生成与展示图片/文件；消息中的附件 UI；点击新建右侧预览标签；云端文件下载到本机。用户进一步强调未来很可能产生**图片、视频、音频的生成与交换**，不能只按一次性“上传按钮”设计。详细设计检查点见下一节。
+3. **Windows 桌面体验。**完善应用/安装器/任务栏/托盘图标、托盘驻留，以及关闭按钮行为设置（退出或收起至托盘等）。已有 `src/main/branding.ts` 和本地分支托盘入口，云端分支目前提前返回；应复用现有入口并统一两种模式的行为，确保真正退出仍正确关闭本地工作，云端客户端退出不停止服务器。
+4. **README、部署教程和正式发布。**README 改为清晰的项目介绍，增加 VPS 部署、客户端接入、升级与产物选择指引。完善已有 tag 驱动 GitHub Actions：Windows setup、Linux 部署包、Android **按 ABI 分包的 APK**（用户消息末尾写为“apl”，按 Android 安装包 APK 理解）。当前 `abiFilters` 包含 arm64-v8a/armeabi-v7a/x86_64，但尚未开启 APK splits；需同步 Gradle、打包/校验脚本、产物名称、上传匹配、checksum 和文档，落实签名配置与实际发布验证。不要把已有 workflow 当成此项全部完成。
+
+### 附件系统设计要求与检查点
+
+**用户已确定的是完整流程和未来多媒体扩展目标。下述是下一轮需要精细评估的设计检查点，不是已完成实现或不可更改的数据模型。**
+
+- **先列清端到端场景：**本地粘贴图片/拖文件 → 待发送附件 → 消息与模型输入；两端上传到云端 → 多端同步；Agent 读取已有附件/生成新产物 → 展示/预览/下载；后续图片、视频、音频在用户、Agent、任务、连接器之间生成与交换。梳理现有 Pi 多模态消息、工具输出与 QQ 邮箱附件能力，避免重复实现或把文字路径冒充实际附件支持。
+- **统一资源引用与内容模型：**区分资源实体、消息/任务引用、上传中的临时项、Agent 生成产物和预览派生件。评估稳定 ID、来源、媒体类型、名称、大小/hash、所属实例/会话/任务、可用状态、尺寸/时长、缩略图/封面/转码版本等字段。持久消息引用稳定资源，不依赖临时 URL、Blob URL 或某台客户端绝对路径。原件与展示版本分开，给未来生成任务留状态/进度/失败和产物关联。
+- **传输与存储边界：**明确本地和云端各由谁接收、落盘、读取、下载；云端字节应通过鉴权的传输接口，不塞入现有 1 MiB JSON RPC、轮询快照或 8 MiB 文本缓存。设计大小/数量限制、上传进度、取消、失败重试/去重、完整性校验；按大视频/音频需求评估流式传输、Range、分片/续传，说明首版支持与后续扩展边界。
+- **Agent 的真实可用性：**区分模型可直接理解的图片/音频/视频输入、只作为文件交给工具的内容，以及生成工具输出。能力随提供商/模型而变，不能仅显示缩略图就称为多模态接入；保留权限、任务原话/附件引用、来源与失败解释，明确云端文件路径如何交给 Worker，生成结果如何成为可交换资源。
+- **交互完整性：**粘贴/拖入/选择文件的同一待发送队列、移除/取消/重试、上传状态；图片缩略图、普通文件卡片和将来的媒体播放卡片；明确消息发送与上传完成的关系。点击附件用右侧**新建标签**承载预览，兼容移动全屏右栏、返回行为、重复打开与资源不可用；下载使用各平台保存机制并显示进度/结果。普通文件的预览范围需明确，不支持类型仍可下载/打开。
+- **生命周期和权限：**设计未发送上传清理、消息/任务归档与删除后的引用关系、共享引用避免误删、过期/缺失文件提示、服务备份/迁移。资源按服务器实例和设备授权隔离，吊销后停止访问；限制任意路径访问、文件名穿越、主动内容预览和不受控外链。读取缓存、缩略图缓存与原件缓存分开，避免多端同步重复传送二进制或长期无界占用磁盘。
+- **验证应覆盖链路与异常：**用离线夹具验证图片输入/文件落盘/Agent 产物/引用持久化/跨端同步/预览/下载、换服隔离、重启恢复、超限/中断/缺失/取消/删除；建立图片、音频、视频和普通文件的扩展样例。真实模型和移动视觉按用户授权验收，不借本轮提交自动发起外部调用。
+
+## 上一交接点（2026-11-21，主对话顶部）
 
 - 聊天顶部按 Pi 实际上下文用量显示「整理上下文」，第 4 次成功压缩后显示「新建会话」。重启延续计数，新建清零，窗口菜单和快捷键仍可用。
 - 助手名片居中，随主对话事件显示短状态和加载圈，去掉信号灯；视觉待用户验收。

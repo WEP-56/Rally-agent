@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { TaskBoard, TaskView } from "../../shared/task";
-import { questionViews } from "../../shared/task";
+import { applyTask } from "../../shared/cloud-state";
+import { IpcChannel } from "../../shared/ipc";
+import { cloudRead } from "./cloud-cache";
 import type { Task } from "./data";
 import { messagesOf } from "./task-messages";
 
-const api = window.rally.tasks;
+
 
 export interface TaskBoardState {
 	tasks: Task[];
@@ -17,28 +19,18 @@ export interface TaskBoardState {
 }
 
 export function useTasks(): TaskBoardState {
-	const [board, setBoard] = useState<TaskBoard>({ tasks: [], active: 0, limit: 2, autoApprove: false });
+	const api = window.rally.tasks;
+	const [board, setBoard] = useState<TaskBoard>(() => cloudRead<TaskBoard>(IpcChannel.tasksState) ?? { tasks: [], active: 0, limit: 2, autoApprove: false });
 
 	useEffect(() => {
 		let alive = true;
 		let received = false;
 		void api.getState().then((next) => {
 			if (alive && !received) setBoard(next);
-		});
+		}).catch(() => {});
 		const off = api.onEvent((event) => {
 			received = true;
-			setBoard((current) => {
-				if (event.type !== "task") return event.board;
-				const exists = current.tasks.some((task) => task.id === event.task.id);
-				const tasks = exists
-					? current.tasks.map((task) => (task.id === event.task.id ? event.task : task))
-					: [...current.tasks, event.task];
-				const open = tasks.filter((task) => !task.ended);
-				const ended = tasks.filter((task) => task.ended && task.archivedAt === undefined).sort((a, b) => b.updatedAt - a.updatedAt || Number(b.id.slice(2)) - Number(a.id.slice(2))).slice(0, 20);
-				const archived = tasks.filter(task => task.archivedAt !== undefined);
-				const questions = [...(current.questions ?? []).filter((item) => item.taskId !== event.task.id), ...questionViews(event.task)];
-				return { ...current, tasks: [...open, ...ended, ...archived], questions };
-			});
+			setBoard((current) => applyTask(current, event));
 		});
 		return () => {
 			alive = false;

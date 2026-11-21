@@ -1,8 +1,11 @@
 // Renderer-side mirror of the main conversation. Main owns the truth; this only applies pushed updates.
 
 import { useCallback, useEffect, useState } from "react";
-import type { ChatEvent, ChatLine, ChatState } from "../../shared/ipc";
+import type { ChatLine, ChatState } from "../../shared/ipc";
 import type { ThinkingLevelName } from "../../shared/models";
+import { IpcChannel } from "../../shared/ipc";
+import { applyChat } from "../../shared/cloud-state";
+import { cloudRead } from "./cloud-cache";
 
 const EMPTY: ChatState = {
 	messages: [],
@@ -23,7 +26,7 @@ export interface ChatController {
 	thinkingLevel: string | null;
 	thinkingLevels: string[];
 	notice: string | null;
-	send(text: string): void;
+	send(text: string): Promise<void>;
 	abort(): void;
 	reset(): Promise<boolean>;
 	newConversation(): Promise<void>;
@@ -31,16 +34,18 @@ export interface ChatController {
 }
 
 export function useChat(): ChatController {
-	const [state, setState] = useState<ChatState>(EMPTY);
+	const [state, setState] = useState<ChatState>(() => cloudRead<ChatState>(IpcChannel.chatState) ?? EMPTY);
 
 	useEffect(() => {
 		let alive = true;
+		let snapshotReceived = false;
 		const unsubscribe = window.rally.chat.onEvent((event) => {
-			if (alive) setState((current) => apply(current, event));
+			if (event.type === "snapshot") snapshotReceived = true;
+			if (alive) setState((current) => applyChat(current, event));
 		});
 		void window.rally.chat.getState().then((snapshot) => {
-			if (alive) setState(snapshot);
-		});
+			if (alive && !snapshotReceived) setState(snapshot);
+		}).catch(() => {});
 		return () => {
 			alive = false;
 			unsubscribe();
@@ -49,7 +54,7 @@ export function useChat(): ChatController {
 
 	// The backend records failures as system lines, so these only guard IPC transport errors.
 	const send = useCallback((text: string) => {
-		void window.rally.chat.send(text).catch((error: unknown) => console.error("chat.send failed", error));
+		return window.rally.chat.send(text);
 	}, []);
 	const abort = useCallback(() => {
 		void window.rally.chat.abort().catch((error: unknown) => console.error("chat.abort failed", error));
@@ -66,15 +71,4 @@ export function useChat(): ChatController {
 	}, []);
 
 	return { ...state, send, abort, reset, selectModel, newConversation: window.rally.chat.newConversation };
-}
-
-function apply(state: ChatState, event: ChatEvent): ChatState {
-	if (event.type === "snapshot") return event.state;
-	if (event.type === "busy") return { ...state, busy: event.busy };
-	if (event.type === "header") return { ...state, header: event.header };
-	const message = event.message;
-	const index = state.messages.findIndex((line) => line.id === message.id);
-	const messages =
-		index === -1 ? [...state.messages, message] : state.messages.map((line, i) => (i === index ? message : line));
-	return { ...state, messages };
 }

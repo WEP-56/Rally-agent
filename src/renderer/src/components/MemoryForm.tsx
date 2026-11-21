@@ -25,8 +25,8 @@ export function MemoryForm() {
   }
   return <div className="flex flex-col gap-3">
     <label className="text-xs font-medium text-muted" htmlFor="memory-path">记忆文件路径</label>
-    <div className="flex gap-2">
-      <Input id="memory-path" className="font-mono text-[13px]" value={path} disabled={busy} onChange={(e) => setPath(e.target.value)} />
+    <div className="memory-path-field flex flex-wrap gap-2">
+      <Input id="memory-path" className="min-w-0 flex-[1_1_200px] font-mono text-[13px]" value={path} disabled={busy} onChange={(e) => setPath(e.target.value)} />
       <Button disabled={busy} onClick={() => void run(async () => { const value = await window.rally.memory.pickFile(); if (value) setPath(value); })}><FolderOpen size={14} />浏览…</Button>
       <Button disabled={busy || !path} onClick={() => void run(async () => { const value = await window.rally.memory.setPath(path); setState(value); setPath(value.path); setConfig({ memoryPath: value.path }); })}>保存</Button>
     </div>
@@ -38,7 +38,7 @@ export function MemoryForm() {
       <div>{state.exists ? `${state.entries} 条标记记忆 · ${state.bytes} 字节 · 约 ${state.estimatedTokens} tokens` : "尚未创建记忆文件"}</div>
       <div className="mt-1">上下文预算约 2,000 tokens（估算）。{state.overBudget ? "已超出预算，请打开文件精简；目前只读取开头部分。" : ""}</div>
       <div className="mt-3 flex gap-2">
-        <Button size="sm" disabled={busy || path !== state.path} onClick={() => void run(async () => { await window.rally.memory.open(); setState(await window.rally.memory.getState()); })}>用编辑器打开</Button>
+        {window.runtime.mode!=="cloud" && <Button size="sm" disabled={busy || path !== state.path} onClick={() => void run(async () => { await window.rally.memory.open(); setState(await window.rally.memory.getState()); })}>用编辑器打开</Button>}
         <Button size="sm" disabled={busy} onClick={() => void run(async () => setState(await window.rally.memory.getState()))}>刷新状态</Button>
       </div>
     </div>}

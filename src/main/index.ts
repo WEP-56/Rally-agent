@@ -1,5 +1,9 @@
 // Electron main entry: single-instance lock, Rally paths, main window. `RALLY_SMOKE=1` runs the M0 smoke check and exits.
 
+import { existsSync } from "node:fs";
+import { connectionHost } from "./connection-host.ts";
+import { IpcChannel } from "../shared/ipc.ts";
+import { ipcMain } from "electron";
 import { join } from "node:path";
 import { app, BrowserWindow, dialog, nativeTheme, safeStorage, screen, shell } from "electron";
 import { broadcastChat, broadcastTask, broadcastWorkspace, broadcastServices, forwardWindowState, registerIpc } from "./ipc.ts";
@@ -32,6 +36,8 @@ if (process.env.RALLY_SMOKE === "1") {
 }
 
 async function startApplication(): Promise<void> {
+	let owner: BrowserWindow | undefined;
+	const connection = connectionHost(existsSync(paths.agentDir), () => owner);
 	let supervisor: Supervisor | undefined;
 	let stopIpc: (() => Promise<void>) | undefined;
 	let startupError: unknown;
@@ -53,6 +59,15 @@ async function startApplication(): Promise<void> {
 	});
 	app.on("before-quit", event => { event.preventDefault(); void shutdown.run(); });
 	try {
+		if (connection.mode !== "local") {
+			owner = createMainWindow(connection.partition);
+			const win = owner;
+			ipcMain.on(IpcChannel.windowClose, e => { if(e.sender===win.webContents) win.close(); });
+			ipcMain.on(IpcChannel.windowMinimize, e => { if(e.sender===win.webContents) win.minimize(); });
+			ipcMain.on(IpcChannel.windowToggleMaximize, e => { if(e.sender===win.webContents) win.isMaximized()?win.unmaximize():win.maximize(); });
+			ipcMain.handle(IpcChannel.windowIsMaximized, () => win.isMaximized());
+			return;
+		}
 		// Supervisor locks the state directory before any recovery or state writes.
 		supervisor = new Supervisor(paths, { emitChat: broadcastChat, emitTask: event => { broadcastTask(event); notifications?.observe(event); }, emitWorkspace: broadcastWorkspace, emitServices: broadcastServices,
 			credentialVault: {
@@ -69,7 +84,7 @@ async function startApplication(): Promise<void> {
 		stopIpc = registerIpc(paths, supervisor, notifications);
 		await supervisor.start();
 		if (!shutdown.started) {
-			destroyTray = createApplicationTray(createMainWindow());
+			destroyTray = createApplicationTray(owner = createMainWindow());
 			notifications.start(supervisor.store.list().map(task => supervisor!.store.view(task)));
 		}
 	} catch (error) {
@@ -94,7 +109,7 @@ async function runSmokeAndExit(): Promise<void> {
 	app.exit(ok ? 0 : 1);
 }
 
-function createMainWindow(): BrowserWindow {
+function createMainWindow(partition?: string): BrowserWindow {
 	if (process.platform === "win32") app.setAppUserModelId(APP_ID);
 	const dark = nativeTheme.shouldUseDarkColors;
 	// Frameless: the renderer draws the prototype's title bar and window controls (IPC in ipc.ts).
@@ -113,6 +128,7 @@ function createMainWindow(): BrowserWindow {
 		icon: applicationIcon(),
 		backgroundColor: dark ? "#1c1c1e" : "#f3f3f3",
 		webPreferences: {
+			partition,
 			preload: join(import.meta.dirname, "../preload/index.cjs"),
 			sandbox: true,
 			contextIsolation: true,

@@ -60,6 +60,9 @@ export interface RallyPaths {
 
 /** Invoke channels (renderer -> main, request/response). */
 export const IpcChannel = {
+	connectionState: "connection:state",
+	connectionSelect: "connection:select",
+	connectionRequest: "connection:request",
 	qqMailState: "qqmail:state",
 	qqMailSave: "qqmail:save",
 	qqMailVerify: "qqmail:verify",
@@ -241,7 +244,7 @@ export interface TasksApi {
 export interface ModelsApi {
 	getState(): Promise<ModelsState>;
 	/** Replace the whole provider list; returns what actually registered plus errors. */
-	save(providers: ProviderEntry[]): Promise<ModelsState>;
+	save(providers: ProviderEntry[], revision?: string): Promise<ModelsState>;
 	/** Ask the provider for its model list; failures are returned, not thrown. */
 	fetchModels(input: FetchModelsInput): Promise<FetchModelsResult>;
 	/** Switch the main session model (and optionally its thinking level); persists the choice. */
@@ -308,9 +311,9 @@ export interface RallyApi {
 	memory: { getState(): Promise<MemoryState>; setPath(path: string): Promise<MemoryState>; open(): Promise<void>; pickFile(): Promise<string | null> };
 	gates: { decide(id: string, decision: "allow" | "deny"): Promise<TaskBoard> };
 	mcp: {
-		saveServer(name: string, json: string, originalName?: string): Promise<McpConfigurationState>;
+		saveServer(name: string, json: string, originalName?: string, revision?: string): Promise<McpConfigurationState>;
 		getState(): Promise<McpConfigurationState>;
-		save(json: string): Promise<McpConfigurationState>;
+		save(json: string, revision?: string): Promise<McpConfigurationState>;
 		update(name: string, enabled: boolean | null): Promise<McpConfigurationState>;
 		setTier(name: string, tier: McpRiskTier): Promise<McpConfigurationState>;
 		setExposure(name: string, exposure: McpExposure | null, tool?: string): Promise<McpConfigurationState>;

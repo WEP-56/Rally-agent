@@ -18,7 +18,7 @@ export function shellCommand(shell: "bash" | "powershell", command: string, task
 }
 
 export function createJobTools(jobs: JobManager, task: Task, run: TaskRun): ToolDefinition[] {
-	const shells: ToolDefinition[] = (["bash", "powershell"] as const).map(shell => ({
+	const shells: ToolDefinition[] = (["bash", "powershell"] as const).filter(shell => shell === "bash" || process.platform === "win32").map(shell => ({
 		name: shell, label: shell === "bash" ? "执行 Bash" : "执行 PowerShell", parameters: shellSchema,
 		description: "Run a command in the task cwd. Commands exceeding the foreground window become background jobs; completion automatically wakes or steers you. timeout is seconds (default unlimited). Do not sleep or poll; continue other work or end this turn while a job runs. Full output is logged; tool output is bounded.",
 		async execute(_id: string, params: Static<typeof shellSchema>, signal?: AbortSignal) {

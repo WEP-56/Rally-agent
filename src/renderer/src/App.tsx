@@ -15,14 +15,17 @@ import { useModels } from "./models";
 import { useTasks } from "./tasks";
 import { cn } from "./utils/cn";
 import { ChatSessionDialog, type ChatSessionOperation, type ChatSessionPhase } from "./components/ChatSessionDialog";
+import { cloudRead } from "./cloud-cache";
+import { IpcChannel } from "../../shared/ipc";
 
-const winApi = window.rally.window;
+
 
 const KIND_TITLE: Record<Exclude<TabKind, "task">, string> = { workstation: "Rally 的工位", browser: "新标签页", terminal: "终端", connections: "连接" };
 
 export default function App() {
+  const winApi=window.rally.window, cloud=window.runtime.mode==="cloud";
   const [config, setConfigState] = useState<Config>(loadConfig);
-  const [identityReady, setIdentityReady] = useState(false);
+  const [identityReady, setIdentityReady] = useState(() => Boolean(cloudRead(IpcChannel.identityState)));
   const [identityError, setIdentityError] = useState("");
   const [identityAttempt, setIdentityAttempt] = useState(0);
   const reloadIdentity = useCallback(() => setIdentityAttempt(value => value + 1), []);
@@ -39,7 +42,10 @@ export default function App() {
     return () => { alive = false; off(); };
   }, [identityAttempt]);
   useEffect(() => {
-    void window.rally.memory.getState().then((state) => setConfigState((current) => ({ ...current, memoryPath: state.path }))).catch(() => {});
+    const reload = () => { void window.rally.memory.getState().then((state) => setConfigState((current) => ({ ...current, memoryPath: state.path }))).catch(() => {}); };
+    const changed = (event: Event) => { if ((event as CustomEvent<string>).detail === "memory") reload(); };
+    reload(); window.addEventListener("rally-configuration", changed);
+    return () => window.removeEventListener("rally-configuration", changed);
   }, []);
   const [onboarded, setOnboarded] = useState(loadOnboarded);
   const [view, setView] = useState<"main" | "settings">("main");
@@ -47,7 +53,7 @@ export default function App() {
   const [maximized, setMaximized] = useState(false);
   const [palette, setPalette] = useState(false);
 
-  const [rightOpen, setRightOpen] = useState(true);
+  const [rightOpen, setRightOpen] = useState(() => !matchMedia("(max-width: 767px)").matches);
   const [ratio, setRatio] = useState(0.55);
   const [dragging, setDragging] = useState(false);
   const container = useRef<HTMLDivElement>(null);
@@ -100,6 +106,7 @@ export default function App() {
 
   const openTab = useCallback(
     (kind: Exclude<TabKind, "task">, opts?: { url?: string; taskId?: string }) => {
+      if(cloud && (kind==="browser" || kind==="terminal"))return;
       setView("main");
       setRightOpen(true);
       if (kind === "workstation" || kind === "connections") {
@@ -366,20 +373,21 @@ export default function App() {
     [dark, tabs, phase],
   );
 
+  useEffect(()=>{const back=(e:Event)=>{if(e.defaultPrevented)return;if(palette){setPalette(false);}else if(phase){setPhase(null);}else if(view==="settings"){setView("main");}else if(rightOpen){setRightOpen(false);}else return;e.preventDefault();};window.addEventListener('rally-back',back);return()=>window.removeEventListener('rally-back',back);},[view,palette,phase,rightOpen]);
   const ctx: AppCtx = { config, setConfig, identityReady, identityError, reloadIdentity, openTab, openTask, openSettings, rerunOnboarding };
 
   return (
     <Ctx.Provider value={ctx}>
       <div className="relative flex h-full w-full flex-col overflow-hidden bg-app">
           <div className="pointer-events-none absolute -left-40 top-[calc(2.5rem-160px)] h-[520px] w-[520px] rounded-full bg-accent/[0.07] blur-3xl" />
-          <TitleBar menus={menus} onSearch={() => setPalette(true)} maximized={maximized} onMin={minimize} onMax={toggleMax} onClose={close} onDoubleClick={toggleMax} />
+          <div className="desktop-bar"><TitleBar menus={cloud?menus.map(m=>({...m,groups:m.groups?.map(g=>g.filter(i=>i.label!=="浏览器"&&i.label!=="终端"))})):menus} onSearch={() => setPalette(true)} maximized={maximized} onMin={minimize} onMax={toggleMax} onClose={close} onDoubleClick={toggleMax} /></div>
 
           {view === "settings" && (
             <div className="min-h-0 flex-1">
               <Settings section={section} setSection={setSection} onBack={() => setView("main")} tasks={tasks} />
             </div>
           )}
-            <div ref={container} className={cn("relative min-h-0 flex-1 p-2.5 pl-0", view === "settings" ? "hidden" : "flex")}>
+            <div ref={container} className={cn("rally-panes relative min-h-0 flex-1 p-2.5 pl-0", view === "settings" ? "hidden" : "flex")}>
               <div className="min-w-0 flex-1 overflow-hidden">
                 <ChatPanel
                   notificationFocus={notificationFocus}
@@ -408,16 +416,16 @@ export default function App() {
               </div>
 
               <div
-                className={cn("relative flex shrink-0", !dragging && "transition-[width,opacity] duration-300 ease-[cubic-bezier(.2,.8,.2,1)]", !rightOpen && "pointer-events-none opacity-0")}
+                className={cn("rally-side relative flex shrink-0", !dragging && "transition-[width,opacity] duration-300 ease-[cubic-bezier(.2,.8,.2,1)]", !rightOpen && "pointer-events-none opacity-0")}
                 style={{ width: rightOpen ? `${ratio * 100}%` : 0 }}
                 inert={!rightOpen}
               >
                 {/* drag handle (the gap itself) */}
-                <div onPointerDown={startDrag} onDoubleClick={() => setRatio(0.55)} className="group relative z-10 flex w-2.5 shrink-0 cursor-col-resize items-center justify-center" title="拖拽调整宽度，双击恢复等分">
+                <div onPointerDown={startDrag} onDoubleClick={() => setRatio(0.55)} className="side-divider group relative z-10 flex w-2.5 shrink-0 cursor-col-resize items-center justify-center" title="拖拽调整宽度，双击恢复等分">
                   <div className={cn("h-10 w-[3px] rounded-full transition-all", dragging ? "h-16 bg-accent" : "bg-transparent group-hover:bg-faint/60")} />
                 </div>
                 <div className="min-w-0 flex-1 overflow-hidden">
-                  <div className="h-full" style={{ minWidth: 330 }}>
+                  <div className="h-full" style={{ minWidth: "min(330px, 100%)" }}>
                     <RightPanel
                       onCollapse={() => setRightOpen(false)}
 					  visible={view === "main" && rightOpen && !palette && !dragging && onboarded}
@@ -428,7 +436,7 @@ export default function App() {
                       newTab={(k) => openTab(k)}
                       tasks={tasks}
                       renameTab={(id, title) => setTabs((ts) => ts.map((t) => (t.id === id ? { ...t, title } : t)))}
-                      onMention={(t) => setInject((s) => ({ text: `@${t.id.toUpperCase()}「${t.title}」`, n: s.n + 1 }))}
+                      onMention={(t) => {setInject((s) => ({ text: `@${t.id.toUpperCase()}「${t.title}」`, n: s.n + 1 })); if(matchMedia("(max-width: 767px)").matches)setRightOpen(false)}}
                     />
                   </div>
                 </div>
@@ -436,7 +444,7 @@ export default function App() {
             </div>
           {dragging && <div className="fixed inset-0 z-[200] cursor-col-resize" />}
 
-          <CommandPalette open={palette} onClose={() => setPalette(false)} commands={commands} tasks={tasks.filter(task => task.archivedAt === undefined)} onTask={openTask} />
+          <CommandPalette open={palette} onClose={() => setPalette(false)} commands={cloud?commands.filter(c=>c.id!=="br"&&c.id!=="tm"):commands} tasks={tasks.filter(task => task.archivedAt === undefined)} onTask={openTask} />
           <ChatSessionDialog operation={operation} phase={phase} error={dialogError} onConfirm={() => void confirmSessionAction()} onClose={() => setPhase(null)} onHide={() => { hideHistory(compactBoundary.current); setPhase(null); }} />
 
           {!onboarded && (

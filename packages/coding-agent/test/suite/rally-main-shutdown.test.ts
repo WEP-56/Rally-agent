@@ -12,6 +12,7 @@ const state = vi.hoisted(() => {
 	return { agentDir, ready, whenReady, armed, arm, stopped, requests, closed, sessions, order, listeners,
 		exit: vi.fn(), dispose: vi.fn(async (pending: Promise<void>) => { order.push("supervisor"); await Promise.all([pending, sessions]); order.push("saved"); }), windows: vi.fn(), cancel: vi.fn(async () => { order.push("cancelled"); }) };
 });
+vi.mock("../../../../src/main/connection-host.ts", () => ({ connectionHost: () => ({mode:"local"}) }));
 vi.mock("electron", () => ({
 	app: { requestSingleInstanceLock: () => true, whenReady: () => state.whenReady, on: (name: string, callback: (...args: unknown[]) => void) => state.listeners.set(name, callback), exit: state.exit },
 	BrowserWindow: state.windows, nativeTheme: { shouldUseDarkColors: false }, dialog: {}, shell: {},

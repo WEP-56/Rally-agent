@@ -2,14 +2,25 @@
 <html lang="zh-CN">
 	<head>
 		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content" />
 		<!-- Remote pages live in isolated native views; the app renderer never embeds them. -->
 		<meta
 			http-equiv="Content-Security-Policy"
 			content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; frame-src 'none'; object-src 'none'"
 		/>
 		<title>Rally</title>
+		<link rel="icon" href="data:," />
+		<script src="./startup.js"></script>
 	</head>
 	<body>
+		<div id="startup" role="status" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--c-app,#f4f3f1);color:var(--c-fg,#16161f);font:16px/1.6 system-ui,sans-serif">
+			<div style="max-width:440px;width:100%">
+				<h1 style="font-size:24px;margin:0 0 12px">Rally</h1>
+				<p id="startup-message">正在启动…</p>
+				<pre id="startup-detail" style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px"></pre>
+				<button id="startup-retry" hidden style="border:0;border-radius:16px;padding:12px 24px;background:var(--c-accent,#5b6cf0);color:white;font:inherit">重新加载</button>
+			</div>
+		</div>
 		<div id="root"></div>
 		<script type="module" src="./src/main.tsx"></script>
 	</body>

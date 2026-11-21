@@ -1,0 +1,80 @@
+import groovy.json.JsonSlurper
+
+plugins { id 'com.android.application' version '9.5.2' }
+
+def rallyVersion = new JsonSlurper().parse(file('../package.json')).version
+def versionParts = rallyVersion.tokenize('.').collect { it.toInteger() }
+def bundledAssets = layout.buildDirectory.dir('generated/rally/assets')
+def bundledResources = layout.buildDirectory.dir('generated/rally/res')
+
+android {
+    namespace 'dev.rally.mobile'
+    compileSdk { version = release(37) { minorApiLevel = 2 } }
+    defaultConfig {
+        applicationId 'dev.rally.mobile'
+        minSdk 26
+        targetSdk 35
+        versionCode versionParts[0] * 1000000 + versionParts[1] * 1000 + versionParts[2]
+        versionName rallyVersion
+        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64' }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    signingConfigs {
+        localDebug {
+            storeFile file('../.artifacts/android-debug.p12')
+            storePassword 'android'
+            keyAlias 'rally-debug'
+            keyPassword 'android'
+        }
+        release {
+            def path = System.getenv('ANDROID_KEYSTORE')
+            if (path) {
+                storeFile file(path)
+                storePassword System.getenv('ANDROID_STORE_PASSWORD')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        debug { signingConfig signingConfigs.localDebug }
+        release { signingConfig signingConfigs.release; minifyEnabled false }
+    }
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = ['src']
+            assets.srcDirs = [bundledAssets]
+            res.srcDirs = [bundledResources]
+        }
+    }
+    packaging { jniLibs { useLegacyPackaging = true } }
+}
+
+dependencies { implementation 'org.mozilla.geckoview:geckoview:160.0.20261116130455' }
+dependencyLocking { lockAllConfigurations() }
+
+tasks.register('prepareRallyAssets', Sync) {
+    inputs.property('version', rallyVersion)
+    filteringCharset = 'UTF-8'
+    from('extension') {
+        into 'extension'
+        filesMatching('manifest.json') { filter { line -> line.replace('"0.0.0"', '"' + rallyVersion + '"') } }
+    }
+    from('../out/renderer') {
+        into 'extension/ui'
+        filesMatching('index.html') { filter { line -> line.replace('<head>', '<head>\n<script src="../bridge.js"></script>') } }
+    }
+    into bundledAssets
+    from('../THIRD_PARTY_NOTICES/geckoview-MPL-2.0.txt') { into 'licenses' }
+    from('../THIRD_PARTY_NOTICES/geckoview-sources.txt') { into 'licenses' }
+}
+tasks.register('prepareRallyResources', Copy) {
+    from('../src/renderer/src/assets/rally-mark.png')
+    into bundledResources.get().dir('drawable')
+    rename { 'rally.png' }
+}
+tasks.named('preBuild').configure { dependsOn 'prepareRallyAssets', 'prepareRallyResources' }

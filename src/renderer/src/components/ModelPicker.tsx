@@ -55,7 +55,7 @@ export function ModelPicker({
 	};
 
 	return (
-		<div ref={ref} className="relative">
+		<div ref={ref} className="model-picker relative">
 			<button
 				type="button"
 				onClick={() => setOpen((v) => !v)}
@@ -69,8 +69,8 @@ export function ModelPicker({
 				<ChevronDown size={13} className={cn("shrink-0 text-faint transition-transform", open && "rotate-180")} />
 			</button>
 			{open && (
-				<div className={cn("glass-strong animate-pop absolute z-50 flex rounded-2xl p-1.5 shadow-pop", direction === "up" ? "bottom-full left-0 mb-1.5" : "top-full right-0 mt-1.5")}>
-					<div className="max-h-72 w-60 overflow-auto">
+				<div className={cn("model-picker-menu glass-strong animate-pop absolute z-50 flex rounded-2xl p-1.5 shadow-pop", direction === "up" ? "bottom-full left-0 mb-1.5" : "top-full right-0 mt-1.5")}>
+					<div className="model-picker-list max-h-72 w-60 overflow-auto">
 						{models.length === 0 && (
 							<div className="px-2.5 py-3 text-[11px] leading-relaxed text-faint">
 								还没有可用模型。
@@ -107,7 +107,7 @@ export function ModelPicker({
 						))}
 					</div>
 					{panel && (
-						<div className="ml-1 w-28 shrink-0 border-l border-line pl-1">
+						<div className="model-picker-levels ml-1 w-28 shrink-0 border-l border-line pl-1">
 							<div className="px-2.5 pb-1 pt-2 text-[11px] font-medium text-faint">思考强度</div>
 							{panel.thinkingLevels.map((level) => {
 								const active =

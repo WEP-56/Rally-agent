@@ -1,3 +1,4 @@
+import { ConnectionForm } from "./ConnectionForm";
 import { IdentityCard } from "./IdentityCard";
 import { useEffect, useState } from "react";
 import { Archive, Bell, ArrowLeft, UserRound, Brain, Server, Plug, Wand2, Palette, Info, FolderInput, Sun, Moon, Monitor, RotateCcw, ExternalLink, Check } from "lucide-react";
@@ -23,6 +24,7 @@ function Github({ size = 14 }: { size?: number }) {
 }
 
 export const SECTIONS = [
+  { id:"connection", label:"运行模式", icon:Monitor, desc:"本地运行与云端连接" },
   { id: "general", label: "身份", icon: UserRound, desc: "名称、性格与工作方式" },
   { id: "workspace", label: "项目与工作区", icon: FolderInput, desc: "默认工作区、最近项目与项目信任" },
   { id: "archive", label: "归档", icon: Archive, desc: "查看、撤销归档或彻底删除任务" },
@@ -140,8 +142,8 @@ function AboutSection() {
         <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(70% 80% at 50% 0%, color-mix(in srgb, var(--c-accent) 40%, transparent), transparent 70%)" }} />
         <div className="relative flex h-[120px] w-full items-center justify-center"><OrbitRing size={300} /><RallyLogo size={88} glow className="relative rounded-[24px]" /></div>
         <div className="font-display relative mt-2 text-[30px] font-semibold">Rally</div>
-        <div className="relative mt-1 text-[13px] text-white/60">桌面个人助手{info ? ` · 版本 ${info.version}` : ""}</div>
-        {info && <div className="relative mt-3 font-mono text-[11px] text-white/35">Electron {info.versions.electron} · 基于 Pi 构建 · {info.platform}</div>}
+        <div className="relative mt-1 text-[13px] text-white/60">{window.runtime.mode === "cloud" ? "云端个人助手" : "桌面个人助手"}{info ? ` · 版本 ${info.version}` : ""}</div>
+        {info && <div className="relative mt-3 font-mono text-[11px] text-white/35">{window.runtime.engine ?? (info.versions.electron ? `Electron ${info.versions.electron}` : "云端运行时")} · 基于 Pi 构建 · {info.platform}</div>}
       </div>
       {error && <p role="alert" className="mb-3 text-xs text-danger">{error}</p>}
       <Group>
@@ -162,21 +164,23 @@ function AboutSection() {
 
 export function Settings({ section, setSection, onBack, tasks }: { section: string; setSection: (s: string) => void; onBack: () => void; tasks: Task[] }) {
   const { config } = useApp();
+  const [detail,setDetail]=useState(section !== "general");
+  useEffect(()=>{const back=(e:Event)=>{if(detail&&matchMedia("(max-width:767px)").matches){setDetail(false);e.preventDefault();e.stopImmediatePropagation();}};window.addEventListener("rally-back",back,true);return()=>window.removeEventListener("rally-back",back,true);},[detail]);
   const cur = SECTIONS.find((s) => s.id === (section === "trust" ? "workspace" : section)) || SECTIONS[0];
   return (
-    <div className="animate-fade flex h-full w-full flex-col gap-2.5 p-2.5 pl-0 md:flex-row md:gap-0 md:pl-2.5">
+    <div data-detail={detail} className="rally-settings animate-fade flex h-full w-full flex-col gap-2.5 p-2.5 pl-0 md:flex-row md:gap-0 md:pl-2.5">
       <aside className="flex min-h-0 shrink-0 flex-col md:w-[290px] md:pr-2.5">
         <div className="flex items-center gap-3 px-2 pb-3 pt-1 md:px-3 md:pb-4 md:pt-2">
           <RoundButton title="返回 (Esc)" aria-label="返回应用" onClick={onBack}><ArrowLeft size={17} strokeWidth={1.9} /></RoundButton>
           <div className="min-w-0"><div className="font-display text-[22px] font-semibold leading-none">设置</div><div className="mt-1 truncate text-xs text-faint">{config.name}</div></div>
         </div>
         <nav className="no-scrollbar flex gap-1 overflow-x-auto px-2 md:flex-1 md:flex-col md:overflow-y-auto md:overflow-x-visible md:px-0">
-          {SECTIONS.map((s) => (
+          {SECTIONS.filter(s=>window.runtime.mode!=="cloud"||s.id!=="notifications").map((s) => (
             <button
               key={s.id}
               aria-label={s.label}
               aria-current={cur.id === s.id ? "page" : undefined}
-              onClick={() => setSection(s.id)}
+              onClick={() => {setSection(s.id);setDetail(true)}}
               className={cn(
                 "group relative flex shrink-0 items-center gap-3 rounded-2xl py-2.5 pl-4 pr-3 text-left transition-all",
                 cur.id === s.id ? "bg-panel shadow-card ring-1 ring-line" : "hover:bg-fg/[0.045]",
@@ -191,8 +195,9 @@ export function Settings({ section, setSection, onBack, tasks }: { section: stri
       </aside>
       <main className="stage relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-[28px] shadow-card ring-1 ring-black/[0.06] dark:ring-white/[0.1]">
         <div key={cur.id} className="relative z-10 h-full overflow-y-auto"><div className="mx-auto max-w-[680px] px-5 pb-20 pt-8 md:px-8">
-          <div className="animate-rise mb-7 border-b border-line px-1 pb-5"><h1 className="font-display text-[28px] font-semibold leading-tight">{cur.label}</h1><p className="mt-1 text-[13px] text-fg/55">{cur.desc}</p></div>
+          <button className="mb-3 min-h-11 px-2 text-muted md:hidden" onClick={()=>setDetail(false)}>← 设置目录</button><div className="animate-rise mb-7 border-b border-line px-1 pb-5"><h1 className="font-display text-[28px] font-semibold leading-tight">{cur.label}</h1><p className="mt-1 text-[13px] text-fg/55">{cur.desc}</p></div>
           <div className="animate-rise" style={{ animationDelay: "40ms" }}>
+          {cur.id === "connection" && <ConnectionForm/>}
           {cur.id === "archive" && <ArchivedTasksSection tasks={tasks} />}
           {cur.id === "general" && <><IdentityCard /><IdentityForm /></>}
           {cur.id === "workspace" && <><div className="glass-strong rounded-[24px] p-5"><WorkspaceForm /></div><section className="mt-7"><h2 className="mb-3 px-1 text-[16px] font-semibold">项目信任</h2><ProjectTrustSection /></section></>}

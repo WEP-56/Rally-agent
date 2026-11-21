@@ -1,0 +1,10 @@
+Android client rendering engine: Mozilla GeckoView
+Pinned Maven coordinate: org.mozilla.geckoview:geckoview:160.0.20261116130455
+License: Mozilla Public License 2.0 (see geckoview-MPL-2.0.txt)
+Official distribution: https://maven.mozilla.org/maven2/org/mozilla/geckoview/geckoview/160.0.20261116130455/
+Corresponding unmodified engine source revision (from the artifact's POM):
+https://hg.mozilla.org/releases/mozilla-release/rev/b1145b0710192f716be5f59f5b2dfeed650d5294
+Source archive:
+https://hg.mozilla.org/releases/mozilla-release/archive/b1145b0710192f716be5f59f5b2dfeed650d5294.tar.gz
+Rally embeds the published engine without modifying its source. The Gradle lockfile
+records the Android library dependencies distributed with the client.

@@ -52,6 +52,8 @@ export interface ModelSummary {
 
 /** Provider settings plus what actually registered, and any config errors worth surfacing. */
 export interface ModelsState {
+	/** Opaque cloud revision; local IPC does not require one. */
+	revision?: string;
 	providers: ProviderEntry[];
 	available: ModelSummary[];
 	active: ActiveSelection | null;

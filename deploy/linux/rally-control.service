@@ -1,0 +1,21 @@
+[Unit]
+Description=Rally device gateway and deployment console
+After=rally-runtime.service
+Requires=rally-runtime.service
+[Service]
+User=rally-control
+Group=rally-control
+SupplementaryGroups=rally-runtime
+StateDirectory=rally-control
+StateDirectoryMode=0700
+EnvironmentFile=-/etc/rally/server.env
+ExecStart=/opt/rally/current/bin/node /opt/rally/current/src/main/cloud/server.ts
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+[Install]
+WantedBy=multi-user.target
