@@ -4,10 +4,7 @@ import { join } from "node:path";
 import { createLarkChannel, LoggerLevel, type LarkChannel, type NormalizedMessage } from "@larksuiteoapi/node-sdk";
 import type { FeishuConnectionState, FeishuCredentials, FeishuSource } from "../shared/connections.ts";
 
-export interface CredentialVault {
-	encrypt(value: string): Buffer;
-	decrypt(ciphertext: Buffer): string;
-}
+import type { CredentialVault } from "./credential-vault.ts";
 
 type Saved = { appId: string; secret: string; tools: boolean; owner?: string };
 type Channel = Pick<LarkChannel, "connect" | "disconnect" | "send" | "getConnectionStatus" | "updatePolicy" | "botIdentity" | "rawWsClient"> & { on(name: "message", handler: (message: NormalizedMessage) => void | Promise<void>): () => void };

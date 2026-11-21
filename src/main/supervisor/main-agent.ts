@@ -7,8 +7,8 @@ import {
 	SessionManager,
 	type ToolDefinition,
 } from "@rally/coding-agent";
-import type { ChatEvent, ChatLine, ChatRole, ChatState, RallyPaths } from "../../shared/ipc.ts";
-import type { FeishuSource } from "../../shared/connections.ts";
+import type { ChatActivity, ChatHeaderState, ChatEvent, ChatLine, ChatRole, ChatState, RallyPaths } from "../../shared/ipc.ts";
+import type { ImSource } from "../../shared/connections.ts";
 import type { SelectModelInput, ThinkingLevelName } from "../../shared/models.ts";
 import type { Quote, QuoteRef } from "../../shared/task.ts";
 import type { WorkspaceState } from "../../shared/workspace.ts";
@@ -20,10 +20,14 @@ import type { EventLog } from "./event-log.ts";
 import { closeRoleSession, createRoleSession } from "./session.ts";
 import type { RelayMessage, RelayMode } from "./relay.ts";
 import { searchChat, type ChatSearchParams } from "./chat-search.ts";
+import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
+import { dirname, extname, join } from "node:path";
 
 /** Tools the main agent may call: read-only file access only (docs 02 section 2). */
 const MAIN_TOOLS = ["read", "grep", "find", "ls"];
+const QUERY_TOOLS = new Set([...MAIN_TOOLS, "chat_search", "git_inspect", "github_read", "fetch_page", "task_read", "schedule_list"]);
+const NEW_CONVERSATION_COMPACTIONS = 4;
 
 export interface MainAgentOptions {
 	models: ModelStore;
@@ -45,15 +49,19 @@ export class MainAgent {
 	private session: AgentSession | null = null;
 	private unsubscribe: (() => void) | null = null;
 	private starting: Promise<void> | null = null;
+	private replacing?: Promise<void>;
+	private conversation?: ChatState["conversation"];
 	private disposed = false;
 	private disposal?: Promise<void>;
 	private readonly messages: ChatLine[] = [];
 	private streaming: { line: ChatLine } | null = null;
 	private nextLine = 1;
 	private busy = false;
+	private compactions = 0;
+	private header: ChatHeaderState = { activity: null, showCompact: false, showNewConversation: false };
 	private localSubmissions = 0;
 	private remoteTurn?: Promise<string | null>;
-	private readonly receivedFeishu = new Set<string>();
+	private readonly receivedIm = new Set<string>();
 	private model: string | null = null;
 	private thinkingLevel: string | null = null;
 	private thinkingLevels: string[] = [];
@@ -102,7 +110,7 @@ export class MainAgent {
 		return this.busy || Boolean(this.session?.isStreaming);
 	}
 
-	canReceiveRelay(): boolean { return !this.disposed && !this.remoteTurn && Boolean(this.session && this.model); }
+	canReceiveRelay(): boolean { return !this.disposed && !this.replacing && !this.remoteTurn && Boolean(this.session && this.model); }
 
 	search(params: ChatSearchParams) { return searchChat(this.messages, params); }
 
@@ -139,14 +147,14 @@ export class MainAgent {
 		const ids = [...fresh, ...(mode === "notice" ? [] : recovered)].map((item) => item.id);
 		const content = [...fresh.map((item) => item.text), ...(mode !== "notice" && recovered.length
 			? [`<rally-resume relays="${recovered.map((item) => item.id).join(",")}">Process the relay facts already in history. Their delivery acknowledgement was interrupted; do not repeat completed actions.</rally-resume>`] : [])].join("\n\n");
-		if (mode !== "notice") this.localSubmissions++;
+		this.localSubmissions++;
 		try {
 			await session.sendCustomMessage({ customType: "rally-relay", content, display: false, details: { relayIds: ids } },
 				mode === "notice" ? { triggerTurn: false, deliverAs: "nextTurn" } : { triggerTurn: true, deliverAs: "steer" });
 		} catch (error) {
 			for (const item of fresh) this.queuedRelays.delete(item.id);
 			throw error;
-		} finally { if (mode !== "notice") this.localSubmissions--; }
+		} finally { this.localSubmissions--; }
 	}
 
 	/** Surface a supervisor fact in the conversation (system line, docs 01 §6). */
@@ -159,7 +167,7 @@ export class MainAgent {
 	async start(): Promise<void> {
 		if (this.disposed || this.session) return;
 		if (!this.starting) {
-			this.starting = this.create(false).finally(() => {
+			this.starting = this.create().finally(() => {
 				this.starting = null;
 			});
 		}
@@ -169,6 +177,8 @@ export class MainAgent {
 	state(): ChatState {
 		return {
 			messages: this.messages.map(clone),
+			header: { ...this.header },
+			conversation: this.conversation && { ...this.conversation },
 			busy: this.busy,
 			model: this.model,
 			thinkingLevel: this.thinkingLevel,
@@ -183,11 +193,13 @@ export class MainAgent {
 	 */
 	async selectModel(input: SelectModelInput): Promise<ChatState> {
 		await this.start();
+		if (this.replacing) throw new Error("正在新建会话，请稍候。");
 		const model = this.models.resolve(input.provider, input.model);
 		if (!model) throw new Error(`找不到模型 ${input.provider}/${input.model}，请先在设置中保存该供应商`);
 		if (input.thinkingLevel && !this.models.levelsFor(input.provider, input.model).includes(input.thinkingLevel)) throw new Error(`该模型不支持思考档位 ${input.thinkingLevel}`);
 		const session = this.session;
 		if (!session) throw new Error("主会话没有启动成功，无法切换模型");
+		this.localSubmissions++;
 		try {
 			await session.setModel(model);
 			if (input.thinkingLevel) session.setThinkingLevel(input.thinkingLevel);
@@ -202,22 +214,22 @@ export class MainAgent {
 		} catch (error) {
 			this.fail(error);
 			throw error;
-		}
+		} finally { this.localSubmissions--; }
 	}
 
 	/** An IM turn runs on the same Pi session. Do not mix desktop prompts or relays into its reply. */
-	async sendFromFeishu(text: string, source: FeishuSource): Promise<string | null> {
+	async sendFromIm(text: string, source: ImSource): Promise<string | null> {
 		await this.start();
-		const key = JSON.stringify([source.appId, source.chatId, source.messageId]);
-		if (this.disposed || this.receivedFeishu.has(key)) return null;
+		const key = imKey(source);
+		if (this.disposed || this.receivedIm.has(key)) return null;
 		if (!this.session || !this.model) return "请先在 Rally 桌面应用选择主 Agent 的模型。";
-		if (this.remoteTurn || this.localSubmissions || this.isBusy() || !this.session.isIdle) return "Rally 正在回复上一条消息，请稍后再发送。";
+		if (this.replacing || this.remoteTurn || this.localSubmissions || this.isBusy() || !this.session.isIdle) return "Rally 正在回复上一条消息，请稍后再发送。";
 		const session = this.session;
 		const turn = Promise.resolve().then(async () => {
 			if (this.disposed) return null;
 			const start = this.messages.length;
 			const line = this.addLine("user", text, false, undefined, source);
-			this.receivedFeishu.add(key);
+			this.receivedIm.add(key);
 			try {
 				await session.sendUserMessage(`[User message ${line.id}]\n${text}`);
 				const reply = this.messages.slice(start + 1).findLast(item => item.role === "assistant" && !item.streaming && item.text.trim());
@@ -237,7 +249,7 @@ export class MainAgent {
 		const trimmed = text.trim();
 		if (!trimmed) return;
 		await this.start();
-		while (this.remoteTurn) await this.remoteTurn.catch(() => {});
+		while (this.replacing || this.remoteTurn) await (this.replacing ?? this.remoteTurn)?.catch(() => {});
 		if (this.disposed) return;
 		const line = this.addLine("user", text);
 		const session = this.session;
@@ -280,7 +292,7 @@ export class MainAgent {
 	async reset(): Promise<boolean> {
 		await this.start();
 		if (!this.session || !this.model) { this.addSystemLine("请先选择主 agent 模型再整理上下文。"); return false; }
-		if (this.isBusy()) { this.addSystemLine("请等待当前回复结束后再整理上下文。"); return false; }
+		if (this.replacing || this.remoteTurn || this.localSubmissions || this.isBusy() || !this.session.isIdle) { this.addSystemLine("请等待当前回复结束后再整理上下文。"); return false; }
 		this.setBusy(true);
 		try {
 			await this.session.compact("Preserve user goals, quoted message IDs, task IDs, decisions and unresolved questions. Never invent user quotes.");
@@ -295,6 +307,21 @@ export class MainAgent {
 		}
 	}
 
+	async newConversation(): Promise<void> {
+		await this.start();
+		if (this.disposed || !this.session) throw new Error("主会话未就绪，请稍后再试。");
+		if (this.replacing || this.remoteTurn || this.localSubmissions || this.isBusy() || !this.session.isIdle) {
+			throw new Error("请等待当前回复或整理结束后再新建会话。");
+		}
+		const operation = this.create(randomUUID());
+		this.replacing = operation;
+		try { await operation; }
+		finally {
+			this.replacing = undefined;
+			if (!this.disposed) this.onAvailable?.();
+		}
+	}
+
 	dispose(): Promise<void> {
 		if (this.disposal) return this.disposal;
 		this.disposed = true;
@@ -304,6 +331,7 @@ export class MainAgent {
 		this.session = null;
 		this.disposal = Promise.allSettled([
 			this.starting,
+			this.replacing,
 			session ? closeRoleSession(session) : undefined,
 		]).then((results) => {
 			const errors = results.flatMap(result => result.status === "rejected" ? [result.reason] : []);
@@ -312,15 +340,17 @@ export class MainAgent {
 		return this.disposal;
 	}
 
-	private async create(fresh: boolean): Promise<void> {
+	private async create(newId?: string): Promise<void> {
+		let candidate: AgentSession | undefined;
 		try {
 			const runtime = await this.models.whenReady();
 			if (this.disposed) return;
 			const selection = this.models.selection();
-			const sessionManager = fresh
-				? SessionManager.create(this.paths.mainCwd, this.paths.sessionsMainDir)
-				: SessionManager.continueRecent(this.paths.mainCwd, this.paths.sessionsMainDir);
-			this.rotateSession(sessionManager);
+			const id = newId ?? this.conversation?.id;
+			const dir = id ? join(this.paths.sessionsMainDir, id) : this.paths.sessionsMainDir;
+			const sessionManager = newId ? SessionManager.create(this.paths.mainCwd, dir) : SessionManager.continueRecent(this.paths.mainCwd, dir);
+			const compactions = newId ? 0 : countCompactions(sessionManager);
+			if (!newId) this.rotateSession(sessionManager);
 			const { session, modelFallbackMessage } = await createRoleSession({
 				cwd: this.paths.mainCwd,
 				agentDir: this.paths.agentDir,
@@ -332,11 +362,21 @@ export class MainAgent {
 				tools: MAIN_TOOLS,
 				customTools: this.customTools,
 			});
-			if (this.disposed) {
-				await closeRoleSession(session);
-				return;
+			candidate = session;
+			if (this.disposed) { await closeRoleSession(session); return; }
+			const previous = this.session;
+			if (newId) {
+				const event = this.events.append("chat_reset", { conversationId: newId });
+				this.conversation = { id: newId, at: event.at };
+				this.unsubscribe?.();
+				this.messages.length = 0;
+				this.streaming = null;
+				this.toolLines.clear();
+				this.queuedRelays.clear();
 			}
 			this.session = session;
+			this.compactions = compactions;
+			candidate = undefined;
 			const transform = session.agent.transformContext;
 			session.agent.transformContext = async (messages, signal) => {
 				let context = transform ? await transform(messages, signal) : messages;
@@ -380,8 +420,13 @@ export class MainAgent {
 			this.notice = modelFallbackMessage ?? null;
 			this.busy = session.isStreaming;
 			this.refreshModelState();
+			if (previous) {
+				await closeRoleSession(previous).catch(error => console.error("Previous main session cleanup failed", error));
+				if (!this.disposed) this.onSettled?.(false);
+			}
 		} catch (error) {
-			if (this.disposed) throw error;
+			if (candidate) await closeRoleSession(candidate);
+			if (newId || this.disposed) throw error;
 			this.session = null;
 			this.model = null;
 			this.thinkingLevel = null;
@@ -394,6 +439,7 @@ export class MainAgent {
 
 	/** Re-apply the persisted model after providers were edited, so new URL/key take effect live. */
 	async reapplyActiveModel(): Promise<void> {
+		if (this.replacing) await this.replacing.catch(() => {});
 		const session = this.session;
 		if (!session) return;
 		const active = this.models.activeSelection;
@@ -408,13 +454,14 @@ export class MainAgent {
 			this.refreshModelState();
 			return;
 		}
+		this.localSubmissions++;
 		try {
 			await session.setModel(model);
 			await session.setThinkingLevel(active.thinkingLevel);
 			this.refreshModelState();
 		} catch (error) {
 			this.fail(error);
-		}
+		} finally { this.localSubmissions--; }
 	}
 
 	/** Re-read model + thinking facts from the live session and push a snapshot. */
@@ -425,17 +472,27 @@ export class MainAgent {
 		this.model = label && !label.startsWith("unknown/") ? label : null;
 		this.thinkingLevel = this.model ? (session?.thinkingLevel ?? null) : null;
 		this.thinkingLevels = this.model ? (session?.getAvailableThinkingLevels() ?? []) : [];
+		this.refreshHeader();
 		this.emit({ type: "snapshot", state: this.state() });
 		this.onAvailable?.();
 	}
 
 	private handle(event: AgentSessionEvent): void {
 		switch (event.type) {
+			case "compaction_start":
+				this.setActivity("compacting");
+				return;
 			case "compaction_end":
-				if (event.result && !event.aborted && this.session) this.rotateSession(this.session.sessionManager);
+				if (event.result && !event.aborted && this.session) {
+					this.compactions++;
+					this.rotateSession(this.session.sessionManager);
+				}
+				this.refreshHeader();
+				this.setActivity(this.busy && event.reason !== "manual" ? "thinking" : null);
 				return;
 			case "agent_start":
 				this.setBusy(true);
+				this.setActivity("thinking");
 				return;
 			case "agent_end":
 				if (event.willRetry) return;
@@ -449,6 +506,7 @@ export class MainAgent {
 					this.logLine(line); this.emit({ type: "message", message: clone(line) });
 				}
 				this.toolLines.clear();
+				this.refreshHeader();
 				this.setBusy(false);
 				this.onSettled?.(event.aborted);
 				return;
@@ -459,6 +517,7 @@ export class MainAgent {
 				line.toolCalls ??= [];
 				line.toolCalls.push({ id: event.toolCallId, name: event.toolName, input: toolInput(event.args), status: "running", startedAt: Date.now() });
 				this.toolLines.set(event.toolCallId, line);
+				this.setActivity(toolActivity(event.toolName));
 				this.logLine(line); this.emit({ type: "message", message: clone(line) });
 				return;
 			}
@@ -470,13 +529,22 @@ export class MainAgent {
 					this.logLine(line); this.emit({ type: "message", message: clone(line) });
 				}
 				this.toolLines.delete(event.toolCallId);
+				const remaining = [...this.toolLines].at(-1);
+				const name = remaining?.[1].toolCalls?.find(call => call.id === remaining[0])?.name;
+				if (this.header.activity !== "compacting") this.setActivity(name ? toolActivity(name) : "thinking");
 				return;
 			}
 			case "message_start":
-				if (event.message.role === "assistant") this.startStreaming();
+				if (event.message.role === "assistant") {
+					if (!this.toolLines.size && this.header.activity !== "compacting") this.setActivity("thinking");
+					this.startStreaming();
+				}
 				return;
 			case "message_update":
-				if (event.message.role === "assistant") this.updateStreaming(event.message);
+				if (event.message.role === "assistant") {
+					if (!this.toolLines.size && this.header.activity !== "compacting" && event.assistantMessageEvent.type === "text_delta" && event.assistantMessageEvent.delta.trim()) this.setActivity("replying");
+					this.updateStreaming(event.message);
+				}
 				return;
 			case "message_end":
 				if (event.message.role !== "assistant") return;
@@ -525,7 +593,7 @@ export class MainAgent {
 		this.emit({ type: "message", message: clone(line) });
 	}
 
-	private addLine(role: ChatRole, text: string, streaming = false, relayId?: string, source?: FeishuSource): ChatLine {
+	private addLine(role: ChatRole, text: string, streaming = false, relayId?: string, source?: ImSource): ChatLine {
 		const line: ChatLine = { id: `#${this.nextLine++}`, role, text, at: Date.now(), streaming, relayId, source };
 		this.messages.push(line);
 		if (!streaming) this.logLine(line);
@@ -546,7 +614,28 @@ export class MainAgent {
 		});
 	}
 
+	private refreshHeader(): void {
+		const usage = this.model ? this.session?.getContextUsage() : undefined;
+		const reserve = this.session?.settingsManager.getCompactionReserveTokens(this.session.model) ?? 0;
+		const threshold = usage ? Math.max(0, 1 - reserve / usage.contextWindow) : 0;
+		// Leave 30 percentage points before the configured trigger; warn proportionally
+		// earlier for models with an unusually low threshold.
+		const warning = Math.max(threshold / 2, threshold - 0.3);
+		const showCompact = usage?.tokens != null && usage.tokens > 0 && usage.tokens >= warning * usage.contextWindow;
+		const showNewConversation = this.compactions >= NEW_CONVERSATION_COMPACTIONS;
+		if (this.header.showCompact === showCompact && this.header.showNewConversation === showNewConversation) return;
+		this.header = { ...this.header, showCompact, showNewConversation };
+		this.emit({ type: "header", header: this.header });
+	}
+
+	private setActivity(activity: ChatActivity | null): void {
+		if (this.header.activity === activity) return;
+		this.header = { ...this.header, activity };
+		this.emit({ type: "header", header: this.header });
+	}
+
 	private setBusy(busy: boolean): void {
+		if (!busy) this.setActivity(null);
 		if (this.busy === busy) return;
 		this.busy = busy;
 		this.emit({ type: "busy", busy });
@@ -562,6 +651,8 @@ export class MainAgent {
 	private replay(): void {
 		for (const event of this.events.all()) {
 			if (event.kind === "chat_reset") {
+				const id = event.data.conversationId;
+				if (typeof id === "string" && /^[0-9a-f-]{36}$/.test(id)) this.conversation = { id, at: event.at };
 				this.messages.length = 0;
 				continue;
 			}
@@ -574,8 +665,8 @@ export class MainAgent {
 			const toolCalls = (event.data.toolCalls as ChatLine["toolCalls"])?.map((call) => ({ ...call, status: call.status === "running" ? "interrupted" as const : call.status }));
 			const blocks = event.data.blocks as ChatLine["blocks"];
 			const relayId = typeof event.data.relayId === "string" ? event.data.relayId : undefined;
-			const source = event.data.source as FeishuSource | undefined;
-			if (source?.platform === "feishu") this.receivedFeishu.add(JSON.stringify([source.appId, source.chatId, source.messageId]));
+			const source = event.data.source as ImSource | undefined;
+			if (source?.platform === "feishu" || source?.platform === "qq") this.receivedIm.add(imKey(source));
 			const line = { id: `#${n}`, role, text, at, streaming: false, toolCalls, blocks, relayId, source };
 			const index = this.messages.findIndex((item) => item.id === line.id);
 			if (index === -1) this.messages.push(line);
@@ -583,6 +674,33 @@ export class MainAgent {
 			this.nextLine = Math.max(this.nextLine, n + 1);
 		}
 	}
+}
+
+/** Earlier segments may retain copies of compaction entries. Count each once, stopping at the UI threshold. */
+function countCompactions(manager: SessionManager): number {
+	const ids = new Set<string>();
+	const visited = new Set<string>();
+	while (ids.size < NEW_CONVERSATION_COMPACTIONS) {
+		for (const entry of manager.getBranch()) if (entry.type === "compaction") ids.add(entry.id);
+		if (ids.size >= NEW_CONVERSATION_COMPACTIONS) break;
+		const header = manager.getHeader();
+		const parent = header?.parentSession;
+		if (!header?.segmentCompactionId || !parent || dirname(parent) !== manager.getSessionDir() || extname(parent) !== ".jsonl" || visited.has(parent)) break;
+		visited.add(parent);
+		try { manager = SessionManager.open(parent, manager.getSessionDir(), manager.getCwd()); }
+		catch { break; }
+	}
+	return ids.size;
+}
+
+function toolActivity(name: string): ChatActivity {
+	if (QUERY_TOOLS.has(name)) return "querying";
+	if (name === "task_dispatch" || name === "schedule_create") return "planning";
+	return "orchestrating";
+}
+
+function imKey(source: ImSource): string {
+	return JSON.stringify([source.platform, source.appId, source.chatId, source.messageId]);
 }
 
 function clone(line: ChatLine): ChatLine {

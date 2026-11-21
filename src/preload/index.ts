@@ -9,6 +9,19 @@ import type { TerminalEvent } from "../shared/terminal";
 import type { IdentityState } from "../shared/identity";
 
 const api: RallyApi = {
+	qqMail: {
+		getState: () => ipcRenderer.invoke(IpcChannel.qqMailState),
+		save: credentials => ipcRenderer.invoke(IpcChannel.qqMailSave, credentials),
+		verify: () => ipcRenderer.invoke(IpcChannel.qqMailVerify),
+		disconnect: () => ipcRenderer.invoke(IpcChannel.qqMailDisconnect),
+	},
+	qqBot: {
+		getState: () => ipcRenderer.invoke(IpcChannel.qqBotState),
+		save: input => ipcRenderer.invoke(IpcChannel.qqBotSave, input),
+		retry: () => ipcRenderer.invoke(IpcChannel.qqBotRetry),
+		pair: () => ipcRenderer.invoke(IpcChannel.qqBotPair),
+		disconnect: () => ipcRenderer.invoke(IpcChannel.qqBotDisconnect),
+	},
 	feishu: {
 		getState: () => ipcRenderer.invoke(IpcChannel.feishuState),
 		save: input => ipcRenderer.invoke(IpcChannel.feishuSave, input),
@@ -106,6 +119,7 @@ const api: RallyApi = {
 		send: (text) => ipcRenderer.invoke(IpcChannel.chatSend, text),
 		abort: () => ipcRenderer.invoke(IpcChannel.chatAbort),
 		reset: () => ipcRenderer.invoke(IpcChannel.chatReset),
+		newConversation: () => ipcRenderer.invoke(IpcChannel.chatNewConversation),
 		onEvent: (listener) => {
 			const handler = (_event: IpcRendererEvent, event: ChatEvent) => listener(event);
 			ipcRenderer.on(IpcEvent.chat, handler);

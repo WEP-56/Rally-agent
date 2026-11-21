@@ -1,11 +1,18 @@
+import type { TaskGate } from "../../shared/gate";
 import type { TaskQuestionView } from "../../shared/task";
-import type { ChatMsg } from "./data";
+import type { ChatMsg, Task } from "./data";
 
-export type ConversationItem = ChatMsg | { id: string; role: "question"; at: number; record: TaskQuestionView };
+export type ConversationItem = ChatMsg
+	| { id: string; role: "question"; at: number; record: TaskQuestionView }
+	| { id: string; role: "gate"; at: number; taskId: string; gate: TaskGate };
 
 /** Join provider turns for display only; persisted messages and quote IDs stay intact. */
-export function conversationItems(messages: ChatMsg[], questions: TaskQuestionView[] = []): ConversationItem[] {
-	const history: ConversationItem[] = [...messages, ...questions.filter(({ question }) => question.answer || question.closed).map(record => ({
+export function conversationItems(messages: ChatMsg[], questions: TaskQuestionView[] = [], tasks: Pick<Task, "id" | "gates">[] = [], historyBefore?: number): ConversationItem[] {
+	const gates = tasks.flatMap(task => (task.gates ?? [])
+		.filter(gate => (gate.escalatedAt !== undefined || gate.decision) && (!gate.decision || historyBefore === undefined || gate.decision.at > historyBefore))
+		.map(gate => ({ id: `gate-${gate.id}`, role: "gate" as const, taskId: task.id, gate,
+			at: gate.escalatedAt ?? gate.requestedAt })));
+	const history: ConversationItem[] = [...messages, ...gates, ...questions.filter(({ question }) => question.answer || question.closed).map(record => ({
 		id: `question-${record.question.id}`, role: "question" as const,
 		at: record.question.answer?.at ?? record.question.closed!.at, record,
 	}))].sort((a, b) => (a.at ?? 0) - (b.at ?? 0));

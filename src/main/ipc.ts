@@ -16,7 +16,7 @@ import { httpAddress } from "../shared/browser.ts";
 import type { TerminalSize } from "../shared/terminal.ts";
 import { TerminalManager } from "./terminal.ts";
 import type { TaskNotifications } from "./notifications.ts";
-import type { FeishuCredentials } from "../shared/connections.ts";
+import type { FeishuCredentials, ImBotCredentials, QqMailCredentials } from "../shared/connections.ts";
 import type { IdentityState } from "../shared/identity.ts";
 import { readAvatar } from "./identity-avatar.ts";
 
@@ -81,6 +81,15 @@ export function registerIpc(paths: RallyPaths, supervisor: Supervisor, notificat
 			for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed()) win.webContents.send(IpcEvent.identity, state);
 			return state;
 		};
+		handle(IpcChannel.qqMailState, event => { browser.owner(event); return supervisor.qqMail.state(); });
+		handle(IpcChannel.qqMailSave, (event, input: QqMailCredentials) => { browser.owner(event); return supervisor.qqMail.save(input); });
+		handle(IpcChannel.qqMailVerify, event => { browser.owner(event); return supervisor.qqMail.verify(); });
+		handle(IpcChannel.qqMailDisconnect, event => { browser.owner(event); return supervisor.qqMail.disconnect(); });
+		handle(IpcChannel.qqBotState, event => { browser.owner(event); return supervisor.qqBot.state(); });
+		handle(IpcChannel.qqBotSave, (event, input: ImBotCredentials) => { browser.owner(event); return supervisor.qqBot.save(input); });
+		handle(IpcChannel.qqBotRetry, event => { browser.owner(event); return supervisor.qqBot.start(); });
+		handle(IpcChannel.qqBotPair, event => { browser.owner(event); return supervisor.qqBot.pair(); });
+		handle(IpcChannel.qqBotDisconnect, event => { browser.owner(event); return supervisor.qqBot.disconnect(); });
 		handle(IpcChannel.feishuState, event => { browser.owner(event); return supervisor.feishu.state(); });
 		handle(IpcChannel.feishuSave, (event, input: FeishuCredentials) => { browser.owner(event); return supervisor.feishu.save(input); });
 		handle(IpcChannel.feishuRetry, event => { browser.owner(event); return supervisor.feishu.start(); });
@@ -128,7 +137,8 @@ export function registerIpc(paths: RallyPaths, supervisor: Supervisor, notificat
 		handle(IpcChannel.mcpExposure, (event, name: string, exposure: McpExposure | null, tool?: string) => {
 			browser.owner(event); return mcp.setExposure(name, exposure, tool);
 		});
-		handle(IpcChannel.gateDecide, (_event, id: string, decision: "allow" | "deny") => {
+		handle(IpcChannel.gateDecide, (event, id: string, decision: "allow" | "deny") => {
+			browser.owner(event);
 			supervisor.gates.decide(id, decision, "user", [], "用户点击确认卡片");
 			return supervisor.board();
 		});
@@ -178,6 +188,7 @@ export function registerIpc(paths: RallyPaths, supervisor: Supervisor, notificat
 		handle(IpcChannel.chatSend, (_event, text: unknown) => chat.send(typeof text === "string" ? text : ""));
 		handle(IpcChannel.chatAbort, () => chat.abort());
 		handle(IpcChannel.chatReset, () => chat.reset());
+		handle(IpcChannel.chatNewConversation, event => { browser.owner(event); return chat.newConversation(); });
 		handle(IpcChannel.workspaceState, () => supervisor.workspace.state());
 		handle(IpcChannel.workspaceUpdate, (_event, patch: WorkspacePatch) => {
 			if (!patch || typeof patch !== "object" || Object.keys(patch).some((key) => key !== "defaultWorkspace") || (patch.defaultWorkspace !== undefined && typeof patch.defaultWorkspace !== "string")) throw new Error("只可设置主对话默认工作区");

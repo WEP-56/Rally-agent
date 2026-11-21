@@ -1,4 +1,5 @@
 import { taskView } from "../../shared/task.ts";
+import { modelGate } from "./gate-tools.ts";
 import type { TaskStore } from "./task-store.ts";
 
 /** A fresh projection for the model, independent of the UI board and compressed history. */
@@ -25,7 +26,7 @@ export function rallyState(store: TaskStore, active: number, limit: number, auto
 	});
 	const gates = open.flatMap(task => (task.gates ?? [])
 		.filter(gate => !gate.decision && gate.expiresAt > now && task.runs.some(run => run.id === gate.runId && !run.endedAt))
-		.map(gate => ({ taskId: task.id, ...gate, waitingOn: gate.escalatedAt !== undefined ? "user" : "main" })));
+		.map(gate => ({ taskId: task.id, ...modelGate(gate), waitingOn: gate.userOnly || gate.escalatedAt !== undefined ? "user" : "main" })));
 	const recentEnded = all.filter(task => task.ended).sort((a, b) => b.ended!.at - a.ended!.at || Number(b.id.slice(2)) - Number(a.id.slice(2)))
 		.slice(0, 20).map(task => ({ id: task.id, title: task.title, schedule: taskView(task, now).schedule, cwd: task.cwd, outcome: task.ended!.outcome, at: task.ended!.at }));
 	const allServices = all.flatMap(task => task.services ?? []);

@@ -55,7 +55,7 @@ async function startApplication(): Promise<void> {
 	try {
 		// Supervisor locks the state directory before any recovery or state writes.
 		supervisor = new Supervisor(paths, { emitChat: broadcastChat, emitTask: event => { broadcastTask(event); notifications?.observe(event); }, emitWorkspace: broadcastWorkspace, emitServices: broadcastServices,
-			feishuVault: {
+			credentialVault: {
 				encrypt(value) {
 					if (!safeStorage.isEncryptionAvailable() || (process.platform === "linux" && safeStorage.getSelectedStorageBackend() === "basic_text")) throw new Error("系统凭据加密不可用。");
 					return safeStorage.encryptString(value);

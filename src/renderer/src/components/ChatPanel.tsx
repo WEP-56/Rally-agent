@@ -1,8 +1,10 @@
 import { AgentAvatar } from "./AgentAvatar";
 import { Critter } from "./brand";
+import { IM_SOURCE_LABELS, type ImSource } from "../../../shared/connections";
+import type { ChatActivity, ChatHeaderState } from "../../../shared/ipc";
 import type { NotificationTarget } from "../../../shared/notifications";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Settings, Search, ArrowUp, PanelRightOpen, Paperclip, SquarePen, ShieldCheck, ChevronRight, Square, AtSign } from "lucide-react";
+import { Settings, Search, ArrowUp, PanelRightOpen, Paperclip, ListRestart, LoaderCircle, SquarePen, ShieldCheck, ChevronRight, Square, AtSign } from "lucide-react";
 import type { ModelSummary, ThinkingLevelName } from "../../../shared/models";
 import type { ChatMsg, Task } from "../data";
 import type { TaskQuestionView } from "../../../shared/task";
@@ -16,13 +18,13 @@ import { QuestionCard } from "./QuestionCard";
 import { StatusBadge } from "./status";
 import { conversationItems } from "../conversation";
 
-function UserBubble({ text, fromFeishu }: { text: string; fromFeishu?: boolean }) {
+function UserBubble({ text, source }: { text: string; source?: ImSource }) {
   const [expanded, setExpanded] = useState(false);
   const long = text.length > 160 || text.split("\n").length > 5;
   return (
     <div className="flex justify-end">
       <div className="bubble-user max-w-[82%] rounded-[22px] rounded-br-md px-4 py-2.5 text-[14.5px] leading-[1.65]">
-        {fromFeishu && <div className="mb-1 text-[11px] font-medium text-muted">来自飞书</div>}
+        {source && <div className="mb-1 text-[11px] font-medium text-muted">来自{IM_SOURCE_LABELS[source.platform]}</div>}
         <div
           className={cn("relative overflow-hidden", long && !expanded && "max-h-[7.6em]")}
           style={long && !expanded ? { maskImage: "linear-gradient(to bottom, black 60%, transparent)", WebkitMaskImage: "linear-gradient(to bottom, black 60%, transparent)" } : undefined}
@@ -39,7 +41,10 @@ function UserBubble({ text, fromFeishu }: { text: string; fromFeishu?: boolean }
   );
 }
 
-function taskFromFeishu(task: Task): boolean { return task.quotes?.some(quote => quote.source?.platform === "feishu") ?? false; }
+function taskSourceLabel(task: Task): string {
+  const labels = new Set(task.quotes?.flatMap(quote => quote.source ? [IM_SOURCE_LABELS[quote.source.platform]] : []));
+  return labels.size ? ` · 来自${[...labels].join("、")}` : "";
+}
 
 function TaskCard({ task }: { task: Task }) {
   const { openTask } = useApp();
@@ -52,7 +57,7 @@ function TaskCard({ task }: { task: Task }) {
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{task.title}</div>
         <div className="mt-0.5 flex items-center gap-2 text-xs text-faint">
-          <span>{task.id.toUpperCase()}{taskFromFeishu(task) ? " · 来自飞书" : ""}</span>
+          <span>{task.id.toUpperCase()}{taskSourceLabel(task)}</span>
           <span>·</span>
           <span className="truncate">{task.summary}</span>
         </div>
@@ -63,9 +68,15 @@ function TaskCard({ task }: { task: Task }) {
   );
 }
 
+const ACTIVITY_LABEL: Record<ChatActivity, string> = {
+  thinking: "思考中", replying: "回复中", querying: "查询中", planning: "制订任务", orchestrating: "编排中", compacting: "整理中",
+};
+
 export function ChatPanel({
 	onShowHistory,
 	historyBefore,
+	header,
+	conversationId,
 	notificationFocus,
 	messages,
 	tasks,
@@ -74,6 +85,7 @@ export function ChatPanel({
 	onSend,
 	onStop,
 	onNewChat,
+	onCompactChat,
 	rightOpen,
 	onToggleRight,
 	inject,
@@ -86,6 +98,8 @@ export function ChatPanel({
 }: {
 	onShowHistory?: () => void;
 	historyBefore?: number;
+	header: ChatHeaderState;
+	conversationId?: string;
 	notificationFocus?: { target: NotificationTarget; n: number };
 	messages: ChatMsg[];
 	questions?: TaskQuestionView[];
@@ -94,6 +108,7 @@ export function ChatPanel({
 	onSend: (t: string) => void;
 	onStop: () => void;
 	onNewChat: () => void;
+	onCompactChat: () => void;
 	rightOpen: boolean;
 	onToggleRight: () => void;
 	inject?: { text: string; n: number };
@@ -104,7 +119,7 @@ export function ChatPanel({
 	autoApprove: boolean;
 	onAutoApprove: (enabled: boolean) => Promise<void>;
 }) {
-	const { config, openTab, openSettings } = useApp();
+	const { config, openTab, openTask, openSettings } = useApp();
 	const [actionError, setActionError] = useState<string | null>(null);
 	const action = (operation: Promise<unknown>) => { setActionError(null); void operation.catch((error: unknown) => setActionError(error instanceof Error ? error.message : String(error))); };
 	const [draft, setDraft] = useState("");
@@ -113,8 +128,15 @@ export function ChatPanel({
 	const focusedNotice = useRef<number | undefined>(undefined);
 	const ta = useRef<HTMLTextAreaElement>(null);
 	const visibleMessages = messages.filter((message) => message.text.trim() || message.blocks?.some(block => block.type === "text" && block.text.trim()) || message.taskRef);
-	const running = tasks.filter(task => task.status === "running" && !task.archivedAt).length;
-	const waiting = tasks.filter(task => ["needs_answer", "needs_gate", "pending_approval", "blocked", "failed", "interrupted"].includes(task.status) && !task.archivedAt).length;
+	const conversation = conversationItems(visibleMessages, questions, tasks, historyBefore);
+	const latestGateId = conversation.findLast(item => item.role === "gate")?.id;
+	const activityLabel = header.activity ? ACTIVITY_LABEL[header.activity] : "待命";
+
+  useEffect(() => {
+    setDraft("");
+    setActionError(null);
+    followTail.current = true;
+  }, [conversationId]);
 
   useEffect(() => {
     if (inject?.n) {
@@ -136,7 +158,7 @@ export function ChatPanel({
 
   useEffect(() => {
     if (followTail.current) scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
-  }, [messages, questions.length]);
+  }, [messages, questions.length, latestGateId]);
 
   useLayoutEffect(() => {
     if (ta.current) {
@@ -155,10 +177,22 @@ export function ChatPanel({
   return (
     <div className="left-ambient relative flex h-full min-w-0 flex-col">
       <div className="drag relative z-10 flex h-16 shrink-0 items-center justify-between gap-2 px-3">
-        <RoundButton size={36} className="no-drag" title="整理上下文 (Ctrl+N)" onClick={onNewChat}><SquarePen size={15} strokeWidth={1.8} /></RoundButton>
-        <button onClick={() => openTab("workstation")} title="打开 Rally 的工位" className="no-drag glass-strong absolute left-1/2 flex h-[42px] max-w-[45%] -translate-x-1/2 items-center gap-2 rounded-full py-1 pl-1 pr-4">
-          <span className="relative shrink-0"><AgentAvatar size={34} /><span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-panel bg-ok" /></span>
-          <span className="min-w-0 text-left leading-tight"><span className="block truncate text-[13px] font-semibold">{config.name}</span><span className="block whitespace-nowrap text-[10px] text-muted">{running || waiting ? `${running} 个进行中 · ${waiting} 件等你` : "你的个人助手"}</span></span>
+        <div className="no-drag flex gap-2">
+          {header.showNewConversation && <RoundButton size={36} title="新建会话 (Ctrl+N)" onClick={onNewChat}><SquarePen size={15} strokeWidth={1.8} /></RoundButton>}
+          {header.showCompact && <RoundButton size={36} title="整理上下文 (Ctrl+Shift+N)" onClick={onCompactChat}><ListRestart size={15} strokeWidth={1.8} /></RoundButton>}
+        </div>
+        <button onClick={() => openTab("workstation")} title="打开 Rally 的工位" className={cn(
+          "no-drag glass-strong absolute left-1/2 flex h-[42px] -translate-x-1/2 items-center gap-1.5 rounded-full py-1 pl-1 pr-2.5",
+          rightOpen ? "max-w-[min(45%,calc(100%_-_196px))]" : "max-w-[min(45%,calc(100%_-_272px))]",
+        )}>
+          <AgentAvatar size={32} />
+          <span className="min-w-0 text-left leading-tight">
+            <span className="block truncate text-[13px] font-semibold">{config.name}</span>
+            <span role="status" className="flex items-center gap-1 whitespace-nowrap text-[10px] text-muted">
+              {header.activity && <LoaderCircle aria-hidden="true" size={10} className="shrink-0 motion-safe:animate-spin" />}
+              {activityLabel}
+            </span>
+          </span>
         </button>
         <div className="no-drag ml-auto flex gap-2"><RoundButton size={36} title="搜索 (Ctrl+K)" onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }))}><Search size={15} strokeWidth={1.8} /></RoundButton><RoundButton size={36} title="设置 (Ctrl+,)" onClick={() => openSettings()}><Settings size={15} strokeWidth={1.8} /></RoundButton>{!rightOpen && <RoundButton size={36} title="展开右侧栏 (Ctrl+B)" onClick={onToggleRight}><PanelRightOpen size={15} strokeWidth={1.8} /></RoundButton>}</div>
       </div>
@@ -184,14 +218,15 @@ export function ChatPanel({
               </div>
             </div>
           )}
-          {conversationItems(visibleMessages, questions).map((m) =>
+          {conversation.map((m) =>
+            m.role === "gate" ? <GateCard key={m.id} taskId={m.taskId} gate={m.gate} openTask={() => openTask(m.taskId)} decide={(value) => window.rally.gates.decide(m.gate.id, value)} /> :
             m.role === "question" ? <QuestionCard key={m.id} {...m.record} answer={(option) => window.rally.tasks.answerOption(m.record.taskId, m.record.question.id, option)} /> : m.role === "system" ? (
               <div key={m.id} className="animate-rise whitespace-pre-wrap break-words text-center text-[12px] leading-relaxed text-faint">
                 {m.text}
               </div>
             ) : m.role === "user" ? (
               <div key={m.id} className="animate-rise">
-                <UserBubble text={m.text} fromFeishu={m.source?.platform === "feishu"} />
+                <UserBubble text={m.text} source={m.source} />
               </div>
             ) : (
               <div key={m.id} className="animate-rise relative ml-8 min-w-0 max-w-[88%] self-start rounded-[22px] rounded-tl-md bg-panel p-4 text-sm leading-relaxed shadow-soft">
@@ -203,9 +238,9 @@ export function ChatPanel({
           )}
           {tasks.filter((task) => task.approval === "pending" && task.status === "pending_approval").map((task) => (
             <div key={`approval-${task.id}`} className="ml-8 max-w-[440px] rounded-[22px] border border-warn/30 bg-panel p-4 text-sm shadow-soft">
-              <div className="flex items-center gap-3"><Critter seed={task.id} size={40} /><div className="min-w-0 flex-1"><div className="truncate font-medium" title={task.title}>{task.title}</div><div className="mt-0.5 truncate text-[11.5px] text-faint" title={task.cwd}>{task.id}{taskFromFeishu(task) ? " · 来自飞书" : ""} · {task.mode === "readonly" ? "只读" : "改写"} · {task.cwd}</div></div><StatusBadge status={task.status} /></div>
+              <div className="flex items-center gap-3"><Critter seed={task.id} size={40} /><div className="min-w-0 flex-1"><div className="truncate font-medium" title={task.title}>{task.title}</div><div className="mt-0.5 truncate text-[11.5px] text-faint" title={task.cwd}>{task.id}{taskSourceLabel(task)} · {task.mode === "readonly" ? "只读" : "改写"} · {task.cwd}</div></div><StatusBadge status={task.status} /></div>
               <details className="mt-2 text-xs text-muted"><summary className="cursor-pointer py-1">原话 · 任务简报</summary><div className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs leading-relaxed">
-                {task.quotes?.map((quote) => <div key={quote.messageId} className="mb-1">{quote.messageId}{quote.source?.platform === "feishu" ? " · 飞书" : ""} · {quote.text}</div>)}
+                {task.quotes?.map((quote) => <div key={quote.messageId} className="mb-1">{quote.messageId}{quote.source && ` · ${IM_SOURCE_LABELS[quote.source.platform]}`} · {quote.text}</div>)}
                 {task.note && <div>备注：{task.note}</div>}
                 {!!task.dependsOn?.length && <div>依赖：{task.dependsOn.join("、")}</div>}
               </div></details>
@@ -215,7 +250,6 @@ export function ChatPanel({
               </div>
             </div>
           ))}
-          {tasks.flatMap((task) => (task.gates ?? []).filter((gate) => (gate.escalatedAt || gate.decision) && (!historyBefore || !gate.decision || gate.decision.at > historyBefore)).map((gate) => <GateCard key={gate.id} taskId={task.id} gate={gate} decide={(value) => window.rally.gates.decide(gate.id, value)} />))}
           {questions.filter(({ question }) => !question.answer && !question.closed).sort((a, b) => a.question.askedAt - b.question.askedAt).map(({ taskId, title, question }) => <QuestionCard key={question.id} taskId={taskId} title={title} question={question} answer={(option) => window.rally.tasks.answerOption(taskId, question.id, option)} />)}
           {actionError && <div role="alert" className="text-xs text-red-500">{actionError}</div>}
         </div>

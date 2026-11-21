@@ -4,9 +4,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fauxAssistantMessage, fauxText, fauxThinking, fauxToolCall, getCurrentSystemPrompt, getCurrentTools, type TranscriptContext } from "@rally/ai";
 import type { FauxResponseStep } from "@rally/ai/compat";
+import { QQBot, type MiddlewareContext, type QQBotEventMap, type QQBotInboundMessage } from "@tencent-connect/qqbot-nodejs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ensureRallyDirs, resolveRallyPaths } from "../../../../src/main/paths.ts";
-import { Supervisor } from "../../../../src/main/supervisor/index.ts";
+import { Supervisor, type SupervisorOptions } from "../../../../src/main/supervisor/index.ts";
 import { ModelStore } from "../../../../src/main/model-store.ts";
 import { SkillStore } from "../../../../src/main/skill-store.ts";
 import { McpStore } from "../../../../src/main/mcp-store.ts";
@@ -42,21 +43,21 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		for (const harness of ownedHarnesses) harness.cleanup();
 	}, 30000);
 
-	async function setup(workerConfigured = true, keepRecentTokens = 20000, eventSegmentBytes?: number, mainSegmentCompactions?: number) {
+	async function setup(workerConfigured = true, keepRecentTokens = 20000, eventSegmentBytes?: number, mainSegmentCompactions?: number, options?: Partial<Pick<SupervisorOptions, "credentialVault" | "qqBotFactory" | "emitChat">> & { reserveTokens?: number }) {
 		// Search tools must use installed binaries, never download during offline integration tests.
 		vi.stubEnv("PI_OFFLINE", "1");
 		const harness = await createHarness({ provider: "rally-test", models: [{ id: "main-1" }, { id: "worker-1" }, { id: "worker-2" }] });
 		harnesses.push(harness);
 		const paths = resolveRallyPaths(join(harness.tempDir, "home"));
 		ensureRallyDirs(paths);
-		writeFileSync(join(paths.agentDir, "settings.json"), JSON.stringify({ compaction: { keepRecentTokens } }));
+		writeFileSync(join(paths.agentDir, "settings.json"), JSON.stringify({ compaction: { keepRecentTokens, reserveTokens: options?.reserveTokens } }));
 		mkdirSync(paths.workspaceDir, { recursive: true });
 		writeFileSync(join(paths.workspaceDir, "README.md"), "# Fixture README\nfirst twenty lines\n");
 		writeFileSync(join(paths.workspaceDir, "AGENTS.md"), "RALLY_PROJECT_INSTRUCTIONS_SENTINEL");
 		mkdirSync(join(paths.workspaceDir, ".rally", "skills", "fixture-skill"), { recursive: true });
 		writeFileSync(join(paths.workspaceDir, ".rally", "skills", "fixture-skill", "SKILL.md"), "---\nname: fixture-skill\ndescription: Fixture worker skill for integration tests\n---\n\nFIXTURE_WORKER_SKILL_SENTINEL\n");
 		setProjectTrust(paths.agentDir, paths.workspaceDir, true);
-		const supervisor = new Supervisor(paths, { emitChat: () => {}, emitTask: () => {}, eventSegmentBytes, mainSegmentCompactions });
+		const supervisor = new Supervisor(paths, { emitChat: () => {}, emitTask: () => {}, eventSegmentBytes, mainSegmentCompactions, ...options });
 		supervisors.push(supervisor);
 		await supervisor.models.save([{ id: "rally-test", name: "Offline", protocol: "messages", baseUrl: "http://localhost:0", apiKey: "faux-key", models: harness.models.map((model) => defaultModel(model.id)) }]);
 		const runtime = await supervisor.models.whenReady();
@@ -95,7 +96,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		await supervisor.main.send("先在桌面问候");
 		await vi.waitFor(() => expect(supervisor.main.state().messages.some(m => m.text === "桌面历史" && !m.streaming) && !supervisor.main.isBusy()).toBe(true));
 		const source = { platform: "feishu" as const, appId: "cli_test", chatId: "oc_test", messageId: "om_test" };
-		const reply = supervisor.main.sendFromFeishu("请读取项目", source);
+		const reply = supervisor.main.sendFromIm("请读取项目", source);
 		await Promise.race([started, reply.then(text => { throw new Error(`Feishu ended early: ${text}`); })]);
 		const laterDesktop = supervisor.main.send("飞书回复后再处理这条");
 		expect(supervisor.main.state().messages.some(m => m.text === "飞书回复后再处理这条")).toBe(false);
@@ -103,13 +104,142 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		await expect(reply).resolves.toBe("仅回飞书");
 		await laterDesktop;
 		await vi.waitFor(() => expect(supervisor.main.state().messages.some(m => m.text === "仅回桌面" && !m.streaming) && !supervisor.main.isBusy()).toBe(true));
-		await expect(supervisor.main.sendFromFeishu("重复投递", source)).resolves.toBeNull();
+		await expect(supervisor.main.sendFromIm("重复投递", source)).resolves.toBeNull();
 		expect(supervisor.store.list()[0]?.quotes[0]).toMatchObject({ text: "请读取项目", source });
 		await supervisor.dispose();
 		const restored = new Supervisor(paths, { emitChat: () => {}, emitTask: () => {} });
 		supervisors.push(restored);
 		expect(restored.main.state().messages.find(m => m.text === "请读取项目")?.source).toEqual(source);
 		expect(restored.store.list()[0]?.quotes[0]?.source).toEqual(source);
+	});
+
+	it("pairs one QQ account, shares the desktop conversation, and replies only to the source message", async () => {
+		const bot = new QQBot({ appId: "12345", appSecret: "fixture-only" });
+		const listeners: Partial<QQBotEventMap> = {};
+		vi.spyOn(bot, "on").mockImplementation(<K extends keyof QQBotEventMap>(event: K, handler: QQBotEventMap[K]) => { listeners[event] = handler; return bot; });
+		let stop!: () => void;
+		vi.spyOn(bot, "start").mockImplementation(() => new Promise<void>(resolve => { stop = resolve; }));
+		vi.spyOn(bot, "stop").mockImplementation(() => stop());
+		const sent = vi.spyOn(bot, "sendText").mockResolvedValue({ id: "sent", timestamp: 0 });
+		const credentialVault = {
+			encrypt: (value: string) => Buffer.from(`fixture:${value}`),
+			decrypt: (value: Buffer) => value.toString().slice("fixture:".length),
+		};
+		const qqBotFactory = vi.fn(() => bot);
+		const { harness, paths, supervisor } = await setup(false, 20000, undefined, undefined, { credentialVault, qqBotFactory });
+		const receive = (content: string, messageId: string, senderId = "owner", kind: QQBotInboundMessage["kind"] = "c2c", timestamp = new Date().toISOString()) => {
+			const replyTarget = { scope: kind === "group" ? "group" as const : "c2c" as const, targetId: senderId, msgId: messageId };
+			const message: QQBotInboundMessage = { content, messageId, senderId, kind, timestamp, replyTarget,
+				rawEventType: kind === "group" ? "GROUP_AT_MESSAGE_CREATE" : "C2C_MESSAGE_CREATE",
+				raw: { id: messageId, content, timestamp, author: { user_openid: senderId } } };
+			return listeners.message!({ bot, message, replyTarget } as MiddlewareContext, message);
+		};
+		expect(supervisor.qqBot.save({ appId: "12345", appSecret: "fixture-only" }).status).toBe("connecting");
+		listeners.ready!(undefined);
+		await receive("未配对", "before");
+		const pair = `/pair ${supervisor.qqBot.pair().pairing!.code}`;
+		await receive(pair, "pair-group", "stranger", "group");
+		await receive(pair, "pair-old", "stranger", "c2c", new Date(0).toISOString());
+		expect(supervisor.qqBot.state().paired).toBe(false);
+		await receive(pair, "pair");
+		expect(supervisor.qqBot.state()).toMatchObject({ paired: true, pairing: undefined });
+		expect(sent).toHaveBeenCalledWith({ scope: "c2c", targetId: "owner", msgId: "pair" }, expect.stringContaining("配对成功"));
+		await receive(pair, "reuse-pair", "stranger");
+		await receive("陌生人", "stranger", "stranger");
+		await receive("群消息", "group", "owner", "group");
+		expect(sent).toHaveBeenCalledTimes(1);
+		expect(supervisor.main.state().messages).toHaveLength(0);
+
+		const started = Promise.withResolvers<void>();
+		const pending = Promise.withResolvers<void>();
+		harness.setResponses([
+			fauxAssistantMessage(fauxText("桌面回复")),
+			context => {
+				expect(context.messages.map(getMessageText).join("\n")).toContain("桌面历史");
+				const quoteId = /User message (#\d+)/.exec(lastUser(context))![1];
+				return fauxAssistantMessage(fauxToolCall("task_dispatch", { title: "QQ 只读任务", cwd: paths.workspaceDir, mode: "readonly", quotes: [{ id: quoteId }] }), { stopReason: "toolUse" });
+			},
+			fauxAssistantMessage(fauxText("仅回 QQ")),
+			async () => { started.resolve(); await pending.promise; return fauxAssistantMessage(fauxText("断开后的回复")); },
+		]);
+		await supervisor.main.send("桌面历史");
+		await vi.waitFor(() => expect(supervisor.main.state().messages.some(m => m.text === "桌面回复" && !m.streaming) && !supervisor.main.isBusy()).toBe(true));
+		await receive("请读取项目", "request");
+		await receive("重复投递", "request");
+		const source = { platform: "qq", appId: "12345", chatId: "owner", messageId: "request" };
+		expect(sent).toHaveBeenCalledTimes(2);
+		expect(sent).toHaveBeenLastCalledWith({ scope: "c2c", targetId: "owner", msgId: "request" }, "仅回 QQ");
+		expect(supervisor.main.state().messages.find(m => m.text === "请读取项目")?.source).toEqual(source);
+		expect(supervisor.store.list()[0]?.quotes[0]).toMatchObject({ text: "请读取项目", source });
+
+		const inFlight = Promise.resolve(receive("另一条 QQ 消息", "pending"));
+		await Promise.race([started.promise, inFlight.then(() => { throw new Error("QQ reply finished before disconnect"); })]);
+		supervisor.qqBot.disconnect();
+		pending.resolve();
+		await inFlight;
+		await receive("断开后迟到的事件", "late");
+		expect(sent).toHaveBeenCalledTimes(2);
+		expect(supervisor.main.state().messages.some(m => m.text === "断开后迟到的事件")).toBe(false);
+		await supervisor.dispose();
+		const restored = new Supervisor(paths, { emitChat: () => {}, emitTask: () => {} });
+		supervisors.push(restored);
+		expect(restored.qqBot.state().paired).toBe(false);
+		expect(restored.main.state().messages.find(m => m.text === "请读取项目")?.source).toEqual(source);
+		expect(restored.store.list()[0]?.quotes[0]?.source).toEqual(source);
+	});
+
+	it("starts a fresh main conversation without losing memory, tasks, or restart continuity", async () => {
+		const { harness, paths, supervisor } = await setup(false);
+		const memory = join(harness.tempDir, "personal-memory.md");
+		const memoryText = "# MEMORY\nPERSISTED_MEMORY_SENTINEL\n";
+		writeFileSync(memory, memoryText);
+		supervisor.memory.updatePath(memory);
+		const started = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		harness.setResponses([async () => { started.resolve(); await release.promise; return fauxAssistantMessage(fauxText("旧会话回复")); }]);
+		await supervisor.main.send("OLD_TRANSCRIPT_SENTINEL");
+		await started.promise;
+		try { await expect(supervisor.main.newConversation()).rejects.toThrow("当前回复"); }
+		finally { release.resolve(); }
+		await vi.waitFor(() => expect(supervisor.main.state().messages.some(m => m.text === "旧会话回复" && !m.streaming) && !supervisor.main.isBusy()).toBe(true));
+		const oldLine = supervisor.main.state().messages.find(m => m.text === "OLD_TRANSCRIPT_SENTINEL")!;
+		const oldQuote = supervisor.main.quote({ id: oldLine.id })!;
+		const task = createTask(supervisor, { quotes: [oldQuote] });
+
+		await supervisor.main.newConversation();
+		const fresh = supervisor.main.state();
+		expect(fresh).toMatchObject({ messages: [], model: "rally-test/main-1", thinkingLevel: "off" });
+		expect(fresh.conversation?.id).toBeTruthy();
+		expect(supervisor.main.quote({ id: oldLine.id })).toBeNull();
+		expect(supervisor.store.get(task.id)?.quotes).toEqual([oldQuote]);
+		expect(readFileSync(memory, "utf8")).toBe(memoryText);
+		await supervisor.dispose();
+
+		// Restart before the fresh session has any transcript: the prior Pi file must not be resumed.
+		const restarted = await restart(paths, harness);
+		expect(restarted.main.state()).toMatchObject({ conversation: fresh.conversation, messages: [] });
+		expect(restarted.memory.state().path).toBe(memory);
+		harness.setResponses([context => {
+			const text = context.messages.map(getMessageText).join("\n");
+			expect(text).toContain("PERSISTED_MEMORY_SENTINEL");
+			expect(text).not.toContain("OLD_TRANSCRIPT_SENTINEL");
+			return fauxAssistantMessage(fauxText("新会话回复"));
+		}]);
+		await expect(restarted.main.sendFromIm("新会话第一条", { platform: "qq", appId: "12345", chatId: "owner", messageId: "fresh" })).resolves.toBe("新会话回复");
+		const first = restarted.main.state().messages[0];
+		expect(first.text).toBe("新会话第一条");
+		expect(Number(first.id.slice(1))).toBeGreaterThan(Number(oldLine.id.slice(1)));
+		await restarted.dispose();
+
+		const resumed = await restart(paths, harness);
+		expect(resumed.main.state().messages.map(m => m.text)).toEqual(["新会话第一条", "新会话回复"]);
+		harness.setResponses([context => {
+			const text = context.messages.map(getMessageText).join("\n");
+			expect(text).toContain("新会话第一条");
+			expect(text).not.toContain("OLD_TRANSCRIPT_SENTINEL");
+			return fauxAssistantMessage(fauxText("接着聊"));
+		}]);
+		await expect(resumed.main.sendFromIm("继续刚才的话", { platform: "qq", appId: "12345", chatId: "owner", messageId: "followup" })).resolves.toBe("接着聊");
 	});
 
 	it("advertises enabled Feishu tools as summary to the router and MCP tools to Workers", async () => {
@@ -367,6 +497,51 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		}
 		expect(harness.getPendingResponseCount()).toBe(0);
 	});
+	it("shows the main chat status and suggests compaction before the configured limit", async () => {
+		const activities = new Set<string>();
+		const { harness, paths, supervisor } = await setup(false, 1, undefined, undefined, {
+			reserveTokens: 25600, // 80% of the faux model's 128k context window.
+			emitChat: event => { if (event.type === "header" && event.header.activity) activities.add(event.header.activity); },
+		});
+		const source = { platform: "qq" as const, appId: "header-test", chatId: "owner" };
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("read", { path: join(paths.workspaceDir, "README.md") }), { stopReason: "toolUse" }),
+			fauxAssistantMessage("查询完成"),
+			fauxAssistantMessage("上下文接近阈值"),
+			fauxAssistantMessage("整理摘要"),
+			fauxAssistantMessage("当前轮前缀摘要"),
+		]);
+		expect(supervisor.main.state().header).toEqual({ activity: null, showCompact: false, showNewConversation: false });
+		await supervisor.main.sendFromIm("a".repeat(200000), { ...source, messageId: "below" });
+		expect(activities).toEqual(new Set(["thinking", "querying", "replying"]));
+		expect(supervisor.main.state().header).toMatchObject({ activity: null, showCompact: false });
+		await supervisor.main.sendFromIm("b".repeat(75000), { ...source, messageId: "near" });
+		expect(supervisor.main.state().header.showCompact).toBe(true);
+		const compacted = await supervisor.main.reset();
+		expect(compacted, supervisor.main.state().messages.at(-1)?.text).toBe(true);
+		expect(activities).toContain("compacting");
+		expect(supervisor.main.state().header).toMatchObject({ activity: null, showCompact: false, showNewConversation: false });
+	});
+
+	it("reveals new conversation only after four completed compactions, including prior segments", async () => {
+		const { harness, paths, supervisor } = await setup(false, 1, undefined, 1);
+		await expect(supervisor.main.reset()).resolves.toBe(false);
+		const source = { platform: "qq" as const, appId: "header-test", chatId: "owner" };
+		for (let n = 1; n <= 4; n++) {
+			harness.setResponses([fauxAssistantMessage(`第 ${n} 轮已收到`), fauxAssistantMessage(`第 ${n} 次摘要`), fauxAssistantMessage("当前轮前缀摘要")]);
+			await supervisor.main.sendFromIm(`补充第 ${n} 条事项`, { ...source, messageId: String(n) });
+			const compacted = await supervisor.main.reset();
+			expect(compacted, supervisor.main.state().messages.at(-1)?.text).toBe(true);
+			expect(supervisor.main.state().header.showNewConversation).toBe(n === 4);
+		}
+		expect(supervisor.events.ofKind("segment_rotated")).toHaveLength(4);
+		await supervisor.dispose();
+		const resumed = await restart(paths, harness);
+		expect(resumed.main.state().header.showNewConversation).toBe(true);
+		await resumed.main.newConversation();
+		expect(resumed.main.state().header).toEqual({ activity: null, showCompact: false, showNewConversation: false });
+	});
+
 	it("rotates after automatic compaction without losing a next-turn relay", async () => {
 		const { harness, paths, supervisor } = await setup(true, 1, undefined, 1);
 		let summarizing = false;
@@ -387,6 +562,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 			// Faux derives usage from prompt length; this crosses the real automatic threshold.
 			await supervisor.main.send("x".repeat(480000));
 			await vi.waitFor(() => expect(summarizing).toBe(true));
+			expect(supervisor.main.state().header.activity).toBe("compacting");
 			await supervisor.main.sendRelay([{ id: "rotation-fixture", text: "PENDING_DURING_ROTATION" }], "notice");
 		} finally { release(); }
 		await vi.waitFor(() => expect(supervisor.main.isBusy()).toBe(false));

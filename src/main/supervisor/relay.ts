@@ -98,7 +98,7 @@ export class Relay {
 						this.enqueue({ kind: "worker_report", task, state: event.data.state as ReportState, summary: String(event.data.summary ?? "") }, [source]);
 				} else if (event.kind === "gate_requested") {
 					const gate = task.gates?.find((item) => item.id === event.data.gateId);
-					if (gate) this.enqueue({ kind: "gate_request", task, gate }, [source]);
+					if (gate && !gate.userOnly) this.enqueue({ kind: "gate_request", task, gate }, [source]);
 				} else if (event.kind === "task_queued" && task.queue?.reason === "dependency_failed" && task.queue.holder) {
 					const upstream = this.store.get(task.queue.holder);
 					if (upstream) this.enqueue({ kind: "dependency_failed", task, upstream }, [source]);

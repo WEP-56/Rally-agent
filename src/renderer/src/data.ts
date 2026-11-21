@@ -1,4 +1,4 @@
-import type { FeishuSource } from "../../shared/connections";
+import type { ImSource } from "../../shared/connections";
 import type { Quote } from "../../shared/task";
 export type StepKind = "cmd" | "read" | "write" | "edit" | "delete" | "search" | "web" | "memory" | "think" | "task" | "tool";
 import type { ToolCall } from "../../shared/tools";
@@ -17,7 +17,7 @@ export interface ToolStep {
 }
 
 export interface ChatMsg {
-	source?: FeishuSource;
+	source?: ImSource;
 	runId?: string;
 	blocks?: AssistantBlock[];
 	toolCalls?: ToolCall[];

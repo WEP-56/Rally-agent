@@ -1,6 +1,6 @@
 import type { NotificationTarget } from "../../shared/notifications";
 import type { IdentityState } from "../../shared/identity";
-import { Cable, Globe, IdCard, Info, Moon, Palette, PanelRight, Plug, Settings as SettingsIcon, SquarePen, SquareTerminal, Sun, Wand2 } from "lucide-react";
+import { Cable, Globe, IdCard, Info, Moon, Palette, PanelRight, Plug, ListRestart, Settings as SettingsIcon, SquarePen, SquareTerminal, Sun, Wand2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "./chat";
 import { titleFor } from "./components/BrowserView";
@@ -14,7 +14,7 @@ import { type AppCtx, type Config, Ctx, loadConfig, loadOnboarded, saveConfig, s
 import { useModels } from "./models";
 import { useTasks } from "./tasks";
 import { cn } from "./utils/cn";
-import { CompactDialog, type CompactPhase } from "./components/CompactDialog";
+import { ChatSessionDialog, type ChatSessionOperation, type ChatSessionPhase } from "./components/ChatSessionDialog";
 
 const winApi = window.rally.window;
 
@@ -172,8 +172,9 @@ export default function App() {
   /* ---------------- chat ---------------- */
   const chat = useChat();
   const stop = () => void chat.abort();
-  const [compactPhase, setCompactPhase] = useState<CompactPhase | null>(null);
-  const [compactError, setCompactError] = useState("");
+  const [phase, setPhase] = useState<ChatSessionPhase | null>(null);
+  const [operation, setOperation] = useState<ChatSessionOperation>("compact");
+  const [dialogError, setDialogError] = useState("");
   const compactBoundary = useRef<{ id: string; at: number } | null>(null);
   const [hiddenHistory, setHiddenHistory] = useState<{ id: string; at: number } | null>(() => {
     try {
@@ -186,21 +187,42 @@ export default function App() {
     if (boundary) localStorage.setItem("rally.hiddenHistory", JSON.stringify(boundary));
     else localStorage.removeItem("rally.hiddenHistory");
   };
-  const newChat = () => { setPalette(false); if (!compactPhase) setCompactPhase("confirm"); };
-  const compact = async () => {
-    if (compactPhase !== "confirm") return;
-    if (chat.busy) { setCompactError("请等待当前回复结束后再整理上下文。"); setCompactPhase("error"); return; }
-    const last = chat.messages.at(-1);
-    compactBoundary.current = last ? { id: last.id, at: Date.now() } : null;
-    setCompactPhase("busy");
-    try {
-      const completed = await chat.reset();
-      setCompactError("未完成整理，请查看主对话中的提示。原有历史保持显示。");
-      setCompactPhase(completed ? "done" : "error");
-    } catch (error) { setCompactError(String(error)); setCompactPhase("error"); }
+  const openSessionDialog = (next: ChatSessionOperation) => {
+    if (phase) return;
+    setPalette(false);
+    setOperation(next);
+    setPhase("confirm");
   };
-  const visibleMessages = hiddenHistory ? chat.messages.slice(chat.messages.findIndex(message => message.id === hiddenHistory.id) + 1) : chat.messages;
-  const visibleQuestions = board.questions?.filter(({ question }) => !hiddenHistory || (!question.answer && !question.closed) || (question.answer?.at ?? question.closed?.at ?? 0) > hiddenHistory.at);
+  const newChat = () => openSessionDialog("new");
+  const compactChat = () => openSessionDialog("compact");
+  const confirmSessionAction = async () => {
+    if (phase !== "confirm") return;
+    if (chat.busy) {
+      setDialogError(operation === "new" ? "请等待当前回复结束后再新建会话。" : "请等待当前回复结束后再整理上下文。");
+      setPhase("error");
+      return;
+    }
+    setPhase("busy");
+    try {
+      if (operation === "new") {
+        await chat.newConversation();
+        hideHistory(null);
+        setNotificationFocus(undefined);
+        setView("main");
+        setPhase(null);
+        return;
+      }
+      const last = chat.messages.at(-1);
+      compactBoundary.current = last ? { id: last.id, at: Date.now() } : null;
+      const completed = await chat.reset();
+      setDialogError("未完成整理，请查看主对话中的提示。原有历史保持显示。");
+      setPhase(completed ? "done" : "error");
+    } catch (error) { setDialogError(error instanceof Error ? error.message : String(error)); setPhase("error"); }
+  };
+  const hiddenIndex = hiddenHistory ? chat.messages.findIndex(message => message.id === hiddenHistory.id) : -1;
+  const historyBefore = hiddenIndex >= 0 ? hiddenHistory?.at : chat.conversation?.at;
+  const visibleMessages = hiddenIndex >= 0 ? chat.messages.slice(hiddenIndex + 1) : chat.messages;
+  const visibleQuestions = board.questions?.filter(({ question }) => historyBefore === undefined || (!question.answer && !question.closed) || (question.answer?.at ?? question.closed?.at ?? 0) > historyBefore);
 
   /* ---------------- resize ---------------- */
   const startDrag = (e: React.PointerEvent) => {
@@ -235,7 +257,7 @@ export default function App() {
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
-      if (!onboarded || compactPhase) return;
+      if (!onboarded || phase) return;
       if (mod && e.key.toLowerCase() === "b") {
         e.preventDefault();
         setRightOpen((v) => !v);
@@ -247,7 +269,8 @@ export default function App() {
         openSettings();
       } else if (mod && e.key.toLowerCase() === "n") {
         e.preventDefault();
-        newChat();
+        if (e.shiftKey) compactChat();
+        else newChat();
       } else if (mod && ["1", "2", "3", "4"].includes(e.key)) {
         e.preventDefault();
         openTab((["workstation", "browser", "terminal", "connections"] as const)[+e.key - 1]);
@@ -268,7 +291,8 @@ export default function App() {
       mnemonic: "W",
       groups: [
         [
-          { label: "整理上下文", shortcut: "Ctrl+N", action: newChat },
+          { label: "新建会话", shortcut: "Ctrl+N", action: newChat },
+          { label: "整理上下文", shortcut: "Ctrl+Shift+N", action: compactChat },
           { label: "显示右侧栏", shortcut: "Ctrl+B", checked: rightOpen, action: () => setRightOpen((v) => !v) },
           { label: "命令面板", shortcut: "Ctrl+K", action: () => setPalette(true) },
         ],
@@ -324,7 +348,8 @@ export default function App() {
 
   const commands: Cmd[] = useMemo(
     () => [
-      { id: "new", label: "整理上下文", group: "操作", icon: <SquarePen size={14} />, hint: "Ctrl+N", run: newChat },
+      { id: "new", label: "新建会话", group: "操作", icon: <SquarePen size={14} />, hint: "Ctrl+N", run: newChat },
+      { id: "compact", label: "整理上下文", group: "操作", icon: <ListRestart size={14} />, hint: "Ctrl+Shift+N", run: compactChat },
       { id: "toggle", label: "切换右侧栏", group: "操作", icon: <PanelRight size={14} />, hint: "Ctrl+B", run: () => setRightOpen((v) => !v) },
       { id: "connections", label: "打开连接", group: "操作", icon: <Cable size={14} />, hint: "Ctrl+4", run: () => openTab("connections") },
       { id: "ws", label: "打开 Rally 的工位", group: "操作", icon: <IdCard size={14} />, hint: "Ctrl+1", run: () => openTab("workstation") },
@@ -338,7 +363,7 @@ export default function App() {
       { id: "s-ab", label: "设置：关于与更新", group: "设置", icon: <Info size={14} />, run: () => openSettings("about") },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [dark, tabs],
+    [dark, tabs, phase],
   );
 
   const ctx: AppCtx = { config, setConfig, identityReady, identityError, reloadIdentity, openTab, openTask, openSettings, rerunOnboarding };
@@ -360,13 +385,16 @@ export default function App() {
                   notificationFocus={notificationFocus}
                   questions={visibleQuestions}
                   messages={visibleMessages}
-                  onShowHistory={hiddenHistory ? () => hideHistory(null) : undefined}
-                  historyBefore={hiddenHistory?.at}
+                  onShowHistory={hiddenIndex >= 0 ? () => hideHistory(null) : undefined}
+                  historyBefore={historyBefore}
+                  header={chat.header}
+                  conversationId={chat.conversation?.id}
                   tasks={tasks}
                   busy={chat.busy}
                   onSend={chat.send}
                   onStop={stop}
                   onNewChat={newChat}
+                  onCompactChat={compactChat}
                   rightOpen={rightOpen}
                   onToggleRight={() => setRightOpen((v) => !v)}
                   inject={inject}
@@ -409,7 +437,7 @@ export default function App() {
           {dragging && <div className="fixed inset-0 z-[200] cursor-col-resize" />}
 
           <CommandPalette open={palette} onClose={() => setPalette(false)} commands={commands} tasks={tasks.filter(task => task.archivedAt === undefined)} onTask={openTask} />
-          <CompactDialog phase={compactPhase} error={compactError} onConfirm={() => void compact()} onClose={() => setCompactPhase(null)} onHide={() => { hideHistory(compactBoundary.current); setCompactPhase(null); }} />
+          <ChatSessionDialog operation={operation} phase={phase} error={dialogError} onConfirm={() => void confirmSessionAction()} onClose={() => setPhase(null)} onHide={() => { hideHistory(compactBoundary.current); setPhase(null); }} />
 
           {!onboarded && (
             <Onboarding

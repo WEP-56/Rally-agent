@@ -32,7 +32,7 @@ describe("Rally conversation rendering (no browser)", () => {
 				{ id: "1", role: "assistant", text: "", blocks: [{ type: "thinking", text: "THINKING_ONLY_MESSAGE" }] },
 				{ id: "2", role: "assistant", text: "INTERMEDIATE_MESSAGE", blocks: [{ type: "text", text: "INTERMEDIATE_MESSAGE" }] },
 				{ id: "3", role: "assistant", text: "", blocks: [{ type: "tool", toolCallId: "hidden" }], toolCalls: [{ id: "hidden", name: "read", input: "hidden.txt", startedAt: 1, status: "running" }] },
-			], tasks: [], busy: false, onSend: () => {}, onStop: () => {}, onNewChat: () => {}, rightOpen: true,
+			], tasks: [], header: { activity: null, showCompact: false, showNewConversation: false }, busy: false, onSend: () => {}, onStop: () => {}, onNewChat: () => {}, onCompactChat: () => {}, rightOpen: true,
 			onToggleRight: () => {}, models: [], model: null, thinkingLevel: null, onSelectModel: () => {}, autoApprove: false, onAutoApprove: async () => {},
 		}));
 		expect(html).not.toContain("THINKING_ONLY_MESSAGE");
@@ -40,6 +40,38 @@ describe("Rally conversation rendering (no browser)", () => {
 		expect(html).not.toContain("已读取");
 		expect(html).not.toContain("思考过程");
 		expect(html).not.toContain("正在规划");
+		expect(html).toContain("待命");
+		expect(html).not.toContain("整理上下文 (Ctrl+Shift+N)");
+		expect(html).not.toContain("新建会话 (Ctrl+N)");
+	});
+
+	it("keeps approval requests and their decisions between the same chat messages", () => {
+		const now = Date.now();
+		const gate: TaskGate = { id: "G-7", runId: "R-1", toolCallId: "call", tool: "qqmail_send", cwd: "/work", action: "发送邮件", scope: ["测试收件人"],
+			alternative: "保留草稿", arguments: { text: "草稿正文" }, requestedAt: now - 3, escalatedAt: now - 2, expiresAt: now + 60000 };
+		const render = (decisions: TaskGate[]) => renderToStaticMarkup(createElement(ChatPanel, {
+			messages: [{ id: "m-1", role: "assistant", text: "BEFORE_GATE", at: now - 4, taskRef: "T-1064" },
+				{ id: "m-2", role: "assistant", text: "AFTER_GATE", at: now - 1 }],
+			tasks: [{ id: "T-1064", title: "邮件任务", summary: "fixture", createdAt: now - 5, duration: "1 秒", progress: 0, status: "needs_gate", tags: [], messages: [], gates: decisions }],
+			header: { activity: "querying", showCompact: true, showNewConversation: false },
+			busy: false, onSend: () => {}, onStop: () => {}, onNewChat: () => {}, onCompactChat: () => {}, rightOpen: true, onToggleRight: () => {},
+			models: [], model: null, thinkingLevel: null, onSelectModel: () => {}, autoApprove: false, onAutoApprove: async () => {},
+		}));
+		const pending = render([gate]);
+		const denied = render([{ ...gate, decision: { value: "deny", actor: "user", at: now, reason: "测试拒绝", basis: [] } }]);
+		for (const html of [pending, denied]) {
+			const card = 'id="gate-G-7"';
+			expect(html.split(card)).toHaveLength(2);
+			expect(html.indexOf("BEFORE_GATE")).toBeLessThan(html.indexOf(card));
+			expect(html.indexOf(card)).toBeLessThan(html.indexOf("AFTER_GATE"));
+		}
+		expect(pending).toContain("确认发送</button>");
+		expect(pending).toContain("查询中");
+		expect(pending).toContain("motion-safe:animate-spin");
+		expect(pending).toContain("整理上下文 (Ctrl+Shift+N)");
+		expect(pending).not.toContain("新建会话 (Ctrl+N)");
+		expect(denied).toContain("已拒绝");
+		expect(denied).not.toContain("确认发送</button>");
 	});
 
 	it("groups adjacent calls across provider turns and keeps question history before later replies", () => {

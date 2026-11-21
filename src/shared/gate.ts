@@ -12,6 +12,7 @@ export interface TaskGate {
 	requestedAt: number;
 	expiresAt: number;
 	escalatedAt?: number;
+	userOnly?: boolean;
 	decision?: {
 		value: "allow" | "deny";
 		actor: "main" | "user" | "system";

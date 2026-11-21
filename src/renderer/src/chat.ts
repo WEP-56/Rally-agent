@@ -6,6 +6,7 @@ import type { ThinkingLevelName } from "../../shared/models";
 
 const EMPTY: ChatState = {
 	messages: [],
+	header: { activity: null, showCompact: false, showNewConversation: false },
 	busy: false,
 	model: null,
 	thinkingLevel: null,
@@ -15,6 +16,8 @@ const EMPTY: ChatState = {
 
 export interface ChatController {
 	messages: ChatLine[];
+	header: ChatState["header"];
+	conversation?: ChatState["conversation"];
 	busy: boolean;
 	model: string | null;
 	thinkingLevel: string | null;
@@ -23,6 +26,7 @@ export interface ChatController {
 	send(text: string): void;
 	abort(): void;
 	reset(): Promise<boolean>;
+	newConversation(): Promise<void>;
 	selectModel(provider: string, model: string, level?: ThinkingLevelName): void;
 }
 
@@ -61,12 +65,13 @@ export function useChat(): ChatController {
 			.catch((error: unknown) => console.error("models.select failed", error));
 	}, []);
 
-	return { ...state, send, abort, reset, selectModel };
+	return { ...state, send, abort, reset, selectModel, newConversation: window.rally.chat.newConversation };
 }
 
 function apply(state: ChatState, event: ChatEvent): ChatState {
 	if (event.type === "snapshot") return event.state;
 	if (event.type === "busy") return { ...state, busy: event.busy };
+	if (event.type === "header") return { ...state, header: event.header };
 	const message = event.message;
 	const index = state.messages.findIndex((line) => line.id === message.id);
 	const messages =

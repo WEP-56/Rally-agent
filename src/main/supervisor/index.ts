@@ -9,7 +9,11 @@ import type { WorkspaceState } from "../../shared/workspace.ts";
 import { type QuoteRef, type ReportState, type Task, type TaskBoard, type TaskRun, taskView } from "../../shared/task.ts";
 import { ModelStore } from "../model-store.ts";
 import { WorkspaceStore } from "../workspace-store.ts";
-import { FeishuConnection, type CredentialVault } from "../feishu-connection.ts";
+import { FeishuConnection } from "../feishu-connection.ts";
+import { QqBotConnection, type QqBotFactory } from "../qqbot-connection.ts";
+import type { CredentialVault } from "../credential-vault.ts";
+import { QqMailConnection } from "../qqmail-connection.ts";
+import type { QqMailTransport } from "../qqmail-transport.ts";
 import { IdentityStore } from "../identity-store.ts";
 import { MemoryStore } from "../memory-store.ts";
 import { createMemoryTools } from "./memory-tools.ts";
@@ -60,7 +64,9 @@ export interface SupervisorOptions {
 	emitWorkspace?(state: WorkspaceState): void;
 	/** Slot limit; settings will drive this later (docs 04 §3.2). */
 	limit?: number;
-	feishuVault?: CredentialVault;
+	credentialVault?: CredentialVault;
+	qqMailTransport?: QqMailTransport;
+	qqBotFactory?: QqBotFactory;
 }
 
 export class Supervisor {
@@ -78,6 +84,8 @@ export class Supervisor {
 	readonly schedules: ScheduledTasks;
 	readonly identity: IdentityStore;
 	readonly feishu: FeishuConnection;
+	readonly qqBot: QqBotConnection;
+	readonly qqMail: QqMailConnection;
 	readonly gates: GateService;
 	readonly audit: AuditLog;
 	readonly processes: ProcessRegistry;
@@ -107,7 +115,9 @@ export class Supervisor {
 			this.memory = new MemoryStore(paths.home, paths.memoryFile, this.events, this.audit);
 			this.workspace = new WorkspaceStore(paths.home, paths.workspaceDir);
 			this.identity = new IdentityStore(paths.home);
-			this.feishu = new FeishuConnection(paths.home, options.feishuVault, (text, source) => this.main.sendFromFeishu(text, source));
+			this.feishu = new FeishuConnection(paths.home, options.credentialVault, (text, source) => this.main.sendFromIm(text, source));
+			this.qqBot = new QqBotConnection(paths.home, options.credentialVault, (text, source) => this.main.sendFromIm(text, source), options.qqBotFactory);
+			this.qqMail = new QqMailConnection(paths.home, options.credentialVault, options.qqMailTransport);
 			const catalog = new CapabilityCatalog(paths.agentDir, () => [paths.mainCwd, this.workspace.base(), ...this.workspace.state().recentProjects]);
 			const approval = this.events.ofKind("approval_mode").at(-1);
 			this.autoApprove = approval?.data.enabled === true;
@@ -139,7 +149,7 @@ export class Supervisor {
 				segmentCompactions: options.mainSegmentCompactions,
 				taskState: () => rallyState(this.store, this.workers.streamingCount(), this.scheduler.limit, this.autoApprove),
 				scheduleState: () => this.schedules.context(),
-				capabilities: async () => (await catalog.context()) + (this.feishu.toolsEnabled() ? "\nFeishu worker MCP (rally_feishu): read shared documents and wiki nodes, search shared Bitable records. Only workers may call it." : ""),
+				capabilities: async () => (await catalog.context()) + (this.feishu.toolsEnabled() ? "\nFeishu worker MCP (rally_feishu): read shared documents and wiki nodes, search shared Bitable records. Only workers may call it." : "") + (this.qqMail.available() ? "\nQQ Mail worker tools: search/read the inbox, save attachments, and compose send/reply for explicit desktop approval. Only workers may call them." : ""),
 				customTools: [...createScheduleTools(() => this.schedules, ref => this.main.quote(ref)), createChatSearchTool((params) => this.main.search(params)), ...createMemoryTools(this.memory, (ref) => this.main.quote(ref), () => !this.disposed), ...createRouterReadTools(() => this.workspace.base(), this.processes, () => catalog.skillPaths), createGitInspectTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGitRunner(this.processes)), createGithubReadTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGithubRunner(this.processes)), createFetchPageTool(this.network), ...createMainTaskTools(this.host()), ...createGateTools(this.gates, this.store)],
 				memory: () => this.memory.context(),
 				identity: () => this.identity.context(),
@@ -165,6 +175,7 @@ export class Supervisor {
 				jobs: this.jobs,
 				services: this.services,
 				feishu: this.feishu,
+				qqMail: this.qqMail,
 				watchdogNow: options.watchdogNow,
 				createTools: (task) => createWorkerTools(this.workerHost(task)),
 				report: (task, runId, state, summary, question, answers) =>
@@ -203,6 +214,7 @@ export class Supervisor {
 			this.relay.start();
 			this.schedules.start();
 			this.feishu.start();
+			this.qqBot.start();
 			this.scheduler.tick();
 		} catch (error) {
 			// The application arms its independent deadline before cleanup can await a stuck session.
@@ -223,7 +235,7 @@ export class Supervisor {
 
 	private async close(pendingRequests?: Promise<void>): Promise<void> {
 		const errors: unknown[] = [];
-		for (const stop of [() => this.schedules.dispose(), () => this.scheduler.dispose(), () => this.relay.dispose(), () => this.gates.dispose()]) {
+		for (const stop of [() => this.qqMail.dispose(), () => this.qqBot.dispose(), () => this.schedules.dispose(), () => this.scheduler.dispose(), () => this.relay.dispose(), () => this.gates.dispose()]) {
 			try { stop(); } catch (error) { errors.push(error); }
 		}
 		// allSettled prevents an early rejection from releasing the lock while another session still closes.

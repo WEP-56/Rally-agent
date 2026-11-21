@@ -1,5 +1,5 @@
 import type { ScheduledTask } from "./schedules.ts";
-import type { FeishuConnectionState, FeishuCredentials, FeishuSource } from "./connections.ts";
+import type { FeishuConnectionState, FeishuCredentials, ImBotCredentials, ImBotState, ImSource, QqMailCredentials, QqMailState } from "./connections.ts";
 import type { IdentityState, IdentityText } from "./identity.ts";
 // IPC contract shared by main, preload and renderer: channel names and the typed API the preload exposes.
 
@@ -60,6 +60,15 @@ export interface RallyPaths {
 
 /** Invoke channels (renderer -> main, request/response). */
 export const IpcChannel = {
+	qqMailState: "qqmail:state",
+	qqMailSave: "qqmail:save",
+	qqMailVerify: "qqmail:verify",
+	qqMailDisconnect: "qqmail:disconnect",
+	qqBotState: "qqbot:state",
+	qqBotSave: "qqbot:save",
+	qqBotRetry: "qqbot:retry",
+	qqBotPair: "qqbot:pair",
+	qqBotDisconnect: "qqbot:disconnect",
 	feishuState: "feishu:state",
 	feishuSave: "feishu:save",
 	feishuRetry: "feishu:retry",
@@ -102,6 +111,7 @@ export const IpcChannel = {
 	chatSend: "chat:send",
 	chatAbort: "chat:abort",
 	chatReset: "chat:reset",
+	chatNewConversation: "chat:newConversation",
 	tasksState: "tasks:state",
 	tasksApprove: "tasks:approve",
 	tasksCancel: "tasks:cancel",
@@ -158,7 +168,7 @@ export interface WindowApi {
 export type ChatRole = "user" | "assistant" | "system";
 
 export interface ChatLine {
-	source?: FeishuSource;
+	source?: ImSource;
 	relayId?: string;
 	blocks?: AssistantBlock[];
 	toolCalls?: ToolCall[];
@@ -169,9 +179,19 @@ export interface ChatLine {
 	streaming: boolean;
 }
 
+export type ChatActivity = "thinking" | "replying" | "querying" | "planning" | "orchestrating" | "compacting";
+
+export interface ChatHeaderState {
+	activity: ChatActivity | null;
+	showCompact: boolean;
+	showNewConversation: boolean;
+}
+
 /** Snapshot of the main conversation; sent on subscribe and after resets. */
 export interface ChatState {
 	messages: ChatLine[];
+	header: ChatHeaderState;
+	conversation?: { id: string; at: number };
 	busy: boolean;
 	/** "provider/model" of the main session, or null when no model is configured. */
 	model: string | null;
@@ -187,7 +207,8 @@ export interface ChatState {
 export type ChatEvent =
 	| { type: "snapshot"; state: ChatState }
 	| { type: "message"; message: ChatLine }
-	| { type: "busy"; busy: boolean };
+	| { type: "busy"; busy: boolean }
+	| { type: "header"; header: ChatHeaderState };
 
 /** Main-conversation API. Only the main agent talks to the user (docs 01 section 4.6). */
 export interface ChatApi {
@@ -196,6 +217,7 @@ export interface ChatApi {
 	abort(): Promise<void>;
 	/** Compact context without clearing the conversation. */
 	reset(): Promise<boolean>;
+	newConversation(): Promise<void>;
 	onEvent(listener: (event: ChatEvent) => void): () => void;
 }
 
@@ -229,6 +251,19 @@ export interface ModelsApi {
 
 /** API exposed on `window.rally` by the preload script. */
 export interface RallyApi {
+	qqMail: {
+		getState(): Promise<QqMailState>;
+		save(credentials: QqMailCredentials): Promise<QqMailState>;
+		verify(): Promise<QqMailState>;
+		disconnect(): Promise<QqMailState>;
+	};
+	qqBot: {
+		getState(): Promise<ImBotState>;
+		save(credentials: ImBotCredentials): Promise<ImBotState>;
+		retry(): Promise<ImBotState>;
+		pair(): Promise<ImBotState>;
+		disconnect(): Promise<ImBotState>;
+	};
 	feishu: {
 		getState(): Promise<FeishuConnectionState>;
 		save(credentials: FeishuCredentials): Promise<FeishuConnectionState>;

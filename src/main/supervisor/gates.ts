@@ -33,22 +33,24 @@ export class GateService {
 		}
 	}
 
-	request(task: Task, runId: string, toolCallId: string, tool: string, args: Record<string, unknown>, description: unknown, signal?: AbortSignal, executionCwd = task.cwd): Promise<NonNullable<TaskGate["decision"]>> {
+	request(task: Task, runId: string, toolCallId: string, tool: string, args: Record<string, unknown>, description: unknown, signal?: AbortSignal, executionCwd = task.cwd, userOnly = false): Promise<NonNullable<TaskGate["decision"]>> {
 		const run = task.runs.find((item) => item.id === runId);
 		if (this.disposed || task.ended || !run || run.endedAt || signal?.aborted) throw new TaskError("TASK_ENDED", "任务或运行已结束");
 		if (task.gates?.some((gate) => !gate.decision)) throw new TaskError("GATE_PENDING", "请先等待当前内门决定，再申请其他不可逆动作");
 		const fields = gateDescription(description);
+		const now = Date.now();
+		const timeoutMs = userOnly ? 600_000 : 120_000;
 		const gate: TaskGate = { ...fields, id: `G-${this.nextId++}`, runId, toolCallId, tool, cwd: executionCwd,
-			arguments: structuredClone(args), requestedAt: Date.now(), expiresAt: Date.now() + 120_000 };
+			arguments: structuredClone(args), requestedAt: now, expiresAt: now + timeoutMs, ...(userOnly ? { userOnly: true, escalatedAt: now } : {}) };
 		return new Promise((resolve, reject) => {
 			const aborted = () => this.closeTask(task.id, "Task or tool call was cancelled.");
-			const timer = setTimeout(() => this.timeout(gate.id), 120_000);
+			const timer = setTimeout(() => this.timeout(gate.id), timeoutMs);
 			timer.unref();
 			this.pending.set(gate.id, { taskId: task.id, gate, resolve, timer, unsubscribe: () => signal?.removeEventListener("abort", aborted) });
 			signal?.addEventListener("abort", aborted, { once: true });
 			try {
 				this.options.store.recordGate(task.id, gate, "gate_requested");
-				this.options.requested(task, structuredClone(gate));
+				if (!userOnly) this.options.requested(task, structuredClone(gate));
 			} catch (error) {
 				this.remove(gate.id);
 				reject(error);
@@ -58,6 +60,7 @@ export class GateService {
 
 	decide(id: string, value: "allow" | "deny", actor: "main" | "user", refs: QuoteRef[] = [], reason: string): void {
 		const waiting = this.current(id);
+		if (waiting.gate.userOnly && actor !== "user") throw new TaskError("GATE_USER_REQUIRED", "此操作必须由用户在桌面确认");
 		if (actor === "user" && !waiting.gate.escalatedAt) throw new TaskError("GATE_NOT_ESCALATED", "该请求尚未转交用户");
 		if (value !== "allow" && value !== "deny") throw new TaskError("DECISION_INVALID", "无效的内门决定");
 		if (typeof reason !== "string" || !reason.trim()) throw new TaskError("REASON_REQUIRED", "请说明决定依据");

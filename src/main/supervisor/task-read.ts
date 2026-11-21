@@ -1,6 +1,7 @@
 import { Type, type Static } from "typebox";
 import type { Task } from "../../shared/task.ts";
 import { taskView } from "../../shared/task.ts";
+import { modelGate } from "./gate-tools.ts";
 import { TaskError, type TaskStore } from "./task-store.ts";
 
 export const TaskReadSchema = Type.Object({
@@ -23,8 +24,8 @@ export function readTask(store: TaskStore, task: Task, params: TaskReadParams): 
 	// Validate even scalar views: direct callers must obey the same contract as schema-validated calls.
 	page([], params);
 	switch (params.view ?? "card") {
-		case "card": return { card: taskView(task), outputDir: task.outputDir };
-		case "report": return { report: task.runs.findLast((run) => run.lastReport)?.lastReport ?? null, attention: task.attention?.answer ? null : task.attention ?? null, gates: task.gates?.filter((gate) => !gate.decision) ?? [], changedFiles: task.changedFiles ?? [] };
+		case "card": return { card: { ...taskView(task), gates: task.gates?.map(modelGate) }, outputDir: task.outputDir };
+		case "report": return { report: task.runs.findLast((run) => run.lastReport)?.lastReport ?? null, attention: task.attention?.answer ? null : task.attention ?? null, gates: task.gates?.filter((gate) => !gate.decision).map(modelGate) ?? [], changedFiles: task.changedFiles ?? [] };
 		case "runs": {
 			const { items, ...paging } = page([...task.runs].reverse(), params);
 			return { runs: items, ...paging };

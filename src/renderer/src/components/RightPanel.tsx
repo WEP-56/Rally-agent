@@ -1,6 +1,6 @@
 import { AgentAvatar } from "./AgentAvatar";
 import { Critter } from "./brand";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Cable, Plus, X, Globe, SquareTerminal, IdCard, ChevronRight, PanelRightClose } from "lucide-react";
 import type { Tab } from "../store";
 import { useApp } from "../store";
@@ -85,6 +85,41 @@ export function RightPanel({
   onCollapse: () => void;
 }) {
   const [drawer, setDrawer] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const strip = useRef<HTMLDivElement>(null);
+  const selectedTab = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ id: number; x: number; left: number; moved: boolean } | null>(null);
+  const skipClick = useRef(false);
+
+  useLayoutEffect(() => {
+    const list = strip.current;
+    const tab = selectedTab.current;
+    if (!visible || !list || !tab) return;
+    const viewport = list.getBoundingClientRect();
+    const target = tab.getBoundingClientRect();
+    // Scroll only the tabs; scrollIntoView can also move the surrounding panel.
+    if (target.left < viewport.left) list.scrollLeft += target.left - viewport.left;
+    else if (target.right > viewport.right) list.scrollLeft += target.right - viewport.right;
+  }, [active, tabs.length, visible]);
+
+  useEffect(() => {
+    const list = strip.current;
+    if (!list) return;
+    const wheel = (event: WheelEvent) => {
+      if (event.ctrlKey || event.shiftKey || event.deltaX || !event.deltaY || list.scrollWidth <= list.clientWidth) return;
+      const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? list.clientWidth : 1;
+      list.scrollLeft += event.deltaY * scale;
+      event.preventDefault();
+    };
+    list.addEventListener("wheel", wheel, { passive: false });
+    return () => list.removeEventListener("wheel", wheel);
+  }, []);
+
+  const endDrag = (id: number) => {
+    if (drag.current?.id !== id) return;
+    drag.current = null;
+    setDragging(false);
+  };
   useEffect(() => {
     if (!drawer) return;
     const k = (e: KeyboardEvent) => e.key === "Escape" && setDrawer(false);
@@ -102,7 +137,36 @@ export function RightPanel({
       {/* tab strip */}
       <div className="drag relative z-10 flex h-16 shrink-0 items-center justify-center px-16">
         <div className="no-drag glass-strong flex min-w-0 max-w-full items-center gap-0.5 rounded-full p-1">
-        <div className="no-scrollbar flex min-w-0 items-center gap-0.5 overflow-x-auto">
+        <div ref={strip} className={cn("no-scrollbar flex min-w-0 select-none items-center gap-0.5 overflow-x-auto", dragging && "cursor-grabbing")}
+          onPointerDown={event => {
+            skipClick.current = false;
+            const list = event.currentTarget;
+            if (event.pointerType !== "mouse" || event.button !== 0 || list.scrollWidth <= list.clientWidth || (event.target instanceof Element && event.target.closest("button"))) return;
+            drag.current = { id: event.pointerId, x: event.clientX, left: list.scrollLeft, moved: false };
+          }}
+          onPointerMove={event => {
+            const gesture = drag.current;
+            if (!gesture || gesture.id !== event.pointerId) return;
+            const delta = event.clientX - gesture.x;
+            if (!gesture.moved) {
+              if (Math.abs(delta) < 5) return;
+              gesture.moved = true;
+              skipClick.current = true;
+              event.currentTarget.setPointerCapture(event.pointerId);
+              setDragging(true);
+            }
+            event.currentTarget.scrollLeft = gesture.left - delta;
+          }}
+          onPointerLeave={event => { if (!drag.current?.moved) endDrag(event.pointerId); }}
+          onPointerUp={event => endDrag(event.pointerId)}
+          onPointerCancel={event => endDrag(event.pointerId)}
+          onLostPointerCapture={event => endDrag(event.pointerId)}
+          onClickCapture={event => {
+            if (!skipClick.current || event.detail === 0) return;
+            skipClick.current = false;
+            event.stopPropagation();
+            event.preventDefault();
+          }}>
         {tabs.map((t) => {
           const isActive = t.id === active;
           const task = t.taskId ? tasks.find((x) => x.id === t.taskId) : undefined;
@@ -110,6 +174,7 @@ export function RightPanel({
           return (
             <div
               key={t.id}
+              ref={isActive ? selectedTab : undefined}
               onMouseDown={(e) => {
                 if (e.button === 1 && t.kind !== "workstation") {
                   e.preventDefault();

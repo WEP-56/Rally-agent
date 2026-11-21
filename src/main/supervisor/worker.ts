@@ -22,6 +22,8 @@ import { assistantContent, type AssistantMessageView } from "../../shared/conver
 import { WORKER_SYSTEM_PROMPT } from "../prompts.ts";
 import type { ModelStore } from "../model-store.ts";
 import { closeRoleSession, createRoleSession } from "./session.ts";
+import { createQqMailTools } from "./qqmail-tools.ts";
+import type { QqMailConnection } from "../qqmail-connection.ts";
 import type { FeishuConnection } from "../feishu-connection.ts";
 import { workerMcpExtensions } from "./mcp.ts";
 import type { TaskStore } from "./task-store.ts";
@@ -62,6 +64,7 @@ export interface WorkerManagerOptions {
 	jobs: JobManager;
 	services: ServiceManager;
 	feishu?: FeishuConnection;
+	qqMail?: QqMailConnection;
 	/** Injectable monotonic clock for inactivity tests; real thresholds remain ten minutes. */
 	watchdogNow?: () => number;
 	createTools(task: Task): ToolDefinition[];
@@ -192,6 +195,7 @@ export class WorkerManager {
 			}),
 			tools: [],
 			customTools: [...this.options.createTools(task), ...buildTools(task, versions, (path) => this.assertWritable(task, run, path), this.options.processes),
+				...createQqMailTools(this.options.qqMail, { task, run, gates: this.options.gates, audit: this.options.audit, store }),
 				...createJobTools(this.options.jobs, task, run),
 				...createServiceTools(this.options.services, task, run),
 				headless(createFileDeleteTool({ task, run, store, versions, gates: this.options.gates, isActive: () => !this.disposed && !task.ended && !run.endedAt })),
@@ -446,7 +450,7 @@ export class WorkerManager {
 				}
 				return;
 			case "tool_execution_start":
-				this.options.store.recordTool(worker.taskId, { id: `${worker.runId}:${event.toolCallId}`, runId: worker.runId, name: event.toolName, input: toolInput(event.args), status: "running", startedAt: Date.now() });
+				this.options.store.recordTool(worker.taskId, { id: `${worker.runId}:${event.toolCallId}`, runId: worker.runId, name: event.toolName, input: event.toolName === "qqmail_send" ? "" : toolInput(event.args), status: "running", startedAt: Date.now() });
 				return;
 			case "tool_execution_end":
 				{
