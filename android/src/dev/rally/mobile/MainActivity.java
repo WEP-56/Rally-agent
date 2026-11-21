@@ -46,8 +46,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 public final class MainActivity extends Activity {
     private static GeckoRuntime runtime;
     private static WebExtension extension;
-    private GeckoSession.PromptDelegate.FilePrompt filePrompt;
-    private GeckoResult<GeckoSession.PromptDelegate.PromptResponse> fileResult;
+    private FilePicker filePicker;
     private AlertDialog choiceDialog;
     private GeckoSession.PromptDelegate.ChoicePrompt choicePrompt;
     private GeckoResult<GeckoSession.PromptDelegate.PromptResponse> choiceResult;
@@ -97,11 +96,6 @@ public final class MainActivity extends Activity {
         panel.addView(text);
         if (retry) { Button button = new Button(this); button.setText("重新打开"); button.setOnClickListener(v -> recreate()); panel.addView(button); }
         root.removeAllViews(); root.addView(panel, new FrameLayout.LayoutParams(-1, -1));
-    }
-
-    private void cancelFile() {
-        if (filePrompt != null && !filePrompt.isComplete()) fileResult.complete(filePrompt.dismiss());
-        filePrompt = null; fileResult = null;
     }
 
     private void cancelChoice() {
@@ -158,7 +152,8 @@ public final class MainActivity extends Activity {
     private void open() {
         if (isDestroyed()) return;
         if (bridge != null) bridge.close();
-        cancelFile();
+        if (filePicker != null) filePicker.close();
+        filePicker = new FilePicker(this);
         cancelChoice();
         if (view != null) view.releaseSession();
         if (session != null) session.close();
@@ -183,17 +178,7 @@ public final class MainActivity extends Activity {
                 cancelChoice(); GeckoResult<PromptResponse> result = new GeckoResult<>(); showChoices(prompt, result); return result;
             }
             @Override public GeckoResult<PromptResponse> onFilePrompt(GeckoSession source, FilePrompt prompt) {
-                cancelFile(); filePrompt = prompt; fileResult = new GeckoResult<>();
-                GeckoResult<PromptResponse> result = fileResult;
-                Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");
-                if (prompt.mimeTypes != null && prompt.mimeTypes.length > 0) {
-                    String[] types = Arrays.stream(prompt.mimeTypes).filter(type -> type.contains("/")).toArray(String[]::new);
-                    if (types.length == 1) pick.setType(types[0]);
-                    else if (types.length > 1) pick.putExtra(Intent.EXTRA_MIME_TYPES, types);
-                }
-                pick.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, prompt.type == FilePrompt.Type.MULTIPLE);
-                try { startActivityForResult(pick, 70); } catch (Exception error) { cancelFile(); }
-                return result;
+                return filePicker.open(prompt);
             }
         });
         bridge = new Bridge(page, profile);
@@ -486,15 +471,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int code, int status, Intent data) {
         super.onActivityResult(code, status, data);
-        if (code == 70 && filePrompt != null) {
-            if (status == RESULT_OK && data != null && !filePrompt.isComplete()) {
-                List<Uri> files = new ArrayList<>();
-                if (data.getClipData() != null) for (int i = 0; i < data.getClipData().getItemCount(); i++) files.add(data.getClipData().getItemAt(i).getUri());
-                else if (data.getData() != null) files.add(data.getData());
-                if (!files.isEmpty()) fileResult.complete(filePrompt.type == GeckoSession.PromptDelegate.FilePrompt.Type.MULTIPLE ? filePrompt.confirm(this, files.toArray(new Uri[0])) : filePrompt.confirm(this, files.get(0)));
-            }
-            cancelFile();
-        }
+        if (filePicker != null && filePicker.onResult(code, status, data)) return;
         if (code == 71 && pickingDownload != null) {
             Bridge.Download download = pickingDownload; pickingDownload = null;
             Uri uri = status == RESULT_OK && data != null ? data.getData() : null;
@@ -510,7 +487,7 @@ public final class MainActivity extends Activity {
     @Override public void onDestroy() {
         if (bridge != null) bridge.close();
         pool.shutdownNow();
-        cancelFile();
+        if (filePicker != null) filePicker.close();
         cancelChoice();
         if (view != null) view.releaseSession();
         if (session != null) session.close();
