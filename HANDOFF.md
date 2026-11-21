@@ -1,8 +1,8 @@
 # Rally 开发交接（更新 2026-11-21）
 
-## 本轮交接点（2026-11-21，四项任务实现与验证）
+## 本轮交接点（2026-11-21，四项任务实现与 Actions 草稿交付）
 
-用户已要求推进下方四项任务，并授权提交、推送和创建 `v0.1.0` 草稿 Release。正式构建直接交给 GitHub Actions，不再等待本地正式 APK 构建。先读本节，下方“下一对话任务”和历史验收记录保留背景，不代表本轮仍从零开始。
+四项开发工作及用户授权的 `v0.1.0` 草稿 Release 已交付。应用源码为 `291ad0e`，原 tag 未移动；工作流修复为 `c6e3899`，通过手动入口检出原 tag 完成构建。GitHub Actions 运行 `44904797684` 的 Windows、Linux、Android 和 draft 四个任务全部成功。草稿尚未对外发布，附件/托盘视觉与实际设备升级仍待用户验收。先读本节，下方“下一对话任务”和历史验收记录保留背景，不代表本轮仍从零开始。
 
 - 第一项已完成并获用户验收（2026-11-21）：`ConnectionForm` 显示当前模式/服务器与两种模式卡片，已配对地址复用凭据；启动选择页加入品牌与步骤说明，Onboarding 加入运行位置步骤并隔离隐藏步骤键盘焦点。原生验证/分区/退出链路未改；Android 只有云端。用户确认“已验收首次引导与运行模式改造。没有问题”。
 - **第二项实现已贯通，视觉/真实设备待用户验收**：先写 `docs/附件与媒体资源系统设计.md`，再实现资源 SQLite/文件库、分块续传/去重/校验、稳定消息/Quote/任务/汇报引用、主 Agent 与 Worker 的实际 Pi image block、`resource_publish`、目录图片及 MCP image 预览。下游任务保存上游发布产物引用，源任务删除后仍可读。生产 faux-provider 测试覆盖主/Worker/目录/产物/汇报/上下游/重启，不调用真实模型。
@@ -10,10 +10,10 @@
 - 云端独立 PUT/GET/HEAD 字节接口经设备鉴权；预览为单资源、2 分钟只读票据，吊销会中断活跃传输。Windows 保存对话框与 Android 系统多选/保存接入，下载暂存并核对大小/SHA-256后完成；Android 原生桥每块 256 KiB，避免超过 JSON 上限。下载暂不跨重启续传，预览票据过期可点刷新。
 - 资源维护启动先恢复所有主对话历史与现存任务引用，再执行 24 小时宽限期清理，每小时维护；事件损坏时停用回收。共享/归档/旧会话附件保留，不清理项目原文件。备份包含完整资源库、事件与会话，说明在部署指南。
 - **第三项实现完成，视觉待用户验收**：`desktop-host.ts` 统一本地/云端/首次模式窗口的托盘、主 frame IPC 与关闭行为；设置 → 桌面行为选择退出或收起，默认退出，存本机 `desktop-v1.json`。第二次启动/托盘点击恢复隐藏窗口，托盘菜单始终明确退出；退出沿用 ApplicationShutdown，本地清理工作，云端只关客户端。原品牌 PNG/ICO 统一用于程序、NSIS、窗口和托盘。
-- **第四项代码与文档完成，正式发布仍待完成**：README 重写，新增 `docs/附件使用与验收.md`、`docs/发布指南.md`，部署指南补传输代理/升级/备份/迁移。Android 改为 arm64-v8a、armeabi-v7a、x86_64 三个独立 APK；构建逐包核对 ABI、Gecko、页面资源、许可和签名。tag 工作流收集一份 Windows、一份 Linux、三份正式 APK，严格检查文件集合/版本与 SHA256SUMS 后创建草稿 Release。
+- **第四项代码、文档与草稿 Release 完成**：README 重写，新增 `docs/附件使用与验收.md`、`docs/发布指南.md`，部署指南补传输代理/升级/备份/迁移。Android 改为 arm64-v8a、armeabi-v7a、x86_64 三个独立 APK；Actions 逐包核对 ABI、Gecko、页面资源、许可和正式签名。草稿已包含一份 Windows、一份 Linux、三份正式 APK 与 SHA256SUMS，五件产物和摘要文件的 GitHub asset digest 全部核对一致。记录在 `.artifacts/release-v0.1.0/verification.json`。实际设备升级与对外发布不在本次自动验收结论内。
 - 验证：完整 `npm run build`、最终 electron-vite、node/web tsc 通过；根 `npm run typecheck` 仍只有两份已知模型数据测试的 9 个错误。附件/连接/缓存/发布 33 项通过；生产 Supervisor 93、本地 IPC 11、桌面托盘 3、主入口关闭 1、watchdog 11 项分别单文件通过；独立云端协议和完整 faux Agent 回归通过。Supervisor 的 3 个旧同步投递断言已改为等待实际 Pi 接收，并以 finally 释放模拟请求；最终整份单文件 93/93 通过，日志 `.artifacts/supervisor-final-test.log`。没有全量 Vitest、真实供应商请求或自动视觉验收。
-- 本地 Windows setup 与 Android 三 ABI 调试包已构建，APK 内容/签名一致性及 Windows 包资源检查通过。安装包在 `release/`，不入库；本轮四包摘要为 `release/SHA256SUMS-testing`，大小/时间/摘要记录在 `.artifacts/final-testing-artifacts.json`。目录中旧 `Rally-0.1.0-android-debug.apk`、Linux tar.gz 和旧 `SHA256SUMS` 来自上一轮，不能当作本轮新版交付；本轮测试包以带 ABI 的 `-debug.apk` 为准。当前机器没有已安装 WSL/Linux 构建环境，本轮 Linux 打包脚本通过语法检查，尚未在 Linux 重打包或更新用户 VPS；云端附件验收需先更新测试服务器。
-- **正式发布授权已取得**：2026-11-21 用户要求本机生成长期签名并存入项目的 Git 忽略目录，配置 GitHub Secrets，授权提交、推送和创建 `v0.1.0` 草稿 Release。签名与备份已保存在 `.signing/` 并限制目录访问，四项 Secrets 与公有证书指纹已配置，私钥/密码不入库。用户要求直接交 Actions 构建，停止把本地正式包验证作为前置。继续跟进实际 CI、草稿产物核验；设备/视觉验收按 `docs/附件使用与验收.md`，未部署 VPS，未对外发布。
+- 本地 Windows setup 与 Android 三 ABI 调试包已构建，APK 内容/签名一致性及 Windows 包资源检查通过。安装包在 `release/`，不入库；本轮四个测试包摘要为 `release/SHA256SUMS-testing`，大小/时间/摘要记录在 `.artifacts/final-testing-artifacts.json`。目录中旧通用 APK、Linux tar.gz 和旧 `SHA256SUMS` 来自上一轮，不能当作本轮新版交付；新版 Linux 与正式发布集合以 GitHub 草稿产物为准。Linux 已在 Actions 实际构建并完成离线打包回归；用户 VPS 本轮未更新，云端附件验收需先更新测试服务器。
+- **签名与提交已完成**：2026-11-21 用户授权本机生成长期签名、配置 GitHub Secrets、提交推送与创建草稿，并要求正式构建直接在 Actions 执行。签名目录 `.signing/android-release/`，备份 `.signing/rally-android-release-backup.zip`，整个目录受 Git 忽略且限制本机访问；四项 Secrets 与公有证书指纹已配置，私钥/密码未入库。首轮 Android 因缺 sdkmanager 失败，补固定版本 SDK 初始化后重跑全绿；无需重建或强推 tag。剩余设备/视觉验收按 `docs/附件使用与验收.md`，未部署 VPS，未对外发布。
 
 主要新增入口：`src/main/resource-{store,http,preview,download}.ts`、`src/main/cloud/{resources,resource-gateway,resource-client}.ts`、`src/main/supervisor/{attachments,resource-tools,resource-lifecycle}.ts`、`src/renderer/src/attachments.ts`、`src/renderer/src/components/Attachments.tsx`、`src/main/{desktop-host,desktop-preferences}.ts`、`tests/attachments/`、`scripts/{verify-windows,release-checksums}.mjs`。图像处理继续复用 Pi，不复制上游实现。
 

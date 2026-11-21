@@ -519,10 +519,13 @@
 - [ ] 新托盘设置与附件界面由用户实际验收。
 - [x] README、部署/附件/发布指南与 Android ABI 分包；正式构建要求签名，逐包验证内容/ABI/证书一致，工作流验证五件产物与摘要后创建草稿。
 - [x] 正式 Android 签名与仓库 Secrets；用户已授权提交、推送和创建 `v0.1.0` 草稿 Release。签名及备份位于忽略目录 `.signing/`。
-- [ ] 实际 tag CI、草稿 Release 与正式包安装升级验证；对外发布仍需完成验收。
+- [x] 实际 Actions 构建与 `v0.1.0` 草稿 Release：四个任务全部成功，五件产物和 SHA256SUMS 摘要一致。
+- [ ] 正式包实际设备安装升级与附件/托盘视觉验收；草稿对外发布仍待验收。
 
 本批根 `npm run typecheck` 仍被已知两个 packages/ai 模型测试文件阻断；独立 node/web 检查通过。未启动浏览器/Electron 视觉验收，未调用供应商，未操作 VPS，未提交。
 
 2026-11-21 附件与桌面增量：ResourceStore 接入整个消息/任务/模型链路；上传原件、目录 read 预览和生成产物都可持久化展示与保存。自动维护先恢复历史引用，保留共享与下游产物；设备吊销中断活跃字节传输。Windows/Android 桥、真实构建 renderer 与 faux-provider 生产链测试通过，Android Java 和三个 ABI 调试包构建通过。Windows 本地/云端统一托盘，默认退出、可设置收起。README、部署、附件与发布指南已更新；正式签名、tag/CI 和真实设备验收仍待完成，不据本地调试构建勾选正式发布。
 
 最终回归：附件/连接/缓存/发布 33 项；生产 Supervisor 单文件 93/93（等待实际 Pi 接收后确认输入投递）；IPC 11、桌面 3、主入口关闭 1、watchdog 11 项均通过。最后根类型检查仍仅两份已知模型测试的 9 个错误。当前 Windows setup 与三 ABI Android 调试包摘要见 `release/SHA256SUMS-testing`；旧 Linux 包未更新，VPS 尚未部署本轮代码。正式签名和提交/tag 授权已向用户询问，未以等待代替授权。
+
+2026-11-21 草稿交付：用户授权已取得，正式签名保存在忽略目录 `.signing/` 并已配置仓库 Secrets。源码提交 `291ad0e` 与 tag `v0.1.0` 已推送；工作流修复 `c6e3899` 增加固定 SDK 初始化和按原 tag 重跑。Actions `44904797684` 全部成功，`v0.1.0` 草稿包含正式 Windows、Linux、三 ABI Android 和 SHA256SUMS；发布摘要与 GitHub 文件 digest 一致。草稿说明已补齐功能、产物选择和验收边界，未对外发布、未更新 VPS、未自动执行视觉/真实设备验收。
