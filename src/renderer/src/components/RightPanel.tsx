@@ -1,11 +1,12 @@
 import { AgentAvatar } from "./AgentAvatar";
 import { Critter } from "./brand";
 import { useEffect, useState } from "react";
-import { Plus, X, Globe, SquareTerminal, IdCard, ChevronRight, PanelRightClose } from "lucide-react";
+import { Cable, Plus, X, Globe, SquareTerminal, IdCard, ChevronRight, PanelRightClose } from "lucide-react";
 import type { Tab } from "../store";
 import { useApp } from "../store";
 import type { Task } from "../data";
 import { cn } from "../utils/cn";
+import { ConnectionsView } from "./ConnectionsView";
 import { Workstation } from "./Workstation";
 import { TaskView } from "./TaskView";
 import { BrowserView } from "./BrowserView";
@@ -17,6 +18,7 @@ export const KIND_META = {
   workstation: { icon: IdCard, title: "Rally 的工位", desc: "名片与任务列表，查看每个任务的上下文", key: "Ctrl+1" },
   browser: { icon: Globe, title: "浏览器", desc: "打开网页或本地 http 服务进行预览", key: "Ctrl+2" },
   terminal: { icon: SquareTerminal, title: "终端", desc: "在工作区中运行命令", key: "Ctrl+3" },
+  connections: { icon: Cable, title: "连接", desc: "飞书等外部应用", key: "Ctrl+4" },
 } as const;
 
 type NewKind = keyof typeof KIND_META;
@@ -160,6 +162,7 @@ export function RightPanel({
           return (
             <div key={t.id} className={cn("absolute inset-0", t.id !== active && "hidden")}>
               {t.kind === "workstation" && <Workstation tasks={tasks} />}
+              {t.kind === "connections" && <ConnectionsView visible={visible && t.id === active} />}
               {t.kind === "task" && task && <TaskView task={task} onMention={onMention} />}
               {t.kind === "browser" && <BrowserView id={t.id} visible={visible && t.id === active && !drawer} initialUrl={t.url} onTitle={(s) => renameTab(t.id, s)} />}
               {t.kind === "terminal" && <TerminalView id={t.id} taskId={t.taskId} visible={visible && t.id === active && !drawer} />}

@@ -8,6 +8,7 @@ import {
 	type ToolDefinition,
 } from "@rally/coding-agent";
 import type { ChatEvent, ChatLine, ChatRole, ChatState, RallyPaths } from "../../shared/ipc.ts";
+import type { FeishuSource } from "../../shared/connections.ts";
 import type { SelectModelInput, ThinkingLevelName } from "../../shared/models.ts";
 import type { Quote, QuoteRef } from "../../shared/task.ts";
 import type { WorkspaceState } from "../../shared/workspace.ts";
@@ -50,6 +51,9 @@ export class MainAgent {
 	private streaming: { line: ChatLine } | null = null;
 	private nextLine = 1;
 	private busy = false;
+	private localSubmissions = 0;
+	private remoteTurn?: Promise<string | null>;
+	private readonly receivedFeishu = new Set<string>();
 	private model: string | null = null;
 	private thinkingLevel: string | null = null;
 	private thinkingLevels: string[] = [];
@@ -98,7 +102,7 @@ export class MainAgent {
 		return this.busy || Boolean(this.session?.isStreaming);
 	}
 
-	canReceiveRelay(): boolean { return !this.disposed && Boolean(this.session && this.model); }
+	canReceiveRelay(): boolean { return !this.disposed && !this.remoteTurn && Boolean(this.session && this.model); }
 
 	search(params: ChatSearchParams) { return searchChat(this.messages, params); }
 
@@ -117,7 +121,7 @@ export class MainAgent {
 				kind = "proposal";
 			} else return null;
 		}
-		return { messageId: line.id, kind, text, at: line.at };
+		return { messageId: line.id, kind, text, at: line.at, source: line.source };
 	}
 
 	/** Durable relay metadata deduplicates an ambiguous send after restart. */
@@ -135,13 +139,14 @@ export class MainAgent {
 		const ids = [...fresh, ...(mode === "notice" ? [] : recovered)].map((item) => item.id);
 		const content = [...fresh.map((item) => item.text), ...(mode !== "notice" && recovered.length
 			? [`<rally-resume relays="${recovered.map((item) => item.id).join(",")}">Process the relay facts already in history. Their delivery acknowledgement was interrupted; do not repeat completed actions.</rally-resume>`] : [])].join("\n\n");
+		if (mode !== "notice") this.localSubmissions++;
 		try {
 			await session.sendCustomMessage({ customType: "rally-relay", content, display: false, details: { relayIds: ids } },
 				mode === "notice" ? { triggerTurn: false, deliverAs: "nextTurn" } : { triggerTurn: true, deliverAs: "steer" });
 		} catch (error) {
 			for (const item of fresh) this.queuedRelays.delete(item.id);
 			throw error;
-		}
+		} finally { if (mode !== "notice") this.localSubmissions--; }
 	}
 
 	/** Surface a supervisor fact in the conversation (system line, docs 01 §6). */
@@ -200,11 +205,39 @@ export class MainAgent {
 		}
 	}
 
-	/** Send a user message. Steers the running turn when the agent is busy. */
+	/** An IM turn runs on the same Pi session. Do not mix desktop prompts or relays into its reply. */
+	async sendFromFeishu(text: string, source: FeishuSource): Promise<string | null> {
+		await this.start();
+		const key = JSON.stringify([source.appId, source.chatId, source.messageId]);
+		if (this.disposed || this.receivedFeishu.has(key)) return null;
+		if (!this.session || !this.model) return "请先在 Rally 桌面应用选择主 Agent 的模型。";
+		if (this.remoteTurn || this.localSubmissions || this.isBusy() || !this.session.isIdle) return "Rally 正在回复上一条消息，请稍后再发送。";
+		const session = this.session;
+		const turn = Promise.resolve().then(async () => {
+			if (this.disposed) return null;
+			const start = this.messages.length;
+			const line = this.addLine("user", text, false, undefined, source);
+			this.receivedFeishu.add(key);
+			try {
+				await session.sendUserMessage(`[User message ${line.id}]\n${text}`);
+				const reply = this.messages.slice(start + 1).findLast(item => item.role === "assistant" && !item.streaming && item.text.trim());
+				return reply?.text.trim() || "这轮没有生成文字回复，请在 Rally 桌面查看对话和任务。";
+			} catch (error) {
+				this.fail(error);
+				return "Rally 未能处理这条消息，请在桌面查看主对话。";
+			}
+		});
+		this.remoteTurn = turn;
+		try { return await turn; }
+		finally { this.remoteTurn = undefined; if (!this.disposed) this.onAvailable?.(); }
+	}
+
+	/** Steer a busy desktop turn, or wait for an IM turn to finish. */
 	async send(text: string): Promise<void> {
 		const trimmed = text.trim();
 		if (!trimmed) return;
 		await this.start();
+		while (this.remoteTurn) await this.remoteTurn.catch(() => {});
 		if (this.disposed) return;
 		const line = this.addLine("user", text);
 		const session = this.session;
@@ -217,14 +250,16 @@ export class MainAgent {
 			return;
 		}
 		const deliverAs = session.isStreaming ? ("steer" as const) : undefined;
+		this.localSubmissions++;
 		this.onAvailable?.();
 		try {
 			// Do not await the whole turn: the run streams back through events.
 			void session.sendUserMessage(`[User message ${line.id}]\n${text}`, deliverAs ? { deliverAs } : undefined).catch((error: unknown) => {
 				this.fail(error);
-			});
+			}).finally(() => { this.localSubmissions--; });
 			this.onAvailable?.();
 		} catch (error) {
+			this.localSubmissions--;
 			this.fail(error);
 		}
 	}
@@ -490,8 +525,8 @@ export class MainAgent {
 		this.emit({ type: "message", message: clone(line) });
 	}
 
-	private addLine(role: ChatRole, text: string, streaming = false, relayId?: string): ChatLine {
-		const line: ChatLine = { id: `#${this.nextLine++}`, role, text, at: Date.now(), streaming, relayId };
+	private addLine(role: ChatRole, text: string, streaming = false, relayId?: string, source?: FeishuSource): ChatLine {
+		const line: ChatLine = { id: `#${this.nextLine++}`, role, text, at: Date.now(), streaming, relayId, source };
 		this.messages.push(line);
 		if (!streaming) this.logLine(line);
 		this.emit({ type: "message", message: clone(line) });
@@ -507,6 +542,7 @@ export class MainAgent {
 			toolCalls: line.toolCalls,
 			blocks: line.blocks,
 			relayId: line.relayId,
+			source: line.source,
 		});
 	}
 
@@ -538,7 +574,9 @@ export class MainAgent {
 			const toolCalls = (event.data.toolCalls as ChatLine["toolCalls"])?.map((call) => ({ ...call, status: call.status === "running" ? "interrupted" as const : call.status }));
 			const blocks = event.data.blocks as ChatLine["blocks"];
 			const relayId = typeof event.data.relayId === "string" ? event.data.relayId : undefined;
-			const line = { id: `#${n}`, role, text, at, streaming: false, toolCalls, blocks, relayId };
+			const source = event.data.source as FeishuSource | undefined;
+			if (source?.platform === "feishu") this.receivedFeishu.add(JSON.stringify([source.appId, source.chatId, source.messageId]));
+			const line = { id: `#${n}`, role, text, at, streaming: false, toolCalls, blocks, relayId, source };
 			const index = this.messages.findIndex((item) => item.id === line.id);
 			if (index === -1) this.messages.push(line);
 			else this.messages[index] = line;

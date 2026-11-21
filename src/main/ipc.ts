@@ -16,6 +16,7 @@ import { httpAddress } from "../shared/browser.ts";
 import type { TerminalSize } from "../shared/terminal.ts";
 import { TerminalManager } from "./terminal.ts";
 import type { TaskNotifications } from "./notifications.ts";
+import type { FeishuCredentials } from "../shared/connections.ts";
 import type { IdentityState } from "../shared/identity.ts";
 import { readAvatar } from "./identity-avatar.ts";
 
@@ -80,6 +81,12 @@ export function registerIpc(paths: RallyPaths, supervisor: Supervisor, notificat
 			for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed()) win.webContents.send(IpcEvent.identity, state);
 			return state;
 		};
+		handle(IpcChannel.feishuState, event => { browser.owner(event); return supervisor.feishu.state(); });
+		handle(IpcChannel.feishuSave, (event, input: FeishuCredentials) => { browser.owner(event); return supervisor.feishu.save(input); });
+		handle(IpcChannel.feishuRetry, event => { browser.owner(event); return supervisor.feishu.start(); });
+		handle(IpcChannel.feishuPair, event => { browser.owner(event); return supervisor.feishu.pair(); });
+		handle(IpcChannel.feishuTools, (event, enabled: boolean) => { browser.owner(event); return supervisor.feishu.setTools(enabled); });
+		handle(IpcChannel.feishuDisconnect, event => { browser.owner(event); return supervisor.feishu.disconnect(); });
 		handle(IpcChannel.identityState, event => { browser.owner(event); return supervisor.identity.state(); });
 		handle(IpcChannel.identityInitialize, (event, legacy: unknown) => { browser.owner(event); return publishIdentity(supervisor.identity.initialize(legacy)); });
 		handle(IpcChannel.identityUpdate, (event, patch: unknown) => { browser.owner(event); return publishIdentity(supervisor.identity.update(patch)); });

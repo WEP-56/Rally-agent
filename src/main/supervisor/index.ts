@@ -9,6 +9,7 @@ import type { WorkspaceState } from "../../shared/workspace.ts";
 import { type QuoteRef, type ReportState, type Task, type TaskBoard, type TaskRun, taskView } from "../../shared/task.ts";
 import { ModelStore } from "../model-store.ts";
 import { WorkspaceStore } from "../workspace-store.ts";
+import { FeishuConnection, type CredentialVault } from "../feishu-connection.ts";
 import { IdentityStore } from "../identity-store.ts";
 import { MemoryStore } from "../memory-store.ts";
 import { createMemoryTools } from "./memory-tools.ts";
@@ -59,6 +60,7 @@ export interface SupervisorOptions {
 	emitWorkspace?(state: WorkspaceState): void;
 	/** Slot limit; settings will drive this later (docs 04 §3.2). */
 	limit?: number;
+	feishuVault?: CredentialVault;
 }
 
 export class Supervisor {
@@ -75,6 +77,7 @@ export class Supervisor {
 	readonly scheduler: Scheduler;
 	readonly schedules: ScheduledTasks;
 	readonly identity: IdentityStore;
+	readonly feishu: FeishuConnection;
 	readonly gates: GateService;
 	readonly audit: AuditLog;
 	readonly processes: ProcessRegistry;
@@ -104,6 +107,7 @@ export class Supervisor {
 			this.memory = new MemoryStore(paths.home, paths.memoryFile, this.events, this.audit);
 			this.workspace = new WorkspaceStore(paths.home, paths.workspaceDir);
 			this.identity = new IdentityStore(paths.home);
+			this.feishu = new FeishuConnection(paths.home, options.feishuVault, (text, source) => this.main.sendFromFeishu(text, source));
 			const catalog = new CapabilityCatalog(paths.agentDir, () => [paths.mainCwd, this.workspace.base(), ...this.workspace.state().recentProjects]);
 			const approval = this.events.ofKind("approval_mode").at(-1);
 			this.autoApprove = approval?.data.enabled === true;
@@ -135,7 +139,7 @@ export class Supervisor {
 				segmentCompactions: options.mainSegmentCompactions,
 				taskState: () => rallyState(this.store, this.workers.streamingCount(), this.scheduler.limit, this.autoApprove),
 				scheduleState: () => this.schedules.context(),
-				capabilities: () => catalog.context(),
+				capabilities: async () => (await catalog.context()) + (this.feishu.toolsEnabled() ? "\nFeishu worker MCP (rally_feishu): read shared documents and wiki nodes, search shared Bitable records. Only workers may call it." : ""),
 				customTools: [...createScheduleTools(() => this.schedules, ref => this.main.quote(ref)), createChatSearchTool((params) => this.main.search(params)), ...createMemoryTools(this.memory, (ref) => this.main.quote(ref), () => !this.disposed), ...createRouterReadTools(() => this.workspace.base(), this.processes, () => catalog.skillPaths), createGitInspectTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGitRunner(this.processes)), createGithubReadTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGithubRunner(this.processes)), createFetchPageTool(this.network), ...createMainTaskTools(this.host()), ...createGateTools(this.gates, this.store)],
 				memory: () => this.memory.context(),
 				identity: () => this.identity.context(),
@@ -160,6 +164,7 @@ export class Supervisor {
 				processes: this.processes,
 				jobs: this.jobs,
 				services: this.services,
+				feishu: this.feishu,
 				watchdogNow: options.watchdogNow,
 				createTools: (task) => createWorkerTools(this.workerHost(task)),
 				report: (task, runId, state, summary, question, answers) =>
@@ -197,6 +202,7 @@ export class Supervisor {
 			this.recoverInterrupted();
 			this.relay.start();
 			this.schedules.start();
+			this.feishu.start();
 			this.scheduler.tick();
 		} catch (error) {
 			// The application arms its independent deadline before cleanup can await a stuck session.
@@ -223,6 +229,7 @@ export class Supervisor {
 		// allSettled prevents an early rejection from releasing the lock while another session still closes.
 		const results = await Promise.allSettled([
 			pendingRequests,
+			Promise.resolve().then(() => this.feishu.dispose()),
 			Promise.resolve().then(() => this.jobs.dispose()),
 			Promise.resolve().then(() => this.services.dispose()),
 			Promise.resolve().then(() => this.processes.dispose()),

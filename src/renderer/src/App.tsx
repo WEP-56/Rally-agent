@@ -1,6 +1,6 @@
 import type { NotificationTarget } from "../../shared/notifications";
 import type { IdentityState } from "../../shared/identity";
-import { Globe, IdCard, Info, Moon, Palette, PanelRight, Plug, Settings as SettingsIcon, SquarePen, SquareTerminal, Sun, Wand2 } from "lucide-react";
+import { Cable, Globe, IdCard, Info, Moon, Palette, PanelRight, Plug, Settings as SettingsIcon, SquarePen, SquareTerminal, Sun, Wand2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "./chat";
 import { titleFor } from "./components/BrowserView";
@@ -18,7 +18,7 @@ import { CompactDialog, type CompactPhase } from "./components/CompactDialog";
 
 const winApi = window.rally.window;
 
-const KIND_TITLE: Record<Exclude<TabKind, "task">, string> = { workstation: "Rally 的工位", browser: "新标签页", terminal: "终端" };
+const KIND_TITLE: Record<Exclude<TabKind, "task">, string> = { workstation: "Rally 的工位", browser: "新标签页", terminal: "终端", connections: "连接" };
 
 export default function App() {
   const [config, setConfigState] = useState<Config>(loadConfig);
@@ -102,8 +102,8 @@ export default function App() {
     (kind: Exclude<TabKind, "task">, opts?: { url?: string; taskId?: string }) => {
       setView("main");
       setRightOpen(true);
-      if (kind === "workstation") {
-        const ex = tabs.find((t) => t.kind === "workstation");
+      if (kind === "workstation" || kind === "connections") {
+        const ex = tabs.find((t) => t.kind === kind);
         if (ex) return setActive(ex.id);
       }
       addTab({ id: uid(), kind, title: kind === "browser" && opts?.url ? titleFor(opts.url) : KIND_TITLE[kind], url: opts?.url, taskId: opts?.taskId });
@@ -248,9 +248,9 @@ export default function App() {
       } else if (mod && e.key.toLowerCase() === "n") {
         e.preventDefault();
         newChat();
-      } else if (mod && ["1", "2", "3"].includes(e.key)) {
+      } else if (mod && ["1", "2", "3", "4"].includes(e.key)) {
         e.preventDefault();
-        openTab((["workstation", "browser", "terminal"] as const)[+e.key - 1]);
+        openTab((["workstation", "browser", "terminal", "connections"] as const)[+e.key - 1]);
       } else if (e.key === "Escape" && view === "settings" && !palette) {
         setView("main");
       }
@@ -303,6 +303,7 @@ export default function App() {
       groups: [
         [
           { label: "Rally 的工位", shortcut: "Ctrl+1", action: () => openTab("workstation") },
+          { label: "连接", shortcut: "Ctrl+4", action: () => openTab("connections") },
           { label: "浏览器", shortcut: "Ctrl+2", action: () => openTab("browser") },
           { label: "终端", shortcut: "Ctrl+3", action: () => openTab("terminal") },
         ],
@@ -325,6 +326,7 @@ export default function App() {
     () => [
       { id: "new", label: "整理上下文", group: "操作", icon: <SquarePen size={14} />, hint: "Ctrl+N", run: newChat },
       { id: "toggle", label: "切换右侧栏", group: "操作", icon: <PanelRight size={14} />, hint: "Ctrl+B", run: () => setRightOpen((v) => !v) },
+      { id: "connections", label: "打开连接", group: "操作", icon: <Cable size={14} />, hint: "Ctrl+4", run: () => openTab("connections") },
       { id: "ws", label: "打开 Rally 的工位", group: "操作", icon: <IdCard size={14} />, hint: "Ctrl+1", run: () => openTab("workstation") },
       { id: "br", label: "打开浏览器", group: "操作", icon: <Globe size={14} />, hint: "Ctrl+2", run: () => openTab("browser") },
       { id: "tm", label: "打开终端", group: "操作", icon: <SquareTerminal size={14} />, hint: "Ctrl+3", run: () => openTab("terminal") },

@@ -1,7 +1,7 @@
 // Electron main entry: single-instance lock, Rally paths, main window. `RALLY_SMOKE=1` runs the M0 smoke check and exits.
 
 import { join } from "node:path";
-import { app, BrowserWindow, dialog, nativeTheme, screen, shell } from "electron";
+import { app, BrowserWindow, dialog, nativeTheme, safeStorage, screen, shell } from "electron";
 import { broadcastChat, broadcastTask, broadcastWorkspace, broadcastServices, forwardWindowState, registerIpc } from "./ipc.ts";
 import { ensureRallyDirs, resolveRallyPaths } from "./paths.ts";
 import { runSmoke } from "./smoke.ts";
@@ -55,6 +55,13 @@ async function startApplication(): Promise<void> {
 	try {
 		// Supervisor locks the state directory before any recovery or state writes.
 		supervisor = new Supervisor(paths, { emitChat: broadcastChat, emitTask: event => { broadcastTask(event); notifications?.observe(event); }, emitWorkspace: broadcastWorkspace, emitServices: broadcastServices,
+			feishuVault: {
+				encrypt(value) {
+					if (!safeStorage.isEncryptionAvailable() || (process.platform === "linux" && safeStorage.getSelectedStorageBackend() === "basic_text")) throw new Error("系统凭据加密不可用。");
+					return safeStorage.encryptString(value);
+				},
+				decrypt(ciphertext) { return safeStorage.decryptString(ciphertext); },
+			},
 			onStartupFailure: async error => { startupError = error; await shutdown.prepare(); void shutdown.run(true); },
 		});
 		ensureRallyDirs(paths);

@@ -22,6 +22,7 @@ import { assistantContent, type AssistantMessageView } from "../../shared/conver
 import { WORKER_SYSTEM_PROMPT } from "../prompts.ts";
 import type { ModelStore } from "../model-store.ts";
 import { closeRoleSession, createRoleSession } from "./session.ts";
+import type { FeishuConnection } from "../feishu-connection.ts";
 import { workerMcpExtensions } from "./mcp.ts";
 import type { TaskStore } from "./task-store.ts";
 import type { GateService } from "./gates.ts";
@@ -60,6 +61,7 @@ export interface WorkerManagerOptions {
 	network: NetworkRunner;
 	jobs: JobManager;
 	services: ServiceManager;
+	feishu?: FeishuConnection;
 	/** Injectable monotonic clock for inactivity tests; real thresholds remain ten minutes. */
 	watchdogNow?: () => number;
 	createTools(task: Task): ToolDefinition[];
@@ -186,7 +188,7 @@ export class WorkerManager {
 			loadProjectSkills: true,
 			...workerMcpExtensions(paths.agentDir, task, run, () => !this.disposed && !task.ended && !run.endedAt, {
 				gates: this.options.gates, audit: this.options.audit, processes: this.options.processes,
-				external: (tool) => store.recordExternalAction(task.id, tool),
+				external: (tool) => store.recordExternalAction(task.id, tool), feishu: this.options.feishu,
 			}),
 			tools: [],
 			customTools: [...this.options.createTools(task), ...buildTools(task, versions, (path) => this.assertWritable(task, run, path), this.options.processes),

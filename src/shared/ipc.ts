@@ -1,4 +1,5 @@
 import type { ScheduledTask } from "./schedules.ts";
+import type { FeishuConnectionState, FeishuCredentials, FeishuSource } from "./connections.ts";
 import type { IdentityState, IdentityText } from "./identity.ts";
 // IPC contract shared by main, preload and renderer: channel names and the typed API the preload exposes.
 
@@ -59,6 +60,12 @@ export interface RallyPaths {
 
 /** Invoke channels (renderer -> main, request/response). */
 export const IpcChannel = {
+	feishuState: "feishu:state",
+	feishuSave: "feishu:save",
+	feishuRetry: "feishu:retry",
+	feishuPair: "feishu:pair",
+	feishuTools: "feishu:tools",
+	feishuDisconnect: "feishu:disconnect",
 	identityState: "identity:state",
 	identityInitialize: "identity:initialize",
 	identityUpdate: "identity:update",
@@ -151,6 +158,7 @@ export interface WindowApi {
 export type ChatRole = "user" | "assistant" | "system";
 
 export interface ChatLine {
+	source?: FeishuSource;
 	relayId?: string;
 	blocks?: AssistantBlock[];
 	toolCalls?: ToolCall[];
@@ -221,6 +229,14 @@ export interface ModelsApi {
 
 /** API exposed on `window.rally` by the preload script. */
 export interface RallyApi {
+	feishu: {
+		getState(): Promise<FeishuConnectionState>;
+		save(credentials: FeishuCredentials): Promise<FeishuConnectionState>;
+		retry(): Promise<FeishuConnectionState>;
+		pair(): Promise<FeishuConnectionState>;
+		setTools(enabled: boolean): Promise<FeishuConnectionState>;
+		disconnect(): Promise<FeishuConnectionState>;
+	};
 	identity: {
 		getState(): Promise<IdentityState>;
 		initialize(legacy: IdentityText): Promise<IdentityState>;

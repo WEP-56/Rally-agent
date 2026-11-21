@@ -1,3 +1,5 @@
+import type { FeishuSource } from "../../shared/connections";
+import type { Quote } from "../../shared/task";
 export type StepKind = "cmd" | "read" | "write" | "edit" | "delete" | "search" | "web" | "memory" | "think" | "task" | "tool";
 import type { ToolCall } from "../../shared/tools";
 import type { AssistantBlock, AssistantMessageView } from "../../shared/conversation";
@@ -15,6 +17,7 @@ export interface ToolStep {
 }
 
 export interface ChatMsg {
+	source?: FeishuSource;
 	runId?: string;
 	blocks?: AssistantBlock[];
 	toolCalls?: ToolCall[];
@@ -56,7 +59,7 @@ export interface Task {
   mode?: "write" | "readonly";
   scope?: string[];
   cwd?: string;
-  quotes?: { messageId: string; text: string }[];
+  quotes?: Pick<Quote, "messageId" | "text" | "source">[];
   note?: string;
   dependsOn?: string[];
 }

@@ -1,5 +1,6 @@
 // Task domain shared by the supervisor and the renderer (docs 01 section 2 / 3).
 // Facts only: approval, runs, reports, attention, gates, endings. Display status is derived.
+import type { FeishuSource } from "./connections.ts";
 import type { ToolCall } from "./tools.ts";
 import type { AssistantMessageView } from "./conversation.ts";
 import type { TaskGate } from "./gate.ts";
@@ -14,6 +15,7 @@ export type QueueReason = "dependency_failed" | "dependency" | "capacity";
 /** Frozen copy of a user message (or a confirmed main-agent proposal). */
 export interface Quote {
 	messageId: string;
+	source?: FeishuSource;
 	kind: "user" | "proposal";
 	text: string;
 	at: number;

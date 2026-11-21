@@ -16,12 +16,13 @@ import { QuestionCard } from "./QuestionCard";
 import { StatusBadge } from "./status";
 import { conversationItems } from "../conversation";
 
-function UserBubble({ text }: { text: string }) {
+function UserBubble({ text, fromFeishu }: { text: string; fromFeishu?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const long = text.length > 160 || text.split("\n").length > 5;
   return (
     <div className="flex justify-end">
       <div className="bubble-user max-w-[82%] rounded-[22px] rounded-br-md px-4 py-2.5 text-[14.5px] leading-[1.65]">
+        {fromFeishu && <div className="mb-1 text-[11px] font-medium text-muted">来自飞书</div>}
         <div
           className={cn("relative overflow-hidden", long && !expanded && "max-h-[7.6em]")}
           style={long && !expanded ? { maskImage: "linear-gradient(to bottom, black 60%, transparent)", WebkitMaskImage: "linear-gradient(to bottom, black 60%, transparent)" } : undefined}
@@ -38,6 +39,8 @@ function UserBubble({ text }: { text: string }) {
   );
 }
 
+function taskFromFeishu(task: Task): boolean { return task.quotes?.some(quote => quote.source?.platform === "feishu") ?? false; }
+
 function TaskCard({ task }: { task: Task }) {
   const { openTask } = useApp();
   return (
@@ -49,7 +52,7 @@ function TaskCard({ task }: { task: Task }) {
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{task.title}</div>
         <div className="mt-0.5 flex items-center gap-2 text-xs text-faint">
-          <span>{task.id.toUpperCase()}</span>
+          <span>{task.id.toUpperCase()}{taskFromFeishu(task) ? " · 来自飞书" : ""}</span>
           <span>·</span>
           <span className="truncate">{task.summary}</span>
         </div>
@@ -188,7 +191,7 @@ export function ChatPanel({
               </div>
             ) : m.role === "user" ? (
               <div key={m.id} className="animate-rise">
-                <UserBubble text={m.text} />
+                <UserBubble text={m.text} fromFeishu={m.source?.platform === "feishu"} />
               </div>
             ) : (
               <div key={m.id} className="animate-rise relative ml-8 min-w-0 max-w-[88%] self-start rounded-[22px] rounded-tl-md bg-panel p-4 text-sm leading-relaxed shadow-soft">
@@ -200,9 +203,9 @@ export function ChatPanel({
           )}
           {tasks.filter((task) => task.approval === "pending" && task.status === "pending_approval").map((task) => (
             <div key={`approval-${task.id}`} className="ml-8 max-w-[440px] rounded-[22px] border border-warn/30 bg-panel p-4 text-sm shadow-soft">
-              <div className="flex items-center gap-3"><Critter seed={task.id} size={40} /><div className="min-w-0 flex-1"><div className="truncate font-medium" title={task.title}>{task.title}</div><div className="mt-0.5 truncate text-[11.5px] text-faint" title={task.cwd}>{task.id} · {task.mode === "readonly" ? "只读" : "改写"} · {task.cwd}</div></div><StatusBadge status={task.status} /></div>
+              <div className="flex items-center gap-3"><Critter seed={task.id} size={40} /><div className="min-w-0 flex-1"><div className="truncate font-medium" title={task.title}>{task.title}</div><div className="mt-0.5 truncate text-[11.5px] text-faint" title={task.cwd}>{task.id}{taskFromFeishu(task) ? " · 来自飞书" : ""} · {task.mode === "readonly" ? "只读" : "改写"} · {task.cwd}</div></div><StatusBadge status={task.status} /></div>
               <details className="mt-2 text-xs text-muted"><summary className="cursor-pointer py-1">原话 · 任务简报</summary><div className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs leading-relaxed">
-                {task.quotes?.map((quote) => <div key={quote.messageId} className="mb-1">{quote.messageId} · {quote.text}</div>)}
+                {task.quotes?.map((quote) => <div key={quote.messageId} className="mb-1">{quote.messageId}{quote.source?.platform === "feishu" ? " · 飞书" : ""} · {quote.text}</div>)}
                 {task.note && <div>备注：{task.note}</div>}
                 {!!task.dependsOn?.length && <div>依赖：{task.dependsOn.join("、")}</div>}
               </div></details>

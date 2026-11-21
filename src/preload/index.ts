@@ -9,6 +9,14 @@ import type { TerminalEvent } from "../shared/terminal";
 import type { IdentityState } from "../shared/identity";
 
 const api: RallyApi = {
+	feishu: {
+		getState: () => ipcRenderer.invoke(IpcChannel.feishuState),
+		save: input => ipcRenderer.invoke(IpcChannel.feishuSave, input),
+		retry: () => ipcRenderer.invoke(IpcChannel.feishuRetry),
+		pair: () => ipcRenderer.invoke(IpcChannel.feishuPair),
+		setTools: enabled => ipcRenderer.invoke(IpcChannel.feishuTools, enabled),
+		disconnect: () => ipcRenderer.invoke(IpcChannel.feishuDisconnect),
+	},
 	identity: {
 		getState: () => ipcRenderer.invoke(IpcChannel.identityState),
 		initialize: legacy => ipcRenderer.invoke(IpcChannel.identityInitialize, legacy),

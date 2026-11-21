@@ -75,6 +75,70 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		expect(snapshots).toHaveLength(1);
 		return JSON.parse(snapshots[0].split("\n").find(line => line.startsWith('{"nowUnixMs":'))!);
 	}
+	it("routes Feishu through the shared conversation and persists the original task source", async () => {
+		const { harness, paths, supervisor } = await setup(false);
+		let releaseReply!: () => void;
+		let seenFeishu!: () => void;
+		const hold = new Promise<void>(resolve => { releaseReply = resolve; });
+		const started = new Promise<void>(resolve => { seenFeishu = resolve; });
+		harness.setResponses([
+			fauxAssistantMessage(fauxText("桌面历史")),
+			context => {
+				expect(context.messages.map(getMessageText).join("\n")).toContain("先在桌面问候");
+				expect(toolNames(context).some(name => name.startsWith("mcp__rally_feishu__"))).toBe(false);
+				const quoteId = /User message (#\d+)/.exec(lastUser(context))![1];
+				return fauxAssistantMessage(fauxToolCall("task_dispatch", { title: "飞书只读任务", cwd: paths.workspaceDir, mode: "readonly", quotes: [{ id: quoteId }] }), { stopReason: "toolUse" });
+			},
+			async () => { seenFeishu(); await hold; return fauxAssistantMessage(fauxText("仅回飞书")); },
+			fauxAssistantMessage(fauxText("仅回桌面")),
+		]);
+		await supervisor.main.send("先在桌面问候");
+		await vi.waitFor(() => expect(supervisor.main.state().messages.some(m => m.text === "桌面历史" && !m.streaming) && !supervisor.main.isBusy()).toBe(true));
+		const source = { platform: "feishu" as const, appId: "cli_test", chatId: "oc_test", messageId: "om_test" };
+		const reply = supervisor.main.sendFromFeishu("请读取项目", source);
+		await Promise.race([started, reply.then(text => { throw new Error(`Feishu ended early: ${text}`); })]);
+		const laterDesktop = supervisor.main.send("飞书回复后再处理这条");
+		expect(supervisor.main.state().messages.some(m => m.text === "飞书回复后再处理这条")).toBe(false);
+		releaseReply();
+		await expect(reply).resolves.toBe("仅回飞书");
+		await laterDesktop;
+		await vi.waitFor(() => expect(supervisor.main.state().messages.some(m => m.text === "仅回桌面" && !m.streaming) && !supervisor.main.isBusy()).toBe(true));
+		await expect(supervisor.main.sendFromFeishu("重复投递", source)).resolves.toBeNull();
+		expect(supervisor.store.list()[0]?.quotes[0]).toMatchObject({ text: "请读取项目", source });
+		await supervisor.dispose();
+		const restored = new Supervisor(paths, { emitChat: () => {}, emitTask: () => {} });
+		supervisors.push(restored);
+		expect(restored.main.state().messages.find(m => m.text === "请读取项目")?.source).toEqual(source);
+		expect(restored.store.list()[0]?.quotes[0]?.source).toEqual(source);
+	});
+
+	it("advertises enabled Feishu tools as summary to the router and MCP tools to Workers", async () => {
+		const { harness, paths, supervisor } = await setup();
+		vi.spyOn(supervisor.feishu, "toolsEnabled").mockReturnValue(true);
+		vi.spyOn(supervisor.feishu, "openTools").mockReturnValue({ credentials: { appId: "cli_fixture", appSecret: "mock-secret-never-sent" }, release: () => {} });
+		harness.setResponses([
+			context => {
+				const contextText = context.messages.map(getMessageText).join("\n");
+				expect(contextText).toContain("Feishu worker MCP (rally_feishu)");
+				expect(contextText).not.toContain("mock-secret-never-sent");
+				expect(toolNames(context).some(name => name.startsWith("mcp__rally_feishu__"))).toBe(false);
+				const id = /User message (#\d+)/.exec(lastUser(context))![1];
+				return fauxAssistantMessage(fauxToolCall("task_dispatch", { title: "飞书工具验证", cwd: paths.workspaceDir, mode: "readonly", quotes: [{ id }] }), { stopReason: "toolUse" });
+			},
+			fauxAssistantMessage(fauxText("等待批准")),
+			context => {
+				expect(toolNames(context).filter(name => name.startsWith("mcp__rally_feishu__"))).toHaveLength(3);
+				return fauxAssistantMessage(fauxToolCall("task_report", { state: "ready", summary: "已核对飞书工具目录" }), { stopReason: "toolUse" });
+			},
+			fauxAssistantMessage(fauxText("核对完成")),
+		]);
+		await supervisor.main.send("派发飞书文档只读任务");
+		await vi.waitFor(() => expect(supervisor.main.state().messages.some(m => m.text === "等待批准" && !m.streaming)).toBe(true));
+		const task = supervisor.store.list()[0];
+		supervisor.approve(task.id);
+		await vi.waitFor(() => expect(supervisor.store.get(task.id)?.runs.at(-1)?.lastReport?.summary).toBe("已核对飞书工具目录"), { timeout: 10000 });
+	});
+
 	it("refreshes the router schedule context in tool loops, after compaction and restart", async () => {
 		const { harness, paths, supervisor } = await setup(true, 1);
 		let planId = "";

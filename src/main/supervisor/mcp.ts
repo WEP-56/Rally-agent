@@ -1,6 +1,8 @@
 import { createCodemodeExtension, createMcpExtension, createToolSearchExtension, type ExtensionFactory, type ToolDefinition } from "@rally/coding-agent";
 import { Type, type Static, type TSchema } from "typebox";
 import { join } from "node:path";
+import type { FeishuConnection } from "../feishu-connection.ts";
+import { FEISHU_MCP_ENTRY, feishuMcpTransport } from "../feishu-mcp.ts";
 import { McpStore } from "../mcp-store.ts";
 import type { Task, TaskRun } from "../../shared/task.ts";
 import type { GateService } from "./gates.ts";
@@ -12,6 +14,7 @@ interface McpHost {
 	gates: GateService;
 	audit: AuditLog;
 	processes: ProcessRegistry;
+	feishu?: FeishuConnection;
 	external(tool: string): void;
 }
 
@@ -19,12 +22,15 @@ interface McpHost {
 export function workerMcpExtensions(agentDir: string, task: Task, run: TaskRun, isActive: () => boolean, host: McpHost): { extensions: ExtensionFactory[]; extensionTools: string[] } {
 	const preferences = new McpStore(agentDir);
 	const loaded = preferences.forProject(task.cwd);
+	const feishu = host.feishu;
+	if (feishu?.toolsEnabled()) loaded.servers = [...loaded.servers.filter(entry => entry.name !== FEISHU_MCP_ENTRY.name), FEISHU_MCP_ENTRY];
+	const managed = managedMcpTransport(host.processes, task.id);
 	const exposures = new Set(loaded.servers.filter((entry) => entry.config.enabled !== false).flatMap((entry) => [entry.config.exposure ?? "direct", ...Object.values(entry.config.toolExposure ?? {})]));
 	const extensionTools = ["mcp__*", "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"];
 	if (exposures.has("codemode")) extensionTools.push("codemode");
 	if (exposures.has("deferred")) extensionTools.push("tool_search");
 	const mcp = createMcpExtension({
-		createTransport: managedMcpTransport(host.processes, task.id),
+		createTransport: (entry, cwd, auth, signal) => feishu && entry.source === FEISHU_MCP_ENTRY.source ? feishuMcpTransport(feishu) : managed(entry, cwd, auth, signal),
 		resolveConfigValue: managedMcpConfigValue(host.processes, task.id),
 		loadConfig: () => ({ ...loaded, servers: loaded.servers.map((entry) => ({ ...entry, config: { ...entry.config, exposure: entry.config.exposure ?? "direct" } })) }),
 		logPath: join(agentDir, "mcp.log"),

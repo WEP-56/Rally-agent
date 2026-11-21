@@ -120,7 +120,7 @@ export const modelLabel = (v: string, fallback = "未设置模型") => (v ? v.sp
 
 /* ------------------------------------------------------------------ */
 
-export type TabKind = "workstation" | "browser" | "terminal" | "task";
+export type TabKind = "workstation" | "browser" | "terminal" | "connections" | "task";
 export interface Tab {
   id: string;
   kind: TabKind;
