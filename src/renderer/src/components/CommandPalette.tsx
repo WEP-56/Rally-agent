@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, CornerDownLeft } from "lucide-react";
+import { Search } from "lucide-react";
 import type { Task } from "../data";
 import { cn } from "../utils/cn";
 import { StatusIcon } from "./status";
@@ -38,10 +38,10 @@ export function CommandPalette({ open, onClose, commands, tasks, onTask }: { ope
   let idx = -1;
 
   return (
-    <div className="animate-fade absolute inset-0 z-[80] flex justify-center bg-black/10 pt-[12vh] dark:bg-black/40" onMouseDown={onClose}>
-      <div className="animate-pop h-fit w-[560px] max-w-[90%] overflow-hidden rounded-2xl bg-raised shadow-pop" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="flex h-12 items-center gap-3 px-4">
-          <Search size={16} className="text-faint" />
+    <div className="animate-fade absolute inset-0 z-[80] flex items-start justify-center bg-ink/25 px-4 pt-[14vh] backdrop-blur-[3px]" onMouseDown={onClose}>
+      <div className="glass-strong animate-pop w-full max-w-[560px] overflow-hidden rounded-[28px] shadow-pop" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-3 px-5 py-4">
+          <Search size={17} className="text-faint" />
           <input
             ref={inp}
             value={q}
@@ -69,10 +69,10 @@ export function CommandPalette({ open, onClose, commands, tasks, onTask }: { ope
           />
           <Kbd>Esc</Kbd>
         </div>
-        <div className="max-h-[50vh] overflow-y-auto bg-sunken/60 p-1.5">
+        <div className="max-h-[52vh] overflow-y-auto border-t border-line p-2">
           {groups.map((g) => (
             <div key={g} className="mb-1">
-              <div className="px-2.5 pb-1 pt-2 text-[11px] font-medium text-faint">{g}</div>
+              <div className="px-3 pb-1 pt-2.5 text-[10.5px] font-semibold uppercase tracking-wider text-faint">{g}</div>
               {items
                 .filter((i) => i.group === g)
                 .map((c) => {
@@ -86,12 +86,11 @@ export function CommandPalette({ open, onClose, commands, tasks, onTask }: { ope
                         c.run();
                         onClose();
                       }}
-                      className={cn("flex h-9 w-full items-center gap-3 rounded-lg px-2.5 text-left text-[13px]", sel === my ? "bg-panel shadow-soft dark:bg-raised" : "")}
+                      className={cn("flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left text-[13.5px] transition-colors", sel === my && "bg-fg/[0.06]")}
                     >
-                      <span className="flex w-4 justify-center text-muted">{c.icon}</span>
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center text-muted">{c.icon}</span>
                       <span className="flex-1 truncate">{c.label}</span>
                       {c.hint && <span className="text-[11px] text-faint">{c.hint}</span>}
-                      {sel === my && <CornerDownLeft size={12} className="text-faint" />}
                     </button>
                   );
                 })}

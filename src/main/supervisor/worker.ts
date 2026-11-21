@@ -16,6 +16,7 @@ import type { Static, TSchema } from "typebox";
 import type { AssistantMessage } from "@rally/ai";
 import type { RallyPaths } from "../../shared/ipc.ts";
 import type { Quote, ReportState, Task, TaskAccess, TaskInput, TaskRun } from "../../shared/task.ts";
+import { taskSchedule } from "../../shared/task.ts";
 import { toolInput, toolOutput } from "../../shared/tools.ts";
 import { assistantContent, type AssistantMessageView } from "../../shared/conversation.ts";
 import { WORKER_SYSTEM_PROMPT } from "../prompts.ts";
@@ -94,6 +95,7 @@ interface Worker {
 	recovering: boolean;
 }
 interface OpeningWorker {
+	pending?: Promise<void>;
 	task: Task;
 	run: TaskRun;
 	lastActivity: number;
@@ -139,6 +141,7 @@ export class WorkerManager {
 		const opening: OpeningWorker = { task, run, lastActivity: this.now(), jobExempt: this.options.jobs.hasBackground(task.id), recovering: false, controller: new AbortController() };
 		this.opening.set(task.id, opening); this.watch();
 		const pending = this.openWorker(opening).finally(() => { this.starting.delete(pending); if (this.opening.get(task.id) === opening) this.opening.delete(task.id); });
+		opening.pending = pending;
 		this.starting.add(pending);
 		return pending;
 	}
@@ -390,6 +393,12 @@ export class WorkerManager {
 		return Promise.all([worker ? this.disposeWorker(worker) : this.closing.get(taskId), opening?.stop]).then(() => {});
 	}
 
+	async closeTask(taskId: string): Promise<void> {
+		const pending = this.opening.get(taskId)?.pending;
+		await this.abort(taskId);
+		await pending;
+	}
+
 	/** Jack out every session without touching task facts; startup recovery marks the runs interrupted. */
 	dispose(): Promise<void> {
 		if (this.disposal) return this.disposal;
@@ -626,6 +635,8 @@ function assignmentMessage(task: Task, run: TaskRun, upstreams: Task[]): string 
 	];
 	for (const quote of task.quotes) lines.push(formatQuote(quote));
 	if (task.note) lines.push(`Main agent's note: ${task.note}`);
+	const schedule = taskSchedule(task);
+	if (schedule) lines.push(`Host schedule occurrence: ${JSON.stringify({ ...schedule, dueUtc: new Date(schedule.dueAt).toISOString(), dispatchedAt: task.createdAt })}. Execute once now; future occurrences are managed by the host.`);
 	lines.push(
 		`Directory: ${task.cwd}`,
 		`Output directory: ${task.outputDir}`,

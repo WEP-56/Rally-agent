@@ -96,6 +96,8 @@ export interface TaskAccess {
 }
 
 export interface Task {
+	/** Host-owned origin; each due occurrence is an ordinary worker task. */
+	schedule?: { id: string; dueAt: number };
 	id: string;
 	title: string;
 	quotes: Quote[];
@@ -133,6 +135,7 @@ export interface Task {
 }
 
 export interface TaskView {
+	schedule?: Task["schedule"];
 	inputs?: TaskInput[];
 	durationMs: number;
 	assistantMessages?: AssistantMessageView[];
@@ -204,6 +207,7 @@ export function taskView(task: Task, now = Date.now()): TaskView {
 	const lastRun = task.runs[task.runs.length - 1];
 	const { status, statusText } = derive(task, lastRun, now);
 	return {
+		schedule: taskSchedule(task),
 		durationMs: task.runs.reduce((total, run) => total + Math.max(0, (run.endedAt ?? task.ended?.at ?? now) - run.startedAt), 0),
 		id: task.id,
 		title: task.title,
@@ -232,6 +236,13 @@ export function taskView(task: Task, now = Date.now()): TaskView {
 		changedFiles: task.changedFiles,
 		usage: task.usage,
 	};
+}
+
+/** Older scheduled workers stored their origin only in the durable dispatch key. */
+export function taskSchedule(task: Pick<Task, "schedule" | "dispatchKey">): Task["schedule"] {
+	if (task.schedule) return { ...task.schedule };
+	const match = /^schedule:(S-[\w-]+):(\d+)$/.exec(task.dispatchKey ?? "");
+	return match && Number.isFinite(new Date(Number(match[2])).getTime()) ? { id: match[1], dueAt: Number(match[2]) } : undefined;
 }
 
 function derive(

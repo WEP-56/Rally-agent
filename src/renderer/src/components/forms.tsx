@@ -13,6 +13,8 @@ import { uid, useApp } from "../store";
 import { Button, Input, Segmented, Textarea, Toggle } from "./ui";
 import { cn } from "../utils/cn";
 import { ModelPicker } from "./ModelPicker";
+import { DEFAULT_IDENTITY, IDENTITY_LIMITS, type IdentityText } from "../../../shared/identity";
+import { AgentAvatar } from "./AgentAvatar";
 
 export function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -27,18 +29,34 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
 }
 
 export function IdentityForm() {
-  const { config, setConfig } = useApp();
+  const { config, identityReady, identityError, reloadIdentity } = useApp();
+  const [draft, setDraft] = useState<IdentityText>({ name: config.name, personality: config.personality, workstyle: config.workstyle });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
+  useEffect(() => { setDraft({ name: config.name, personality: config.personality, workstyle: config.workstyle }); }, [config.name, config.personality, config.workstyle]);
+  const action = async (run: () => Promise<unknown>) => {
+    setBusy(true); setError(""); setSaved(false);
+    try { const result = await run(); if (result !== null) setSaved(true); } catch (reason) { setError(String(reason)); } finally { setBusy(false); }
+  };
+  const dirty = draft.name !== config.name || draft.personality !== config.personality || draft.workstyle !== config.workstyle;
+  const loading = !identityReady && !identityError;
   return (
-    <div className="flex flex-col gap-4">
-      <Field label="名称" hint="会显示在名片与对话中">
-        <Input value={config.name} onChange={(e) => setConfig({ name: e.target.value })} placeholder="Rally" />
-      </Field>
-      <Field label="性格" hint="影响语气与表达方式">
-        <Textarea rows={2} value={config.personality} onChange={(e) => setConfig({ personality: e.target.value })} />
-      </Field>
-      <Field label="工作方式" hint="规划、派发与确认的偏好">
-        <Textarea rows={3} value={config.workstyle} onChange={(e) => setConfig({ workstyle: e.target.value })} />
-      </Field>
+    <div>
+    <div className="glass-strong divide-y divide-line overflow-hidden rounded-[24px]">
+      <div className="flex items-center gap-4 px-5 py-4"><AgentAvatar size={56} /><div className="min-w-0 flex-1"><div className="text-[14px] font-medium">头像</div><div className="mt-0.5 text-[12.5px] text-muted">PNG、JPEG 或 WebP，5 MiB 以内；居中裁成正方形</div></div><div className="flex flex-wrap justify-end gap-2"><Button size="sm" disabled={!identityReady || busy} onClick={() => void action(() => window.rally.identity.pickAvatar())}>选择图片</Button>{config.avatar && <Button size="sm" disabled={busy} onClick={() => void action(() => window.rally.identity.resetAvatar())}>恢复默认</Button>}</div></div>
+      {([
+        { key: "name", label: "名称", hint: "会显示在名片与对话中", rows: 0 },
+        { key: "personality", label: "性格", hint: "说话的语气与态度", rows: 2 },
+        { key: "workstyle", label: "工作方式", hint: "规划、派发与确认的偏好", rows: 3 },
+      ] as const).map(field => <label key={field.key} className="flex flex-col gap-4 px-5 py-4">
+        <div><span className="text-[14px] font-medium">{field.label}</span><span className="mt-0.5 block text-[12.5px] leading-relaxed text-muted">{field.hint}</span></div>
+        {field.rows ? <Textarea disabled={loading || busy} maxLength={IDENTITY_LIMITS[field.key]} rows={field.rows} value={draft[field.key]} onChange={event => { setDraft(current => ({ ...current, [field.key]: event.target.value })); setSaved(false); }} /> : <Input disabled={loading || busy} maxLength={IDENTITY_LIMITS.name} value={draft.name} onChange={event => { setDraft(current => ({ ...current, name: event.target.value })); setSaved(false); }} placeholder={DEFAULT_IDENTITY.name} />}
+      </label>)}
+    </div>
+    <div className="mt-4 flex items-center justify-between gap-3 px-1"><p className="text-[12px] text-muted">保存后从主对话下一次模型请求生效。权限与审批规则保持有效。</p><Button variant="primary" disabled={loading || busy || (!dirty && !identityError) || !draft.name.trim()} onClick={() => void action(() => window.rally.identity.update(draft))}>{busy ? "保存中…" : "保存人设"}</Button></div>
+    {(error || identityError) && <div role="alert" className="mt-3 text-xs text-danger">{error || identityError}{identityError && <Button size="sm" onClick={reloadIdentity}>重试加载</Button>}</div>}
+    {saved && !dirty && <p role="status" className="mt-2 text-xs text-ok">已保存到本机</p>}
     </div>
   );
 }
@@ -216,7 +234,7 @@ function ProviderCard({
 	};
 
 	return (
-		<div className="animate-rise rounded-2xl bg-sunken p-4">
+		<div className="glass-strong animate-rise rounded-[24px] p-5">
 			<div className="flex items-center gap-2">
 				<div className="flex h-8 w-8 items-center justify-center rounded-lg bg-raised text-sm font-semibold text-muted shadow-soft">
 					{(provider.name || "?")[0]}

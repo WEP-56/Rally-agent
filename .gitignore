@@ -26,3 +26,6 @@ packages/ai/src/providers/data/
 # Temporary manual-test notes and screenshots
 /docs/test-image/
 /docs/测试清单-完整测试后的部分问题.md
+
+# Local visual verification evidence
+/output/playwright/

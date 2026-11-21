@@ -1,4 +1,5 @@
 import type { NotificationTarget } from "../../shared/notifications";
+import type { IdentityState } from "../../shared/identity";
 import { Globe, IdCard, Info, Moon, Palette, PanelRight, Plug, Settings as SettingsIcon, SquarePen, SquareTerminal, Sun, Wand2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "./chat";
@@ -21,6 +22,22 @@ const KIND_TITLE: Record<Exclude<TabKind, "task">, string> = { workstation: "Ral
 
 export default function App() {
   const [config, setConfigState] = useState<Config>(loadConfig);
+  const [identityReady, setIdentityReady] = useState(false);
+  const [identityError, setIdentityError] = useState("");
+  const [identityAttempt, setIdentityAttempt] = useState(0);
+  const reloadIdentity = useCallback(() => setIdentityAttempt(value => value + 1), []);
+  useEffect(() => {
+    let alive = true;
+    const apply = (identity: IdentityState) => {
+      if (!alive) return;
+      setConfigState(current => { const next = { ...current, ...identity }; saveConfig(next); return next; });
+      setIdentityReady(true); setIdentityError("");
+    };
+    const off = window.rally.identity.onChange(apply);
+    const { name, personality, workstyle } = loadConfig();
+    void window.rally.identity.initialize({ name, personality, workstyle }).then(apply).catch(reason => { if (alive) setIdentityError(String(reason)); });
+    return () => { alive = false; off(); };
+  }, [identityAttempt]);
   useEffect(() => {
     void window.rally.memory.getState().then((state) => setConfigState((current) => ({ ...current, memoryPath: state.path }))).catch(() => {});
   }, []);
@@ -31,7 +48,7 @@ export default function App() {
   const [palette, setPalette] = useState(false);
 
   const [rightOpen, setRightOpen] = useState(true);
-  const [ratio, setRatio] = useState(0.5);
+  const [ratio, setRatio] = useState(0.55);
   const [dragging, setDragging] = useState(false);
   const container = useRef<HTMLDivElement>(null);
 
@@ -63,10 +80,19 @@ export default function App() {
     const r = document.documentElement;
     r.classList.toggle("dark", dark);
     r.style.setProperty("--c-accent", config.accent);
-    r.style.fontSize = { sm: "14px", md: "15px", lg: "16px" }[config.fontSize];
+    r.style.fontSize = { sm: "14px", md: "15px", lg: "16.5px" }[config.fontSize];
   }, [dark, config.accent, config.fontSize]);
 
   /* ---------------- tabs ---------------- */
+  useEffect(() => window.rally.tasks.onEvent(event => {
+    if (event.type !== "deleted") return;
+    setTabs(current => {
+      const removed = new Set(current.filter(tab => tab.kind === "task" && tab.taskId === event.taskId).map(tab => tab.id));
+      const remaining = current.filter(tab => !removed.has(tab.id));
+      setActive(id => id && removed.has(id) ? remaining.at(-1)?.id ?? null : id);
+      return remaining;
+    });
+  }), []);
   const addTab = useCallback((t: Tab) => {
     setTabs((ts) => [...ts, t]);
     setActive(t.id);
@@ -313,27 +339,21 @@ export default function App() {
     [dark, tabs],
   );
 
-  const ctx: AppCtx = { config, setConfig, openTab, openTask, openSettings, rerunOnboarding };
+  const ctx: AppCtx = { config, setConfig, identityReady, identityError, reloadIdentity, openTab, openTask, openSettings, rerunOnboarding };
 
   return (
     <Ctx.Provider value={ctx}>
       <div className="relative flex h-full w-full flex-col overflow-hidden bg-app">
-          <TitleBar
-            menus={menus}
-            onSearch={() => setPalette(true)}
-            maximized={maximized}
-            onMin={minimize}
-            onMax={toggleMax}
-            onClose={close}
-          />
+          <div className="pointer-events-none absolute -left-40 top-[calc(2.5rem-160px)] h-[520px] w-[520px] rounded-full bg-accent/[0.07] blur-3xl" />
+          <TitleBar menus={menus} onSearch={() => setPalette(true)} maximized={maximized} onMin={minimize} onMax={toggleMax} onClose={close} onDoubleClick={toggleMax} />
 
           {view === "settings" && (
             <div className="min-h-0 flex-1">
-              <Settings section={section} setSection={setSection} onBack={() => setView("main")} />
+              <Settings section={section} setSection={setSection} onBack={() => setView("main")} tasks={tasks} />
             </div>
           )}
-            <div ref={container} className={cn("min-h-0 flex-1 px-1.5 pb-1.5", view === "settings" ? "hidden" : "flex")}>
-              <div className="min-w-0 flex-1 overflow-hidden rounded-xl bg-panel shadow-card">
+            <div ref={container} className={cn("relative min-h-0 flex-1 p-2.5 pl-0", view === "settings" ? "hidden" : "flex")}>
+              <div className="min-w-0 flex-1 overflow-hidden">
                 <ChatPanel
                   notificationFocus={notificationFocus}
                   questions={visibleQuestions}
@@ -360,14 +380,16 @@ export default function App() {
               <div
                 className={cn("relative flex shrink-0", !dragging && "transition-[width,opacity] duration-300 ease-[cubic-bezier(.2,.8,.2,1)]", !rightOpen && "pointer-events-none opacity-0")}
                 style={{ width: rightOpen ? `${ratio * 100}%` : 0 }}
+                inert={!rightOpen}
               >
                 {/* drag handle (the gap itself) */}
-                <div onPointerDown={startDrag} onDoubleClick={() => setRatio(0.5)} className="group relative z-10 flex w-1.5 shrink-0 cursor-col-resize items-center justify-center" title="拖拽调整宽度，双击恢复等分">
+                <div onPointerDown={startDrag} onDoubleClick={() => setRatio(0.55)} className="group relative z-10 flex w-2.5 shrink-0 cursor-col-resize items-center justify-center" title="拖拽调整宽度，双击恢复等分">
                   <div className={cn("h-10 w-[3px] rounded-full transition-all", dragging ? "h-16 bg-accent" : "bg-transparent group-hover:bg-faint/60")} />
                 </div>
-                <div className="min-w-0 flex-1 overflow-hidden rounded-xl bg-panel shadow-card">
+                <div className="min-w-0 flex-1 overflow-hidden">
                   <div className="h-full" style={{ minWidth: 330 }}>
                     <RightPanel
+                      onCollapse={() => setRightOpen(false)}
 					  visible={view === "main" && rightOpen && !palette && !dragging && onboarded}
                       tabs={tabs}
                       active={active}

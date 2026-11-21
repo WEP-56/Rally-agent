@@ -40,7 +40,7 @@ export function McpSection() {
 		{error && <p role="alert" className="mb-4 break-words text-xs text-red-500">{error}</p>}
 		{state?.errors.map((message) => <p key={message} role="alert" className="mb-2 break-all text-xs text-red-500">{message}</p>)}
 		{dirty && <p className="mb-3 text-xs text-muted">JSON 有未保存修改，请保存后再修改列表。</p>}
-		{editor && <fieldset disabled={busy} className="mb-4 rounded-2xl bg-sunken p-4">
+		{editor && <fieldset disabled={busy} className="glass-strong mb-4 rounded-[24px] p-5">
 			<div className="mb-3 text-sm font-medium">{editor.originalName === undefined ? "添加服务器" : `编辑 ${editor.originalName}`}</div>
 			<label className="text-xs text-muted">服务器名称<input aria-label="服务器名称" value={editor.name} onChange={event => setEditor({ ...editor, name: event.target.value })} className="my-2 block w-full rounded-lg bg-panel px-3 py-2 text-sm" /></label>
 			<p className="mb-2 text-xs leading-relaxed text-muted">填写单个服务器的 JSON 配置：stdio 使用 command、args，HTTP 使用 url；可选 description 简述用途。</p>
@@ -51,7 +51,7 @@ export function McpSection() {
 			<p className="mb-2 text-xs text-faint">在 mcpServers 中按名称添加服务器。stdio 使用 command 与 args 数组，HTTP 使用 url；可保留 env、headers 和其他 Pi 支持的字段。</p>
 			<textarea aria-label="MCP JSON 配置" spellCheck={false} disabled={busy} className="selectable min-h-80 w-full rounded-2xl bg-term p-4 font-mono text-xs leading-relaxed text-fg/85 outline-none" value={json} onChange={(event) => setJson(event.target.value)} />
 			<div className="mt-3 flex justify-end"><Button variant="primary" disabled={busy || !dirty} onClick={() => void change(() => window.rally.mcp.save(json))}>保存配置</Button></div>
-		</> : <fieldset disabled={busy || dirty || editor !== null} className="flex min-w-0 flex-col gap-1 rounded-2xl bg-sunken p-1">
+		</> : <fieldset disabled={busy || dirty || editor !== null} className="flex min-w-0 flex-col gap-2.5">
 			{state?.servers.map((server) => <ServerSettings key={server.name} server={server} change={change} edit={() => editServer(server.name)} />)}
 			{state?.servers.length === 0 && <p className="p-4 text-xs text-faint">尚未配置 MCP 服务器</p>}
 		</fieldset>}
@@ -78,7 +78,7 @@ function ServerSettings({ server, change, edit }: { server: McpServerSettings; c
 	const [exposure, setExposure] = useState<McpExposure>("deferred");
 	const rules = Object.entries(server.toolExposure);
 	const set = (mode: McpExposure | null, tool?: string) => change(() => window.rally.mcp.setExposure(server.name, mode, tool));
-	return <div className="min-w-0 rounded-xl bg-panel px-4 py-3 dark:bg-raised/60">
+	return <div className="glass min-w-0 rounded-[22px] px-5 py-4">
 		<div className="flex items-center gap-4">
 			<Plug size={16} className="shrink-0 text-faint" />
 			<div className="min-w-0 flex-1"><div className="text-sm font-medium">{server.name} <span className="text-[10px] uppercase text-faint">{server.transport}</span></div><div className="mt-1 truncate font-mono text-xs text-faint" title={server.address}>{server.address}</div></div>

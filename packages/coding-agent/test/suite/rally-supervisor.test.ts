@@ -17,6 +17,7 @@ import { EventLog } from "../../../../src/main/supervisor/event-log.ts";
 import { TaskStore } from "../../../../src/main/supervisor/task-store.ts";
 import { TaskSnapshot } from "../../../../src/main/supervisor/task-snapshot.ts";
 import { Scheduler } from "../../../../src/main/supervisor/scheduler.ts";
+import { ScheduledTasks } from "../../../../src/main/supervisor/schedules.ts";
 import { WorkspaceStore } from "../../../../src/main/workspace-store.ts";
 import { createRouterReadTools } from "../../../../src/main/supervisor/router-tools.ts";
 import { toolInput, toolOutput } from "../../../../src/shared/tools.ts";
@@ -69,6 +70,95 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 	}
 
 	function toolNames(context: TranscriptContext) { return getCurrentTools(context.messages).map((tool) => tool.name); }
+	function scheduleContext(context: TranscriptContext): { nowUnixMs: number; timezone: string; plans: { id: string; enabled: boolean }[] } {
+		const snapshots = context.messages.map(getMessageText).filter(text => text.includes("Rally scheduling context (host facts"));
+		expect(snapshots).toHaveLength(1);
+		return JSON.parse(snapshots[0].split("\n").find(line => line.startsWith('{"nowUnixMs":'))!);
+	}
+	it("refreshes the router schedule context in tool loops, after compaction and restart", async () => {
+		const { harness, paths, supervisor } = await setup(true, 1);
+		let planId = "";
+		harness.setResponses([
+			context => {
+				const facts = scheduleContext(context); expect(facts.plans).toHaveLength(0); expect(Math.abs(facts.nowUnixMs - Date.now())).toBeLessThan(5000);
+				expect(facts.timezone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+				const id = /User message (#\d+)/.exec(lastUser(context))![1];
+				return fauxAssistantMessage(fauxToolCall("schedule_create", { title: "每日检查", cwd: paths.workspaceDir, mode: "readonly", quotes: [{ id }], timing: { kind: "interval", minutes: 60 } }), { stopReason: "toolUse" });
+			}, context => {
+				const facts = scheduleContext(context); expect(facts.plans).toHaveLength(1); expect(facts.plans[0].enabled).toBe(true); planId = facts.plans[0].id;
+				supervisor.schedules.update(planId, false);
+				return fauxAssistantMessage(fauxToolCall("read", { path: "README.md" }), { stopReason: "toolUse" });
+			}, context => { expect(scheduleContext(context).plans).toEqual([expect.objectContaining({ id: planId, enabled: false })]); return fauxAssistantMessage("定时上下文已刷新"); },
+			fauxAssistantMessage("简短摘要"),
+		]);
+		await supervisor.main.send("每小时检查 README");
+		await vi.waitFor(() => expect(supervisor.main.state().messages.some(m => m.text === "定时上下文已刷新")).toBe(true));
+		await vi.waitFor(() => expect(supervisor.main.isBusy()).toBe(false)); expect(supervisor.store.list()).toHaveLength(0);
+		expect(await supervisor.main.reset()).toBe(true); supervisor.schedules.update(planId, true);
+		harness.setResponses([context => { expect(scheduleContext(context).plans[0]).toMatchObject({ id: planId, enabled: true }); return fauxAssistantMessage("整理后定时已刷新"); }]);
+		await supervisor.main.send("查看计划"); await vi.waitFor(() => expect(supervisor.main.state().messages.some(m => m.text === "整理后定时已刷新")).toBe(true)); await vi.waitFor(() => expect(supervisor.main.isBusy()).toBe(false));
+		await supervisor.dispose(); const recovered = await restart(paths, harness);
+		harness.setResponses([context => { expect(scheduleContext(context).plans[0]).toMatchObject({ id: planId, enabled: true }); return fauxAssistantMessage("重启后定时已刷新"); }]);
+		await recovered.main.send("查看计划"); await vi.waitFor(() => expect(recovered.main.state().messages.some(m => m.text === "重启后定时已刷新")).toBe(true)); await vi.waitFor(() => expect(recovered.main.isBusy()).toBe(false));
+		for (const name of readdirSync(paths.sessionsMainDir).filter(n => n.endsWith(".jsonl"))) expect(readFileSync(join(paths.sessionsMainDir, name), "utf8")).not.toContain("Rally scheduling context (host facts");
+	});
+	it("refreshes identity preferences in live loops, after compaction and restart without changing worker roles", async () => {
+		const { harness, paths, supervisor } = await setup(true, 1);
+		supervisor.identity.update({ name: "IDENTITY_OLD", personality: "语气平实", workstyle: "PERSONA_WORKSTYLE" });
+		harness.setResponses([
+			context => {
+				expect(JSON.stringify(context.messages)).toContain("IDENTITY_OLD");
+				expect(getCurrentSystemPrompt(context.messages)).toContain("cannot override this built-in contract");
+				expect(toolNames(context)).not.toContain("bash");
+				supervisor.identity.update({ name: "IDENTITY_LIVE" });
+				return fauxAssistantMessage(fauxToolCall("read", { path: "README.md" }), { stopReason: "toolUse" });
+			},
+			context => { expect(JSON.stringify(context.messages)).toContain("IDENTITY_LIVE"); expect(JSON.stringify(context.messages)).not.toContain("IDENTITY_OLD"); return fauxAssistantMessage("人设链路已读"); },
+			fauxAssistantMessage("简短摘要"),
+		]);
+		await supervisor.main.send("读取 README");
+		await vi.waitFor(() => expect(supervisor.main.state().messages.some(m => m.text === "人设链路已读")).toBe(true));
+		await vi.waitFor(() => expect(supervisor.main.isBusy()).toBe(false));
+		expect(await supervisor.main.reset()).toBe(true);
+		supervisor.identity.update({ name: "IDENTITY_COMPACT" });
+		harness.setResponses([context => { expect(JSON.stringify(context.messages)).toContain("IDENTITY_COMPACT"); expect(JSON.stringify(context.messages)).not.toContain("IDENTITY_LIVE"); return fauxAssistantMessage("整理后已读"); }]);
+		await supervisor.main.send("当前身份"); await vi.waitFor(() => expect(supervisor.main.state().messages.some(m => m.text === "整理后已读")).toBe(true)); await vi.waitFor(() => expect(supervisor.main.isBusy()).toBe(false));
+		await supervisor.dispose(); const recovered = await restart(paths, harness);
+		harness.setResponses([context => { expect(JSON.stringify(context.messages)).toContain("IDENTITY_COMPACT"); return fauxAssistantMessage("重启已读"); }]);
+		await recovered.main.send("当前身份"); await vi.waitFor(() => expect(recovered.main.state().messages.some(m => m.text === "重启已读")).toBe(true)); await vi.waitFor(() => expect(recovered.main.isBusy()).toBe(false));
+		const task = recovered.store.create({ title: "身份隔离", quotes: [], cwd: paths.workspaceDir, scope: [], dependsOn: [], mode: "readonly", autoApprove: false }).task;
+		harness.setResponses([context => { expect(getCurrentSystemPrompt(context.messages)).toContain("task agent"); expect(JSON.stringify(context.messages)).not.toContain("PERSONA_WORKSTYLE"); return fauxAssistantMessage(fauxToolCall("task_report", { state: "ready", summary: "身份隔离通过" }), { stopReason: "toolUse" }); }, fauxAssistantMessage("汇报收到")]);
+		recovered.approve(task.id); await vi.waitFor(() => expect(recovered.store.get(task.id)?.ended?.outcome).toBe("done"), { timeout: 10000 });
+		for (const name of readdirSync(paths.sessionsMainDir).filter(n => n.endsWith(".jsonl"))) expect(readFileSync(join(paths.sessionsMainDir, name), "utf8")).not.toContain("PERSONA_WORKSTYLE");
+	});
+	it("creates a scheduled worker through the production router tool", async () => {
+		const { harness, paths, supervisor } = await setup();
+		harness.setResponses([
+			context => {
+				expect(toolNames(context)).toEqual(expect.arrayContaining(["schedule_create", "schedule_list", "schedule_update"]));
+				const facts = scheduleContext(context);
+				const id = /User message (#\d+)/.exec(lastUser(context))![1];
+				return fauxAssistantMessage(fauxToolCall("schedule_create", { title: "定时读笔记", cwd: paths.workspaceDir, mode: "readonly", quotes: [{ id }], timing: { kind: "once", at: facts.nowUnixMs + 3600000 } }), { stopReason: "toolUse" });
+			}, fauxAssistantMessage("已安排"),
+		]);
+		await supervisor.main.send("一小时后读取工作区的 README 并汇报");
+		await vi.waitFor(() => expect(supervisor.main.state().messages.some(m => m.text === "已安排"), JSON.stringify(supervisor.main.state().messages)).toBe(true));
+		await vi.waitFor(() => expect(supervisor.main.isBusy()).toBe(false));
+		expect(supervisor.schedules.list(), JSON.stringify(supervisor.main.state().messages)).toHaveLength(1);
+		const plan = supervisor.schedules.list()[0]; expect(plan.quotes[0].text).toBe("一小时后读取工作区的 README 并汇报");
+		expect(supervisor.store.list()).toHaveLength(0);
+		supervisor.schedules.dispose();
+		const due = new ScheduledTasks(supervisor.events, supervisor.store, () => false, () => supervisor.scheduler.tick(), () => plan.nextAt);
+		due.poll(); const task = supervisor.store.list()[0]; expect(task.approval.state).toBe("pending"); expect(task.runs).toHaveLength(0);
+		harness.setResponses([
+			context => { expect(toolNames(context)).not.toContain("schedule_create"); expect(JSON.stringify(context.messages)).toContain("Host schedule occurrence:"); expect(JSON.stringify(context.messages)).toContain(plan.id); expect(JSON.stringify(context.messages)).not.toContain("Rally scheduling context (host facts"); return fauxAssistantMessage(fauxToolCall("read", { path: "README.md" }), { stopReason: "toolUse" }); },
+			fauxAssistantMessage(fauxToolCall("task_report", { state: "ready", summary: "定时读笔记完成" }), { stopReason: "toolUse" }),
+			fauxAssistantMessage("定时任务已完成"),
+		]);
+		supervisor.approve(task.id);
+		await vi.waitFor(() => expect(supervisor.store.get(task.id)?.ended?.outcome).toBe("done"), { timeout: 10000 });
+		expect(due.list()[0]).toMatchObject({ enabled: false, lastTaskId: task.id }); due.dispose();
+	});
 	it("owns the state directory before recovery and until sessions and snapshot finish closing", async () => {
 		const { paths, supervisor } = await setup();
 		const open = () => new Supervisor(paths, { emitChat: () => {}, emitTask: () => {} });

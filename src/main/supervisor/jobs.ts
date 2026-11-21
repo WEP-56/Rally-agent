@@ -41,6 +41,7 @@ export class JobManager {
 	private disposal?: Promise<void>;
 	constructor(options: JobsOptions) {
 		this.options = options;
+		this.sequence = options.store.deletedResourceSequence("job");
 		for (const task of options.store.list()) for (const job of task.jobs ?? []) this.sequence = Math.max(this.sequence, Number(job.id.slice(2)) || 0);
 		// A crash between creating the log and committing job_started must not reuse its ID.
 		if (existsSync(options.directory)) for (const file of readdirSync(options.directory)) this.sequence = Math.max(this.sequence, Number(/^J-(\d+)\.log$/.exec(file)?.[1]) || 0);

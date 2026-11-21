@@ -1,3 +1,5 @@
+import type { ScheduledTask } from "./schedules.ts";
+import type { IdentityState, IdentityText } from "./identity.ts";
 // IPC contract shared by main, preload and renderer: channel names and the typed API the preload exposes.
 
 import type { NotificationSettings, NotificationTarget } from "./notifications.ts";
@@ -57,6 +59,13 @@ export interface RallyPaths {
 
 /** Invoke channels (renderer -> main, request/response). */
 export const IpcChannel = {
+	identityState: "identity:state",
+	identityInitialize: "identity:initialize",
+	identityUpdate: "identity:update",
+	identityPickAvatar: "identity:pick-avatar",
+	identityResetAvatar: "identity:reset-avatar",
+	schedulesState: "schedules:state",
+	schedulesUpdate: "schedules:update",
 	notificationsState: "notifications:state",
 	notificationsUpdate: "notifications:update",
 	notificationsTarget: "notifications:target",
@@ -90,6 +99,7 @@ export const IpcChannel = {
 	tasksApprove: "tasks:approve",
 	tasksCancel: "tasks:cancel",
 	tasksArchive: "tasks:archive",
+	tasksDelete: "tasks:delete",
 	tasksAnswerOption: "tasks:answer-option",
 	tasksApprovalMode: "tasks:approval-mode",
 	modelsState: "models:state",
@@ -116,6 +126,7 @@ export const IpcChannel = {
 
 /** Event channels (main -> renderer). */
 export const IpcEvent = {
+	identity: "identity:changed",
 	notification: "notifications:event",
 	browser: "browser:event",
 	terminal: "terminal:event",
@@ -181,7 +192,7 @@ export interface ChatApi {
 }
 
 /** Task board updates pushed from main; `task` upserts one card. */
-export type TaskEvent = { type: "snapshot"; board: TaskBoard } | { type: "task"; task: TaskView };
+export type TaskEvent = { type: "snapshot"; board: TaskBoard } | { type: "task"; task: TaskView } | { type: "deleted"; taskId: string; board: TaskBoard };
 
 /** Task board and explicit user actions; freeform answers go through the main chat. */
 export interface TasksApi {
@@ -190,6 +201,7 @@ export interface TasksApi {
 	approve(taskId: string): Promise<TaskBoard>;
 	cancel(taskId: string): Promise<TaskBoard>;
 	archive(taskId: string, archived: boolean): Promise<TaskBoard>;
+	deleteArchived(taskId: string): Promise<TaskBoard>;
 	answerOption(taskId: string, questionId: string, option: string): Promise<TaskBoard>;
 	setAutoApprove(enabled: boolean): Promise<TaskBoard>;
 	onEvent(listener: (event: TaskEvent) => void): () => void;
@@ -209,6 +221,15 @@ export interface ModelsApi {
 
 /** API exposed on `window.rally` by the preload script. */
 export interface RallyApi {
+	identity: {
+		getState(): Promise<IdentityState>;
+		initialize(legacy: IdentityText): Promise<IdentityState>;
+		update(patch: Partial<IdentityText>): Promise<IdentityState>;
+		pickAvatar(): Promise<IdentityState | null>;
+		resetAvatar(): Promise<IdentityState>;
+		onChange(listener: (state: IdentityState) => void): () => void;
+	};
+	schedules: { getState(): Promise<ScheduledTask[]>; update(id: string, enabled: boolean | null): Promise<ScheduledTask[]> };
 	notifications: {
 		getState(): Promise<NotificationSettings>;
 		update(value: NotificationSettings): Promise<NotificationSettings>;

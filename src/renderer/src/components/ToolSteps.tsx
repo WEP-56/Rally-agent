@@ -1,14 +1,14 @@
 import { useState } from "react";
-import { Brain, ChevronRight, FilePen, FilePlus2, FileX2, Glasses, Globe, Search, Sparkles, SquareTerminal, Copy, Check, ListTodo, Wrench } from "lucide-react";
+import { Brain, ChevronRight, FilePen, FilePlus2, FileX2, FileText, Globe, Search, Sparkles, SquareTerminal, Copy, Check, ListTodo, Wrench } from "lucide-react";
 import type { StepKind, ToolStep } from "../data";
 import { cn } from "../utils/cn";
 
-const ICON: Record<StepKind, typeof Glasses> = {
+const ICON: Record<StepKind, typeof FileText> = {
   task: ListTodo,
   tool: Wrench,
   memory: Brain,
   cmd: SquareTerminal,
-  read: Glasses,
+  read: FileText,
   write: FilePlus2,
   edit: FilePen,
   delete: FileX2,
@@ -107,7 +107,7 @@ function CopyBtn({ text }: { text: string }) {
         setOk(true);
         setTimeout(() => setOk(false), 1200);
       }}
-      className="rounded-md p-1 text-faint hover:bg-hover hover:text-fg"
+      className="rounded-md p-1 text-white/50 hover:bg-white/10 hover:text-white"
     >
       {ok ? <Check size={13} /> : <Copy size={13} />}
     </button>
@@ -118,19 +118,19 @@ function StepDetail({ s }: { s: ToolStep }) {
   if (s.diff) {
     return (
       <div className="animate-fade ml-7 mr-1 mb-2 mt-1 overflow-hidden rounded-xl bg-term shadow-soft">
-        <div className="flex items-center justify-between bg-deep/60 px-3 py-1.5 text-xs text-muted dark:bg-black/20">
+        <div className="flex items-center justify-between bg-white/5 px-3 py-1.5 text-xs text-white/60">
           <span className="font-mono">{s.target}</span>
           <CopyBtn text={(s.diff.add || []).join("\n")} />
         </div>
         <div className="selectable overflow-x-auto py-1.5 font-mono text-[12px] leading-[1.7]">
           {s.diff.ctx?.map((l, i) => (
-            <div key={"c" + i} className="flex px-3 text-faint"><span className="w-5 shrink-0 select-none"> </span>{l}</div>
+            <div key={"c" + i} className="flex px-3 text-white/50"><span className="w-5 shrink-0 select-none"> </span>{l}</div>
           ))}
           {s.diff.del?.map((l, i) => (
-            <div key={"d" + i} className="flex bg-red-500/10 px-3 text-red-700 dark:text-red-300"><span className="w-5 shrink-0 select-none">-</span><span className="whitespace-pre">{l}</span></div>
+            <div key={"d" + i} className="flex bg-red-500/10 px-3 text-red-300"><span className="w-5 shrink-0 select-none">-</span><span className="whitespace-pre">{l}</span></div>
           ))}
           {s.diff.add?.map((l, i) => (
-            <div key={"a" + i} className="flex bg-emerald-500/10 px-3 text-emerald-800 dark:text-emerald-300"><span className="w-5 shrink-0 select-none">+</span><span className="whitespace-pre">{l || " "}</span></div>
+            <div key={"a" + i} className="flex bg-emerald-500/10 px-3 text-emerald-300"><span className="w-5 shrink-0 select-none">+</span><span className="whitespace-pre">{l || " "}</span></div>
           ))}
         </div>
       </div>
@@ -139,11 +139,11 @@ function StepDetail({ s }: { s: ToolStep }) {
   if (!s.output) return null;
   return (
     <div className="animate-fade ml-7 mr-1 mb-2 mt-1 overflow-hidden rounded-xl bg-term shadow-soft">
-      <div className="flex items-center justify-between bg-deep/60 px-3 py-1.5 text-xs text-muted dark:bg-black/20">
+      <div className="flex items-center justify-between bg-white/5 px-3 py-1.5 text-xs text-white/60">
         <span className="truncate font-mono">{s.target}</span>
         <CopyBtn text={s.output} />
       </div>
-      <pre className="selectable max-h-64 overflow-auto px-3 py-2.5 font-mono text-[12px] leading-[1.65] text-fg/85">{s.output}</pre>
+      <pre className="selectable max-h-64 overflow-auto px-3 py-2.5 font-mono text-[12px] leading-[1.65] text-white/80">{s.output}</pre>
     </div>
   );
 }
@@ -152,13 +152,14 @@ export function ToolSteps({ steps, rich, defaultOpen = false }: { steps: ToolSte
   const [open, setOpen] = useState(defaultOpen);
   const [detail, setDetail] = useState<number | null>(null);
   return (
-    <div className="min-w-0">
-      <button aria-expanded={open} onClick={() => setOpen((v) => !v)} className="group flex max-w-full items-center gap-1 rounded-md py-1 text-left text-sm text-muted transition-colors hover:text-fg">
-        <span>{summarize(steps)}</span>
+    <div className="glass min-w-0 overflow-hidden rounded-2xl">
+      <button aria-expanded={open} onClick={() => setOpen((v) => !v)} className="group flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-[12.5px] text-muted transition-colors hover:text-fg">
+        {(() => { const Icon = ICON[steps[0]?.kind ?? "tool"]; return <Icon size={13} className="shrink-0 text-faint" />; })()}
+        <span className="truncate">{summarize(steps)}</span>
         <ChevronRight size={14} className={cn("text-faint transition-transform group-hover:text-fg", open && "rotate-90")} />
       </button>
       {open && (
-        <div className="animate-fade -ml-2 mt-1 flex flex-col gap-0.5">
+        <div className="animate-fade flex flex-col gap-0.5 px-1.5 pb-1.5">
           {steps.map((s, i) => (
             <div key={i}>
               <StepLine s={s} rich={rich} open={detail === i} onClick={rich ? () => setDetail(detail === i ? null : i) : undefined} />

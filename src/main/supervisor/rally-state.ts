@@ -12,7 +12,7 @@ export function rallyState(store: TaskStore, active: number, limit: number, auto
 			attention: task.attention && !task.attention.closed && !task.attention.answer && liveRuns.has(task.attention.runId) ? task.attention : undefined,
 		}, now);
 		const report = task.runs.findLast(run => run.lastReport)?.lastReport;
-		return { id: task.id, title: task.title, status: view.status, statusText: view.statusText, mode: task.mode,
+		return { id: task.id, title: task.title, schedule: view.schedule, status: view.status, statusText: view.statusText, mode: task.mode,
 			cwd: task.cwd, scope: task.scope, dependsOn: task.dependsOn, quoteIds: task.quotes.map(quote => quote.messageId),
 			approval: task.approval.state, queue: task.queue ?? null, durationMs: view.durationMs,
 			run: task.runs.at(-1) ? { id: task.runs.at(-1)!.id, n: task.runs.at(-1)!.n, endedAt: task.runs.at(-1)!.endedAt } : null,
@@ -27,7 +27,7 @@ export function rallyState(store: TaskStore, active: number, limit: number, auto
 		.filter(gate => !gate.decision && gate.expiresAt > now && task.runs.some(run => run.id === gate.runId && !run.endedAt))
 		.map(gate => ({ taskId: task.id, ...gate, waitingOn: gate.escalatedAt !== undefined ? "user" : "main" })));
 	const recentEnded = all.filter(task => task.ended).sort((a, b) => b.ended!.at - a.ended!.at || Number(b.id.slice(2)) - Number(a.id.slice(2)))
-		.slice(0, 20).map(task => ({ id: task.id, title: task.title, cwd: task.cwd, outcome: task.ended!.outcome, at: task.ended!.at }));
+		.slice(0, 20).map(task => ({ id: task.id, title: task.title, schedule: taskView(task, now).schedule, cwd: task.cwd, outcome: task.ended!.outcome, at: task.ended!.at }));
 	const allServices = all.flatMap(task => task.services ?? []);
 	const services = [...allServices.filter(service => service.status === "running"), ...allServices.filter(service => service.status !== "running").sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0)).slice(0, 20)]
 		.map(({ id, taskId, name, status, ready, port, url, reason, endedAt }) => ({ id, taskId, name, status, ready, port, url, reason, endedAt }));

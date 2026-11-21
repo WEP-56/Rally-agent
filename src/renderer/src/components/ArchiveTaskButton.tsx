@@ -14,7 +14,7 @@ export function ArchiveTaskButton({ task }: { task: Task }) {
 			catch (error) { setError(error instanceof Error ? error.message : String(error)); }
 			finally { setBusy(false); }
 		}} className="flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted hover:bg-hover hover:text-fg disabled:opacity-40">
-			{archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}{archived ? "取消归档" : "归档"}
+			{archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}{archived ? "撤销归档" : "归档"}
 		</button>
 		{error && <p role="alert" className="max-w-48 break-words text-xs text-red-500">{error}</p>}
 	</div>;

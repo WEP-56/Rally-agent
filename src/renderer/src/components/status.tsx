@@ -4,7 +4,7 @@ import { cn } from "../utils/cn";
 
 export const STATUS_META: Record<TaskStatus, { label: string; cls: string; dot: string }> = {
   running: { label: "进行中", cls: "bg-accent-soft text-accent", dot: "bg-accent" },
-  done: { label: "已完成", cls: "bg-sunken text-muted", dot: "bg-faint" },
+  done: { label: "已完成", cls: "bg-ok/10 text-ok", dot: "bg-ok" },
   failed: { label: "失败", cls: "bg-amber-500/12 text-amber-600 dark:text-amber-400", dot: "bg-amber-500" },
   cancelled: { label: "已取消", cls: "bg-sunken text-faint", dot: "bg-press" },
   dropped: { label: "无需处理", cls: "bg-sunken text-faint", dot: "bg-press" },
@@ -25,7 +25,7 @@ export function StatusIcon({ status, size = 16 }: { status: TaskStatus; size?: n
 
 export function StatusBadge({ status, className }: { status: TaskStatus; className?: string }) {
   const m = STATUS_META[status];
-  return <span className={cn("inline-flex h-5 items-center rounded-md px-1.5 text-[11px] font-medium", m.cls, className)}>{m.label}</span>;
+  return <span className={cn("inline-flex h-5 items-center gap-1 rounded-full px-2 text-[10.5px] font-medium", m.cls, className)}><span className={cn("h-1 w-1 rounded-full", m.dot)} />{m.label}</span>;
 }
 
 export function timeAgo(t: number) {

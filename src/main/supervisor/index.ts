@@ -1,3 +1,5 @@
+import { ScheduledTasks } from "./schedules.ts";
+import { createScheduleTools } from "./schedule-tools.ts";
 import { managedModelConfigValue } from "./model-config-value.ts";
 // Supervisor assembly: EventLog + task facts + scheduler + worker sessions + relay (docs 01 §4).
 // The single writer is this process; renderers only mirror what it broadcasts.
@@ -7,6 +9,7 @@ import type { WorkspaceState } from "../../shared/workspace.ts";
 import { type QuoteRef, type ReportState, type Task, type TaskBoard, type TaskRun, taskView } from "../../shared/task.ts";
 import { ModelStore } from "../model-store.ts";
 import { WorkspaceStore } from "../workspace-store.ts";
+import { IdentityStore } from "../identity-store.ts";
 import { MemoryStore } from "../memory-store.ts";
 import { createMemoryTools } from "./memory-tools.ts";
 import { createChatSearchTool } from "./chat-search.ts";
@@ -26,6 +29,7 @@ import { GateService } from "./gates.ts";
 import { AuditLog } from "./audit.ts";
 import { createGateTools } from "./gate-tools.ts";
 import { join } from "node:path";
+import { unlinkSync } from "node:fs";
 import { createGitInspectTool } from "./git-inspect.ts";
 import { managedGitRunner } from "./git-runner.ts";
 import { createGithubReadTool } from "./github-tool.ts";
@@ -69,6 +73,8 @@ export class Supervisor {
 	readonly workers: WorkerManager;
 	readonly relay: Relay;
 	readonly scheduler: Scheduler;
+	readonly schedules: ScheduledTasks;
+	readonly identity: IdentityStore;
 	readonly gates: GateService;
 	readonly audit: AuditLog;
 	readonly processes: ProcessRegistry;
@@ -97,6 +103,7 @@ export class Supervisor {
 			this.audit = new AuditLog(paths.auditFile, this.events);
 			this.memory = new MemoryStore(paths.home, paths.memoryFile, this.events, this.audit);
 			this.workspace = new WorkspaceStore(paths.home, paths.workspaceDir);
+			this.identity = new IdentityStore(paths.home);
 			const catalog = new CapabilityCatalog(paths.agentDir, () => [paths.mainCwd, this.workspace.base(), ...this.workspace.state().recentProjects]);
 			const approval = this.events.ofKind("approval_mode").at(-1);
 			this.autoApprove = approval?.data.enabled === true;
@@ -121,14 +128,17 @@ export class Supervisor {
 			this.gates = new GateService({ store: this.store, audit: this.audit, events: this.events,
 				quote: (ref) => this.main.quote(ref), requested: () => this.relay.captureSources(),
 				notice: () => this.relay.captureSources() });
+			this.schedules = new ScheduledTasks(this.events, this.store, () => this.autoApprove, () => this.scheduler.tick());
 			this.main = new MainAgent(paths, this.events, options.emitChat, {
 				models: this.models,
 				segmentBytes: options.mainSegmentBytes,
 				segmentCompactions: options.mainSegmentCompactions,
 				taskState: () => rallyState(this.store, this.workers.streamingCount(), this.scheduler.limit, this.autoApprove),
+				scheduleState: () => this.schedules.context(),
 				capabilities: () => catalog.context(),
-				customTools: [createChatSearchTool((params) => this.main.search(params)), ...createMemoryTools(this.memory, (ref) => this.main.quote(ref), () => !this.disposed), ...createRouterReadTools(() => this.workspace.base(), this.processes, () => catalog.skillPaths), createGitInspectTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGitRunner(this.processes)), createGithubReadTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGithubRunner(this.processes)), createFetchPageTool(this.network), ...createMainTaskTools(this.host()), ...createGateTools(this.gates, this.store)],
+				customTools: [...createScheduleTools(() => this.schedules, ref => this.main.quote(ref)), createChatSearchTool((params) => this.main.search(params)), ...createMemoryTools(this.memory, (ref) => this.main.quote(ref), () => !this.disposed), ...createRouterReadTools(() => this.workspace.base(), this.processes, () => catalog.skillPaths), createGitInspectTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGitRunner(this.processes)), createGithubReadTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGithubRunner(this.processes)), createFetchPageTool(this.network), ...createMainTaskTools(this.host()), ...createGateTools(this.gates, this.store)],
 				memory: () => this.memory.context(),
+				identity: () => this.identity.context(),
 				workspace: () => this.workspace.state(),
 				onRelayRead: (ids) => this.relay.consumed(ids),
 				onAvailable: () => this.relay?.available(),
@@ -186,6 +196,7 @@ export class Supervisor {
 			if (this.snapshot.warning) this.main.addSystemLine(this.snapshot.warning);
 			this.recoverInterrupted();
 			this.relay.start();
+			this.schedules.start();
 			this.scheduler.tick();
 		} catch (error) {
 			// The application arms its independent deadline before cleanup can await a stuck session.
@@ -206,7 +217,7 @@ export class Supervisor {
 
 	private async close(pendingRequests?: Promise<void>): Promise<void> {
 		const errors: unknown[] = [];
-		for (const stop of [() => this.scheduler.dispose(), () => this.relay.dispose(), () => this.gates.dispose()]) {
+		for (const stop of [() => this.schedules.dispose(), () => this.scheduler.dispose(), () => this.relay.dispose(), () => this.gates.dispose()]) {
 			try { stop(); } catch (error) { errors.push(error); }
 		}
 		// allSettled prevents an early rejection from releasing the lock while another session still closes.
@@ -237,6 +248,25 @@ export class Supervisor {
 		const board = this.board();
 		this.options.emitTask({ type: "snapshot", board });
 		return board;
+	}
+
+	async deleteArchived(taskId: string): Promise<TaskBoard> {
+		if (!/^T-\d+$/.test(taskId)) throw new Error("无效任务编号");
+		const task = this.store.beginDelete(taskId);
+		try {
+			await this.workers.closeTask(taskId);
+			await this.jobs.killTask(taskId);
+			for (const service of task.services ?? []) await this.services.stop(service.id, "user");
+			this.events.assertWritable();
+			// Only app-owned files with host-generated names. Never traverse task cwd/outputDir.
+			const files = [join(this.paths.sessionsTasksDir, `${taskId}.jsonl`),
+				...(task.jobs ?? []).filter(job => /^J-\d+$/.test(job.id)).map(job => join(this.paths.jobsDir, `${job.id}.log`)),
+				...(task.services ?? []).filter(service => /^S-\d+$/.test(service.id)).map(service => join(this.paths.jobsDir, `${service.id}.log`))];
+			for (const file of files) { try { unlinkSync(file); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; } }
+			this.store.finishDelete(taskId);
+			this.options.emitServices?.(this.services.state());
+			return this.board();
+		} finally { this.store.abortDelete(taskId); }
 	}
 
 	setAutoApprove(enabled: boolean): TaskBoard {
@@ -271,6 +301,10 @@ export class Supervisor {
 	}
 
 	private onStoreChange(task: Task, kind: string): void {
+		if (kind === "task_deleted") {
+			this.options.emitTask({ type: "deleted", taskId: task.id, board: this.board() });
+			return;
+		}
 		if (["task_report", "gate_requested", "task_queued", "task_approved", "attention_answered", "gate_decided"].includes(kind)) this.relay?.captureSources();
 		if (kind === "task_ended") this.gates?.closeTask(task.id, "Task ended.");
 		if (kind === "task_ended") void this.jobs?.killTask(task.id).catch(error => console.error("Task job cleanup failed", error));

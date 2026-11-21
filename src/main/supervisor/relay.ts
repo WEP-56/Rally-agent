@@ -2,6 +2,7 @@
 // Busy main agent gets a steer; idle main agent gets one coalesced turn after a short window.
 
 import type { ReportState, Task, TaskAttention } from "../../shared/task.ts";
+import { taskSchedule } from "../../shared/task.ts";
 import type { EventLog } from "./event-log.ts";
 import type { TaskGate } from "../../shared/gate.ts";
 import type { TaskStore } from "./task-store.ts";
@@ -65,7 +66,7 @@ export class Relay {
 	start(): void {
 		if (this.disposed) return;
 		this.captureSources();
-		for (const item of this.pending.values()) if (item.systemLine) this.main.addSystemLine(item.systemLine, item.id);
+		for (const item of this.pending.values()) if (item.systemLine && (!item.taskId || this.store.get(item.taskId))) this.main.addSystemLine(item.systemLine, item.id);
 		this.started = true;
 		this.available();
 	}
@@ -90,7 +91,7 @@ export class Relay {
 			if (event.seq <= this.cursor) continue;
 			const source = `event:${event.seq}`;
 			const task = event.data.task as Task | undefined;
-			if (task?.id && !this.sources.has(source)) {
+			if (task?.id && this.store.get(task.id) && !this.sources.has(source)) {
 				if (event.kind === "task_report") {
 					if (event.data.attentionOpened && task.attention) this.enqueue({ kind: "worker_question", task, attention: task.attention }, [source]);
 					else if (!event.data.attentionId && ["ready", "blocked", "failed", "dropped"].includes(String(event.data.state)))
@@ -202,14 +203,14 @@ export class Relay {
 		const items: RelayRecord[] = [];
 		for (const item of this.pending.values()) {
 			if ((item.kind === "notice") !== (mode === "notice") || this.submitted.has(item.id)) continue;
-			if (item.systemLine) this.main.addSystemLine(item.systemLine, item.id);
 			const task = item.taskId ? this.store.get(item.taskId) : undefined;
-			if ((item.questionId && (task?.ended || task?.attention?.id !== item.questionId)) ||
+			if ((item.taskId && !task) || (item.questionId && (task?.ended || task?.attention?.id !== item.questionId)) ||
 				(item.gateId && !task?.gates?.some((gate) => gate.id === item.gateId && !gate.decision))) {
 				this.events.append("relay_discarded", { relayId: item.id, reason: "request_no_longer_pending" });
 				this.pending.delete(item.id);
 				continue;
 			}
+			if (item.systemLine) this.main.addSystemLine(item.systemLine, item.id);
 			items.push(item);
 		}
 		if (!items.length) return;
@@ -256,6 +257,7 @@ function reportEvent(task: Task, state: ReportState, summary: string): string {
 	return [
 		`<rally-event kind="worker_report" task="${task.id}" state="${state}">`,
 		`title: ${title}`,
+		taskSchedule(task) ? `schedule occurrence: ${JSON.stringify(taskSchedule(task))}; the host owns future dispatch. Do not schedule another occurrence in response to this report.` : "",
 		`summary: ${truncate(summary, 600)}`,
 		`changed: ${changed}`,
 		`outputs: ${task.outputDir}`,

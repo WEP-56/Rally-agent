@@ -6,8 +6,18 @@ import type { WorkspaceState } from "../shared/workspace";
 import type { ServicesState } from "../shared/services";
 import type { BrowserEvent } from "../shared/browser";
 import type { TerminalEvent } from "../shared/terminal";
+import type { IdentityState } from "../shared/identity";
 
 const api: RallyApi = {
+	identity: {
+		getState: () => ipcRenderer.invoke(IpcChannel.identityState),
+		initialize: legacy => ipcRenderer.invoke(IpcChannel.identityInitialize, legacy),
+		update: patch => ipcRenderer.invoke(IpcChannel.identityUpdate, patch),
+		pickAvatar: () => ipcRenderer.invoke(IpcChannel.identityPickAvatar),
+		resetAvatar: () => ipcRenderer.invoke(IpcChannel.identityResetAvatar),
+		onChange: listener => { const handler = (_event: IpcRendererEvent, state: IdentityState) => listener(state); ipcRenderer.on(IpcEvent.identity, handler); return () => ipcRenderer.off(IpcEvent.identity, handler); },
+	},
+	schedules: { getState: () => ipcRenderer.invoke(IpcChannel.schedulesState), update: (id, enabled) => ipcRenderer.invoke(IpcChannel.schedulesUpdate, id, enabled) },
 	notifications: {
 		getState: () => ipcRenderer.invoke(IpcChannel.notificationsState),
 		update: value => ipcRenderer.invoke(IpcChannel.notificationsUpdate, value),
@@ -99,6 +109,7 @@ const api: RallyApi = {
 		approve: (taskId) => ipcRenderer.invoke(IpcChannel.tasksApprove, taskId),
 		cancel: (taskId) => ipcRenderer.invoke(IpcChannel.tasksCancel, taskId),
 		archive: (taskId, archived) => ipcRenderer.invoke(IpcChannel.tasksArchive, taskId, archived),
+		deleteArchived: taskId => ipcRenderer.invoke(IpcChannel.tasksDelete, taskId),
 		answerOption: (taskId, questionId, option) => ipcRenderer.invoke(IpcChannel.tasksAnswerOption, taskId, questionId, option),
 		setAutoApprove: (enabled) => ipcRenderer.invoke(IpcChannel.tasksApprovalMode, enabled),
 		onEvent: (listener) => {

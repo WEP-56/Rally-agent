@@ -29,7 +29,9 @@ export interface MainAgentOptions {
 	customTools?: ToolDefinition[];
 	workspace?(): WorkspaceState;
 	memory?(): string;
+	identity?(): string;
 	taskState?(): string;
+	scheduleState?(): string;
 	capabilities?(): Promise<string>;
 	segmentBytes?: number;
 	segmentCompactions?: number;
@@ -60,7 +62,9 @@ export class MainAgent {
 	private readonly models: ModelStore;
 	private readonly workspace?: () => WorkspaceState;
 	private readonly memory?: () => string;
+	private readonly identity?: () => string;
 	private readonly taskState?: () => string;
+	private readonly scheduleState?: () => string;
 	private readonly capabilities?: () => Promise<string>;
 	private readonly segmentBytes: number;
 	private readonly segmentCompactions: number;
@@ -78,7 +82,9 @@ export class MainAgent {
 		this.models = options.models;
 		this.workspace = options.workspace;
 		this.memory = options.memory;
+		this.identity = options.identity;
 		this.taskState = options.taskState;
+		this.scheduleState = options.scheduleState;
 		this.capabilities = options.capabilities;
 		this.segmentBytes = options.segmentBytes ?? 20 * 1024 * 1024;
 		this.segmentCompactions = options.segmentCompactions ?? 10;
@@ -299,6 +305,18 @@ export class MainAgent {
 			const transform = session.agent.transformContext;
 			session.agent.transformContext = async (messages, signal) => {
 				let context = transform ? await transform(messages, signal) : messages;
+				const schedules = this.scheduleState?.();
+				if (schedules) {
+					context = context.filter(message => message.role !== "custom" || message.customType !== "rally-schedules");
+					const index = Math.max(0, context.findLastIndex(message => message.role === "user"));
+					context = [...context.slice(0, index), { role: "custom" as const, customType: "rally-schedules", display: false, timestamp: Date.now(), content: schedules }, ...context.slice(index)];
+				}
+				const identity = this.identity?.();
+				if (identity) {
+					context = context.filter(message => message.role !== "custom" || message.customType !== "rally-identity");
+					const index = Math.max(0, context.findLastIndex(message => message.role === "user"));
+					context = [...context.slice(0, index), { role: "custom" as const, customType: "rally-identity", display: false, timestamp: Date.now(), content: identity }, ...context.slice(index)];
+				}
 				const capabilities = await this.capabilities?.().catch(() => "Rally capability catalog is unavailable. Ask the user to check Skills/MCP settings if needed; do not assume there are no configured capabilities.");
 				if (capabilities) {
 					const index = Math.max(0, context.findLastIndex(message => message.role === "user"));

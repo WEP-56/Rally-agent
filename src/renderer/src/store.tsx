@@ -1,4 +1,5 @@
 import { createContext, useContext } from "react";
+import { DEFAULT_IDENTITY } from "../../shared/identity";
 
 export interface Provider {
   id: string;
@@ -28,6 +29,7 @@ export interface Skill {
 export type ThemeMode = "light" | "dark" | "system";
 
 export interface Config {
+	avatar: string | null;
   name: string;
   personality: string;
   workstyle: string;
@@ -44,24 +46,22 @@ export interface Config {
 }
 
 export const ACCENTS = [
-  { name: "翡翠", value: "#10a37f" },
-  { name: "靛蓝", value: "#4f6bed" },
-  { name: "紫晶", value: "#8b5cf6" },
-  { name: "琥珀", value: "#d97706" },
-  { name: "珊瑚", value: "#e5484d" },
-  { name: "石墨", value: "#52525b" },
+  { name: "轨道靛", value: "#5b6cf0" },
+  { name: "晨雾紫", value: "#8b5cf6" },
+  { name: "海盐青", value: "#0ea5a4" },
+  { name: "琥珀", value: "#e08a1e" },
+  { name: "珊瑚", value: "#ee5a67" },
+  { name: "石墨", value: "#4b4b5c" },
 ];
 
 export const DEFAULT_CONFIG: Config = {
-  name: "Rally",
-  personality: "冷静、可靠、直截了当，偶尔带一点幽默感",
-  workstyle: "先规划后执行；把大目标拆成小任务交给工位并行处理；涉及删除或外部写入前先征求确认",
+  ...DEFAULT_IDENTITY,
   memoryPath: "C:\\Users\\you\\.rally\\memory",
   providers: [],
   rallyModel: "",
   taskModel: "",
   theme: "light",
-  accent: "#10a37f",
+  accent: "#5b6cf0",
   fontSize: "md",
   density: "cozy",
   mcp: [
@@ -130,6 +130,9 @@ export interface Tab {
 }
 
 export interface AppCtx {
+	identityReady: boolean;
+	identityError: string;
+	reloadIdentity: () => void;
   config: Config;
   setConfig: (patch: Partial<Config>) => void;
   openTab: (kind: Exclude<TabKind, "task">, opts?: { url?: string; taskId?: string }) => void;

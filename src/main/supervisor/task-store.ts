@@ -27,6 +27,7 @@ import type { EventKind, EventLog, LoggedEvent } from "./event-log.ts";
 import type { AuditLog } from "./audit.ts";
 
 export interface CreateTaskInput {
+	schedule?: Task["schedule"];
 	title: string;
 	quotes: Quote[];
 	note?: string;
@@ -54,6 +55,10 @@ export class TaskStore {
 	private readonly activities = new Map<string, ToolCall[]>();
 	private readonly conversations = new Map<string, AssistantMessageView[]>();
 	private readonly accesses = new Map<string, TaskAccess[]>();
+	private readonly deleting = new Set<string>();
+	private readonly deleted = new Set<string>();
+	private deletedJobSequence = 0;
+	private deletedServiceSequence = 0;
 
 	constructor(events: EventLog, workspaceDir: string | (() => string), onChange: (task: Task, kind: string) => void, audit?: AuditLog, recovery?: readonly LoggedEvent[]) {
 		this.events = events;
@@ -70,6 +75,37 @@ export class TaskStore {
 
 	get(id: string): Task | undefined {
 		return this.tasks.get(id);
+	}
+	isDeleted(id: string): boolean { return this.deleted.has(id); }
+	deletedResourceSequence(kind: "job" | "service"): number { return kind === "job" ? this.deletedJobSequence : this.deletedServiceSequence; }
+
+	/** Reserve the task while its live resources close; resuming/restoring is then rejected. */
+	beginDelete(taskId: string): Task {
+		this.events.assertWritable();
+		this.assertNotDeleting(taskId);
+		const task = this.require(taskId);
+		if (!task.ended || task.archivedAt === undefined) throw new TaskError("NOT_ARCHIVED", "只能彻底删除已经结束并归档的任务");
+		if (this.list().some(other => !other.ended && other.dependsOn.includes(taskId))) throw new TaskError("TASK_REFERENCED", "仍有未结束任务依赖此任务，请先处理下游任务");
+		this.deleting.add(taskId);
+		return task;
+	}
+	abortDelete(taskId: string): void { this.deleting.delete(taskId); }
+	finishDelete(taskId: string): void {
+		if (!this.deleting.has(taskId)) throw new TaskError("DELETE_NOT_STARTED", "删除操作尚未开始");
+		const task = this.require(taskId);
+		const jobSequence = Math.max(this.deletedJobSequence, ...(task.jobs ?? []).map(job => Number(job.id.slice(2)) || 0));
+		const serviceSequence = Math.max(this.deletedServiceSequence, ...(task.services ?? []).map(service => Number(service.id.slice(2)) || 0));
+		this.events.append("task_deleted", { taskId, actor: "user", nextAttention: this.nextAttention, jobSequence, serviceSequence });
+		this.deletedJobSequence = jobSequence; this.deletedServiceSequence = serviceSequence;
+		this.erase(taskId);
+		this.onChange(task, "task_deleted");
+	}
+	private erase(taskId: string): void {
+		this.deleted.add(taskId); this.deleting.delete(taskId);
+		this.tasks.delete(taskId); this.activities.delete(taskId); this.conversations.delete(taskId); this.accesses.delete(taskId);
+	}
+	private assertNotDeleting(taskId: string): void {
+		if (this.deleting.has(taskId)) throw new TaskError("TASK_DELETING", "任务正在删除，请稍后操作");
 	}
 
 	recordGate(taskId: string, gate: TaskGate, kind: "gate_requested" | "gate_escalated" | "gate_decided"): void {
@@ -99,6 +135,7 @@ export class TaskStore {
 
 	archive(taskId: string, archived: boolean): void {
 		this.events.assertWritable();
+		this.assertNotDeleting(taskId);
 		const task = this.require(taskId);
 		if (!task.ended) throw new TaskError("NOT_ENDED", "请先在主对话中结束任务，再归档");
 		if ((task.archivedAt !== undefined) === archived) return;
@@ -182,11 +219,13 @@ export class TaskStore {
 	}
 
 	create(input: CreateTaskInput): { task: Task; warnings: ScopeWarning[] } {
+		for (const id of input.dependsOn) this.assertNotDeleting(id);
 		const now = Date.now();
 		const id = `T-${this.nextTask++}`;
 		const outputDir = taskOutputDir(typeof this.workspaceDir === "function" ? this.workspaceDir() : this.workspaceDir, id, input.title);
 		const task: Task = {
 			id,
+			schedule: input.schedule,
 			dispatchKey: input.dispatchKey,
 			title: input.title,
 			quotes: input.quotes,
@@ -236,6 +275,7 @@ export class TaskStore {
 	}
 
 	update(taskId: string, patch: Partial<Pick<Task, "title" | "note" | "cwd" | "mode" | "scope" | "dependsOn">>): Task {
+		for (const id of patch.dependsOn ?? []) this.assertNotDeleting(id);
 		const task = this.require(taskId);
 		if (task.ended) throw new TaskError("ALREADY_ENDED", "任务已结束");
 		if (task.runs.length > 0) throw new TaskError("ALREADY_STARTED", "任务已开始，请用 task_steer");
@@ -246,6 +286,7 @@ export class TaskStore {
 
 	/** Resume an ended/interrupted task; the current global approval mode applies again. */
 	resume(taskId: string, input: { note?: string; quotes?: Quote[]; mode?: TaskMode; scope?: string[]; autoApprove?: boolean }): Task {
+		this.assertNotDeleting(taskId);
 		const task = this.require(taskId);
 		const last = task.runs.at(-1);
 		if (!task.ended && last?.endReason !== "interrupted" && last?.lastReport?.state !== "blocked") throw new TaskError("NOT_ENDED", "任务尚未结束，请用 task_steer");
@@ -581,7 +622,18 @@ export class TaskStore {
 	}
 
 	private replay(records: readonly LoggedEvent[]): void {
+		// Tombstones win even over late shutdown facts or cached pre-delete snapshots.
+		for (const event of records) if (event.kind === "task_deleted" && typeof event.data.taskId === "string") {
+			this.deleted.add(event.data.taskId);
+			const numeric = Number(event.data.taskId.slice(2));
+			if (Number.isFinite(numeric)) this.nextTask = Math.max(this.nextTask, numeric + 1);
+			if (typeof event.data.nextAttention === "number") this.nextAttention = Math.max(this.nextAttention, event.data.nextAttention);
+			if (typeof event.data.jobSequence === "number") this.deletedJobSequence = Math.max(this.deletedJobSequence, event.data.jobSequence);
+			if (typeof event.data.serviceSequence === "number") this.deletedServiceSequence = Math.max(this.deletedServiceSequence, event.data.serviceSequence);
+		}
 		for (const event of records) {
+			const taskId = typeof event.data.taskId === "string" ? event.data.taskId : (event.data.task as Task | undefined)?.id;
+			if (taskId && this.deleted.has(taskId)) continue;
 			if (event.kind === "access_recorded" && typeof event.data.taskId === "string" && event.data.access) {
 				const entries = this.accesses.get(event.data.taskId) ?? [];
 				entries.push(structuredClone(event.data.access as TaskAccess));

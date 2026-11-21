@@ -11,12 +11,14 @@ import { BrowserManager } from "../../../../src/main/browser.ts";
 import { TerminalManager } from "../../../../src/main/terminal.ts";
 import { TaskNotifications } from "../../../../src/main/notifications.ts";
 import { McpStore } from "../../../../src/main/mcp-store.ts";
+import { IdentityStore } from "../../../../src/main/identity-store.ts";
 
 const transport = vi.hoisted(() => ({
 	handlers: new Map<string, (...args: unknown[]) => unknown>(),
 	listeners: new Map<string, unknown>(),
 	rejectChannel: "",
 	owner: vi.fn(),
+	pick: vi.fn(),
 	notices: [] as { title: string; click?: () => void; close: ReturnType<typeof vi.fn> }[],
 }));
 vi.mock("electron", () => ({
@@ -29,7 +31,7 @@ vi.mock("electron", () => ({
 		on: (channel: string, listener: unknown) => transport.listeners.set(channel, listener),
 		removeListener: (channel: string) => transport.listeners.delete(channel),
 	},
-	app: { getAppPath: () => process.cwd() }, BrowserWindow: { getAllWindows: () => [], fromWebContents: transport.owner }, dialog: {}, shell: {},
+	app: { getAppPath: () => process.cwd() }, BrowserWindow: { getAllWindows: () => [], fromWebContents: transport.owner }, dialog: { showOpenDialog: transport.pick }, shell: {}, nativeImage: {},
 	Notification: class {
 		title: string; click?: () => void; close = vi.fn();
 		static isSupported() { return true; }
@@ -57,6 +59,46 @@ describe("Rally IPC shutdown boundary (no Electron UI)", () => {
 		const supervisor = new Supervisor(paths, { emitChat: () => {}, emitTask }); supervisors.push(supervisor);
 		return { paths, supervisor };
 	}
+	it("restricts archived task deletion to the owning main frame", async () => {
+		const { paths, supervisor } = await setup(); stops.push(registerIpc(paths, supervisor));
+		const sender = { mainFrame: {} }; transport.owner.mockReturnValue({ webContents: sender, isDestroyed: () => false });
+		const event = { sender, senderFrame: sender.mainFrame };
+		const task = supervisor.store.create({ title: "待删除", quotes: [], cwd: paths.workspaceDir, mode: "readonly", scope: [], dependsOn: [], autoApprove: false }).task;
+		const remove = transport.handlers.get(IpcChannel.tasksDelete)!;
+		await expect(remove({ sender, senderFrame: {} }, task.id)).rejects.toThrow("BROWSER_NOT_ALLOWED");
+		await expect(remove(event, {})).rejects.toThrow("无效任务编号");
+		await expect(remove(event, task.id)).rejects.toThrow("只能彻底删除");
+		supervisor.store.cancel(task.id, "system"); supervisor.archive(task.id, true);
+		await remove(event, task.id); expect(supervisor.board().tasks).toHaveLength(0);
+	});
+	it("restricts identity settings to the owning main frame and persists changes", async () => {
+		const { paths, supervisor } = await setup(); stops.push(registerIpc(paths, supervisor));
+		const sender = { mainFrame: {} }; transport.owner.mockReturnValue({ webContents: sender, isDestroyed: () => false });
+		const event = { sender, senderFrame: sender.mainFrame };
+		for (const channel of [IpcChannel.identityState, IpcChannel.identityInitialize, IpcChannel.identityUpdate, IpcChannel.identityPickAvatar, IpcChannel.identityResetAvatar]) await expect(transport.handlers.get(channel)!({ sender, senderFrame: {} })).rejects.toThrow("BROWSER_NOT_ALLOWED");
+		await transport.handlers.get(IpcChannel.identityInitialize)!(event, { name: "小莱", personality: "平实", workstyle: "短句" });
+		await transport.handlers.get(IpcChannel.identityUpdate)!(event, { personality: "清晰" });
+		expect(new IdentityStore(paths.home).state()).toMatchObject({ name: "小莱", personality: "清晰", workstyle: "短句" });
+		await expect(transport.handlers.get(IpcChannel.identityUpdate)!(event, { avatar: "https://bad" })).rejects.toThrow("无效字段");
+		transport.pick.mockResolvedValueOnce({ canceled: true, filePaths: [] });
+		expect(await transport.handlers.get(IpcChannel.identityPickAvatar)!(event)).toBeNull();
+		expect(await transport.handlers.get(IpcChannel.identityResetAvatar)!(event)).toMatchObject({ avatar: null });
+	});
+	it("restricts persisted schedule controls to the owning main frame", async () => {
+		const { paths, supervisor } = await setup();
+		stops.push(registerIpc(paths, supervisor));
+		const sender = { mainFrame: {} }; transport.owner.mockReturnValue({ webContents: sender, isDestroyed: () => false });
+		const event = { sender, senderFrame: sender.mainFrame };
+		const plan = supervisor.schedules.create({ title: "定时笔记", cwd: paths.workspaceDir, mode: "readonly", timing: { kind: "interval", minutes: 30 } }, [{ messageId: "#1", kind: "user", text: "每半小时整理笔记", at: Date.now() }]);
+		const list = transport.handlers.get(IpcChannel.schedulesState)!; const update = transport.handlers.get(IpcChannel.schedulesUpdate)!;
+		await expect(list({ sender, senderFrame: {} })).rejects.toThrow("BROWSER_NOT_ALLOWED");
+		await expect(update({ sender, senderFrame: {} }, plan.id, false)).rejects.toThrow("BROWSER_NOT_ALLOWED");
+		expect(await list(event)).toMatchObject([{ id: plan.id, enabled: true }]);
+		await expect(update(event, plan.id, "false")).rejects.toThrow("无效启停值");
+		expect(await update(event, plan.id, false)).toMatchObject([{ id: plan.id, enabled: false }]);
+		expect(supervisor.events.ofKind("schedule_changed").at(-1)?.data.source).toEqual({ actor: "user" });
+		expect(await update(event, plan.id, null)).toEqual([]);
+	});
 	it("saves MCP search disclosure through owned-frame IPC without starting a connection", async () => {
 		const { paths, supervisor } = await setup();
 		const mcp = new McpStore(paths.agentDir); mcp.save(JSON.stringify({ mcpServers: { fixture: { command: "never-execute" } } }));

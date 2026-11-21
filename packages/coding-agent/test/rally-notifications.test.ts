@@ -84,6 +84,14 @@ function setup() {
 	return { manager, task, update, file, window };
 }
 describe("task notification lifecycle", () => {
+	it("withdraws deleted task notifications and clears pending navigation", () => {
+		const { manager, task, update } = setup(); manager.start([task]);
+		update({ ended: { outcome: "done", at: 2, by: "worker" } });
+		const notice = state.shown.at(-1)!; notice.handlers.get("click")!();
+		manager.observe({ type: "deleted", taskId: task.id, board: { tasks: [], active: 0, limit: 2, autoApprove: false } });
+		expect(manager.takeTarget()).toBeNull(); expect(notice.close).toHaveBeenCalled();
+		notice.handlers.get("click")!(); expect(manager.takeTarget()).toBeNull();
+	});
 	it("suppresses startup recovery and snapshot replay, then deduplicates completion updates", () => {
 		const { manager, task, update } = setup();
 		const done = { ...task, ended: { outcome: "done" as const, at: 2, by: "worker" as const } };

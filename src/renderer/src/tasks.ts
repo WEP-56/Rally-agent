@@ -21,12 +21,14 @@ export function useTasks(): TaskBoardState {
 
 	useEffect(() => {
 		let alive = true;
+		let received = false;
 		void api.getState().then((next) => {
-			if (alive) setBoard(next);
+			if (alive && !received) setBoard(next);
 		});
 		const off = api.onEvent((event) => {
+			received = true;
 			setBoard((current) => {
-				if (event.type === "snapshot") return event.board;
+				if (event.type !== "task") return event.board;
 				const exists = current.tasks.some((task) => task.id === event.task.id);
 				const tasks = exists
 					? current.tasks.map((task) => (task.id === event.task.id ? event.task : task))
@@ -59,6 +61,7 @@ function toTask(view: TaskView): Task {
 	const status = view.status;
 	return {
 		id: view.id,
+		schedule: view.schedule,
 		archivedAt: view.archivedAt,
 		ended: Boolean(view.ended),
 		toolCalls: view.toolCalls,

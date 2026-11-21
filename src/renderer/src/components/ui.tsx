@@ -1,24 +1,44 @@
-import { useEffect, useRef, useState, type ReactNode, type ButtonHTMLAttributes, type InputHTMLAttributes, type TextareaHTMLAttributes } from "react";
 import { Check, ChevronDown } from "lucide-react";
-import { cn } from "../utils/cn";
 import { useBrowserOverlay } from "../browser-overlays";
-import rallyIcon from "../../../../icon.png";
+export { RallyMark as RallyLogo } from "./brand";
+import { useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
+import { cn } from "../utils/cn";
 
-type BtnProps = ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "ghost" | "danger"; size?: "sm" | "md" | "lg" };
+type BtnProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: "primary" | "secondary" | "ghost" | "danger" | "dark" | "glass";
+  size?: "sm" | "md" | "lg";
+};
 
 export function Button({ variant = "secondary", size = "md", className, ...p }: BtnProps) {
   return (
     <button
       {...p}
       className={cn(
-        "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-all active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none whitespace-nowrap",
-        size === "sm" && "h-7 px-2.5 text-xs",
-        size === "md" && "h-8 px-3.5 text-sm",
-        size === "lg" && "h-10 px-5 text-sm",
-        variant === "primary" && "bg-accent text-accent-fg shadow-soft hover:brightness-110",
-        variant === "secondary" && "bg-sunken text-fg hover:bg-deep dark:hover:bg-raised",
+        "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full font-medium transition-all active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40",
+        size === "sm" && "h-7 px-3 text-xs",
+        size === "md" && "h-9 px-4 text-[13px]",
+        size === "lg" && "h-11 px-6 text-sm",
+        variant === "primary" && "bg-accent text-accent-fg shadow-[0_3px_10px_color-mix(in_srgb,var(--c-accent)_26%,transparent)] hover:brightness-110",
+        variant === "dark" && "bg-ink text-white hover:bg-ink/85 dark:bg-white dark:text-ink dark:hover:bg-white/85",
+        variant === "secondary" && "bg-sunken text-fg hover:bg-deep",
+        variant === "glass" && "glass text-fg hover:brightness-[1.03]",
         variant === "ghost" && "text-muted hover:bg-hover hover:text-fg",
-        variant === "danger" && "bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/15",
+        variant === "danger" && "bg-danger/10 text-danger hover:bg-danger/15",
+        className,
+      )}
+    />
+  );
+}
+
+/** Round floating button — the "IM" style chrome used on both panes. */
+export function RoundButton({ className, active, size = 40, ...p }: ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean; size?: number }) {
+  return (
+    <button
+      {...p}
+      style={{ width: size, height: size }}
+      className={cn(
+        "glass-strong inline-flex shrink-0 items-center justify-center rounded-full text-fg/80 transition-all hover:text-fg hover:brightness-[1.04] active:scale-95",
+        active && "text-accent",
         className,
       )}
     />
@@ -30,7 +50,7 @@ export function IconButton({ className, active, ...p }: ButtonHTMLAttributes<HTM
     <button
       {...p}
       className={cn(
-        "inline-flex h-7 w-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-hover hover:text-fg active:bg-press",
+        "inline-flex h-8 w-8 items-center justify-center rounded-full text-muted transition-colors hover:bg-hover hover:text-fg active:bg-press",
         active && "bg-hover text-fg",
         className,
       )}
@@ -43,7 +63,7 @@ export function Input({ className, ...p }: InputHTMLAttributes<HTMLInputElement>
     <input
       {...p}
       className={cn(
-        "h-9 w-full rounded-lg bg-sunken px-3 text-sm text-fg placeholder:text-faint transition-all focus:bg-panel focus:shadow-[0_0_0_3px_var(--c-accent-soft),var(--s-soft)]",
+        "h-10 w-full rounded-xl bg-sunken px-3.5 text-sm text-fg shadow-[inset_0_0_0_1px_var(--c-line)] transition-all placeholder:text-faint focus:bg-panel focus:shadow-[inset_0_0_0_1px_var(--c-accent),0_0_0_4px_color-mix(in_srgb,var(--c-accent)_16%,transparent)]",
         className,
       )}
     />
@@ -55,15 +75,76 @@ export function Textarea({ className, ...p }: TextareaHTMLAttributes<HTMLTextAre
     <textarea
       {...p}
       className={cn(
-        "w-full resize-none rounded-lg bg-sunken px-3 py-2 text-sm leading-relaxed text-fg placeholder:text-faint transition-all focus:bg-panel focus:shadow-[0_0_0_3px_var(--c-accent-soft),var(--s-soft)]",
+        "w-full resize-none rounded-xl bg-sunken px-3.5 py-2.5 text-sm leading-relaxed text-fg shadow-[inset_0_0_0_1px_var(--c-line)] transition-all placeholder:text-faint focus:bg-panel focus:shadow-[inset_0_0_0_1px_var(--c-accent),0_0_0_4px_color-mix(in_srgb,var(--c-accent)_16%,transparent)]",
         className,
       )}
     />
   );
 }
 
+export function Toggle({ checked, onChange, label, disabled }: { checked: boolean; onChange: (v: boolean) => void; label?: string; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors duration-200 disabled:opacity-40",
+        checked ? "bg-accent" : "bg-fg/15",
+      )}
+    >
+      <span
+        className={cn(
+          "absolute left-[3px] top-[3px] h-5 w-5 rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.3)] transition-transform duration-200 ease-[cubic-bezier(.3,1.4,.5,1)]",
+          checked && "translate-x-[18px]",
+        )}
+      />
+    </button>
+  );
+}
+
+export function Segmented<T extends string>({
+  value,
+  onChange,
+  options,
+  className,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: { value: T; label: ReactNode }[];
+  className?: string;
+}) {
+  return (
+    <div className={cn("inline-flex rounded-full bg-fg/[0.06] p-[3px]", className)}>
+      {options.map((o) => (
+        <button
+          key={o.value}
+          onClick={() => onChange(o.value)}
+          className={cn(
+            "inline-flex h-7 items-center gap-1 rounded-full px-3 text-xs font-medium transition-all",
+            value === o.value ? "bg-panel text-fg shadow-soft" : "text-muted hover:text-fg",
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function Kbd({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <kbd className={cn("inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-fg/[0.07] px-1.5 font-mono text-[10.5px] font-medium text-muted", className)}>
+      {children}
+    </kbd>
+  );
+}
+
 export function useClickOutside<T extends HTMLElement>(open: boolean, onClose: () => void) {
-	useBrowserOverlay(open);
+  useBrowserOverlay(open);
   const ref = useRef<T>(null);
   useEffect(() => {
     if (!open) return;
@@ -79,6 +160,10 @@ export function useClickOutside<T extends HTMLElement>(open: boolean, onClose: (
     };
   }, [open, onClose]);
   return ref;
+}
+
+export function Eyebrow({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn("text-[11px] font-semibold uppercase tracking-[0.14em] text-faint", className)}>{children}</div>;
 }
 
 export interface Opt {
@@ -137,43 +222,4 @@ export function Select({ value, options, onChange, placeholder = "请选择", cl
       )}
     </div>
   );
-}
-
-export function Toggle({ checked, onChange, disabled, label }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label?: string }) {
-  return (
-    <button
-      role="switch" aria-checked={checked} aria-label={label} disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors", checked ? "bg-accent" : "bg-press")}
-    >
-      <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-soft transition-all", checked ? "left-[18px]" : "left-0.5")} />
-    </button>
-  );
-}
-
-export function Segmented<T extends string>({ value, options, onChange }: { value: T; options: { value: T; label: ReactNode }[]; onChange: (v: T) => void }) {
-  return (
-    <div className="inline-flex rounded-lg bg-sunken p-0.5">
-      {options.map((o) => (
-        <button
-          key={o.value}
-          onClick={() => onChange(o.value)}
-          className={cn(
-            "flex h-7 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-all",
-            value === o.value ? "bg-raised text-fg shadow-soft" : "text-muted hover:text-fg",
-          )}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-export function Kbd({ children }: { children: ReactNode }) {
-  return <span className="rounded bg-sunken px-1.5 py-px font-mono text-[10px] text-faint">{children}</span>;
-}
-
-export function RallyLogo({ size = 28, className }: { size?: number; className?: string }) {
-  return <img src={rallyIcon} alt="Rally" width={size} height={size} draggable={false} className={cn("shrink-0 object-contain", className)} style={{ width: size, height: size }} />;
 }

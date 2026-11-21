@@ -22,7 +22,7 @@ export function TerminalView({ id, taskId, visible }: { id: string; taskId?: str
     term.loadAddon(fitter); term.loadAddon(finder); term.loadAddon(new Unicode11Addon()); term.unicode.activeVersion = "11";
     term.loadAddon(new WebLinksAddon((event, url) => { if (event.ctrlKey || event.metaKey) void api.openLink(url).catch(reason => setError(String(reason))); }));
     term.open(element);
-    const applyTheme = () => { const css = getComputedStyle(element); term.options.theme = { background: css.getPropertyValue("--c-term").trim(), foreground: css.getPropertyValue("--c-fg").trim(), cursor: css.getPropertyValue("--c-accent").trim(), selectionBackground: "#80808055" }; };
+    const applyTheme = () => { const css = getComputedStyle(element); term.options.theme = { background: "#14141f", foreground: "#e4e4ee", cursor: css.getPropertyValue("--c-accent").trim(), selectionBackground: "#80808055" }; };
     applyTheme(); const themeObserver = new MutationObserver(applyTheme); themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
     const resize = () => { if (shown.current && element.clientWidth > 0 && element.clientHeight > 0) fitter.fit(); };
     resize(); const observer = new ResizeObserver(resize); observer.observe(element);
@@ -54,7 +54,7 @@ export function TerminalView({ id, taskId, visible }: { id: string; taskId?: str
   }, [id, taskId]);
   useEffect(() => { if (visible) { fit.current?.fit(); if (!finding) terminal.current?.focus(); } }, [visible, finding, config.fontSize]);
   const find = (backward = false) => { if (query) { if (backward) search.current?.findPrevious(query); else search.current?.findNext(query); } };
-  return <div className="flex h-full flex-col bg-term">
+  return <div className="flex h-[calc(100%_-_24px)] flex-col rounded-[22px] bg-term m-3 overflow-hidden shadow-float">
     <div className="flex h-9 shrink-0 items-center gap-2 px-4 text-[11px] text-faint">
       <span>{state?.shell ?? "终端"}</span><span className="min-w-0 flex-1 truncate" title={state?.cwd}>初始目录：{state?.cwd ?? "正在启动…"}</span>
       <IconButton title="查找 (Ctrl+F)" onClick={() => setFinding(value => !value)}><Search size={13} /></IconButton>

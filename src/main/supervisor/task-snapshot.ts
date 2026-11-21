@@ -88,6 +88,13 @@ export class TaskSnapshot {
 
 function orderedRecord(event: LoggedEvent): boolean { return event.kind === "assistant_message" || event.kind === "tool_activity"; }
 function retain(records: Map<string, LoggedEvent>, key: string, event: LoggedEvent): void {
+	const taskId = typeof event.data.taskId === "string" ? event.data.taskId : (event.data.task as { id?: string } | undefined)?.id;
+	if (taskId) {
+		if (records.get(JSON.stringify(["task", taskId]))?.kind === "task_deleted") return;
+		if (event.kind === "task_deleted") for (const [priorKey, prior] of records) {
+			if (prior.data.taskId === taskId || (prior.data.task as { id?: string } | undefined)?.id === taskId) records.delete(priorKey);
+		}
+	}
 	// Replay upserts preserve first-seen order even when an older message/tool finishes later.
 	const prior = records.get(key);
 	if (prior && orderedRecord(event) && !records.has(`${key}:first`)) records.set(`${key}:first`, prior);
@@ -97,6 +104,7 @@ function retain(records: Map<string, LoggedEvent>, key: string, event: LoggedEve
 /** Mirror TaskStore replay precedence. Each retained record contains the complete latest value. */
 function projectionKey(event: LoggedEvent): string | undefined {
 	const { data, kind } = event;
+	if (kind === "task_deleted" && typeof data.taskId === "string") return JSON.stringify(["task", data.taskId]);
 	if (kind === "access_recorded" && typeof data.taskId === "string" && data.access) {
 		const access = data.access as { toolCallId: string; kind: string; target: string };
 		return JSON.stringify(["access", data.taskId, access.toolCallId, access.kind, access.target]);

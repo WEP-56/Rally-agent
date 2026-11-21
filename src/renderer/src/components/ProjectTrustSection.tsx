@@ -28,7 +28,7 @@ export function ProjectTrustSection() {
 		})}><FolderInput size={14} />选择并信任项目</Button>
 		{error && <p role="alert" className="mt-4 break-words text-xs text-red-500">{error}</p>}
 		<div className="mt-5 flex flex-col gap-2">
-			{state?.projects.map((entry) => <div key={entry.path} className="flex items-center gap-3 rounded-2xl bg-sunken p-4">
+			{state?.projects.map((entry) => <div key={entry.path} className="glass flex items-center gap-3 rounded-[22px] p-4">
 				<ShieldCheck size={18} className={entry.decision ? "shrink-0 text-accent" : "shrink-0 text-faint"} />
 				<div className="min-w-0 flex-1">
 					<div className="break-all font-mono text-xs">{entry.path}</div>

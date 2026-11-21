@@ -16,6 +16,8 @@ import { httpAddress } from "../shared/browser.ts";
 import type { TerminalSize } from "../shared/terminal.ts";
 import { TerminalManager } from "./terminal.ts";
 import type { TaskNotifications } from "./notifications.ts";
+import type { IdentityState } from "../shared/identity.ts";
+import { readAvatar } from "./identity-avatar.ts";
 
 /** Register all IPC handlers. Call once after app ready. */
 export function registerIpc(paths: RallyPaths, supervisor: Supervisor, notifications?: TaskNotifications): () => Promise<void> {
@@ -74,6 +76,24 @@ export function registerIpc(paths: RallyPaths, supervisor: Supervisor, notificat
 		handle(IpcChannel.browserLayout, (event, layout: BrowserLayout) => browser.layout(browser.owner(event), layout));
 		handle(IpcChannel.browserClose, (event, id: string) => browser.close(browser.owner(event), id));
 		const chat = supervisor.main;
+		const publishIdentity = (state: IdentityState) => {
+			for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed()) win.webContents.send(IpcEvent.identity, state);
+			return state;
+		};
+		handle(IpcChannel.identityState, event => { browser.owner(event); return supervisor.identity.state(); });
+		handle(IpcChannel.identityInitialize, (event, legacy: unknown) => { browser.owner(event); return publishIdentity(supervisor.identity.initialize(legacy)); });
+		handle(IpcChannel.identityUpdate, (event, patch: unknown) => { browser.owner(event); return publishIdentity(supervisor.identity.update(patch)); });
+		handle(IpcChannel.identityResetAvatar, event => { browser.owner(event); return publishIdentity(supervisor.identity.setAvatar(null)); });
+		handle(IpcChannel.identityPickAvatar, async event => {
+			const owner = browser.owner(event);
+			const selected = await dialog.showOpenDialog(owner, { title: "选择头像", filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "webp"] }], properties: ["openFile"] });
+			if (selected.canceled || !selected.filePaths[0]) return null;
+			if (closing) throw new Error("Rally is shutting down");
+			browser.owner(event);
+			return publishIdentity(supervisor.identity.setAvatar(readAvatar(selected.filePaths[0])));
+		});
+		handle(IpcChannel.schedulesState, (event) => { browser.owner(event); return supervisor.schedules.list(); });
+		handle(IpcChannel.schedulesUpdate, (event, id: string, enabled: boolean | null) => { browser.owner(event); return supervisor.schedules.update(id, enabled); });
 		handle(IpcChannel.servicesState, () => supervisor.services.state());
 		handle(IpcChannel.servicesStop, async (_event, id: unknown) => {
 			if (typeof id !== "string" || !/^S-\d+$/.test(id)) throw new Error("SERVICE_NOT_FOUND");
@@ -169,6 +189,11 @@ export function registerIpc(paths: RallyPaths, supervisor: Supervisor, notificat
 		handle(IpcChannel.tasksApprove, (_event, taskId: unknown) => supervisor.approve(String(taskId)));
 		handle(IpcChannel.tasksCancel, (_event, taskId: unknown) => supervisor.cancel(String(taskId)));
 		handle(IpcChannel.tasksArchive, (event, taskId: string, archived: boolean) => { browser.owner(event); return supervisor.archive(taskId, archived); });
+		handle(IpcChannel.tasksDelete, (event, taskId: unknown) => {
+			browser.owner(event);
+			if (typeof taskId !== "string") throw new Error("无效任务编号");
+			return supervisor.deleteArchived(taskId);
+		});
 		handle(IpcChannel.tasksAnswerOption, (_event, taskId: unknown, questionId: unknown, option: unknown) => {
 			if (typeof taskId !== "string" || typeof questionId !== "string" || typeof option !== "string") throw new Error("ANSWER_INVALID: 回答参数无效");
 			return supervisor.answerOption(taskId, questionId, option);

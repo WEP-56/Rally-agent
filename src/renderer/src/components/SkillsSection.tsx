@@ -40,7 +40,7 @@ export function SkillsSection() {
 		{!state && !error && <p className="text-xs text-faint">正在读取 skills…</p>}
 		{state && !list.length && <p className="text-xs text-faint">{query ? "没有匹配的 skills" : "尚未发现 skills，可从本地目录导入。"}</p>}
 		<fieldset disabled={busy} className="grid min-w-0 grid-cols-1 gap-2 lg:grid-cols-2">
-			{list.map((skill) => <div key={skill.path} className="flex items-start gap-3 rounded-2xl bg-sunken p-4 transition-shadow hover:shadow-soft">
+			{list.map((skill) => <div key={skill.path} className="glass flex items-start gap-3 rounded-[22px] p-4 transition-shadow hover:shadow-soft">
 				<div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", skill.enabled ? "bg-accent-soft text-accent" : "bg-panel text-faint dark:bg-raised")}><Wand2 size={16} /></div>
 				<div className="min-w-0 flex-1">
 					<div className="truncate font-mono text-[13px] font-medium" title={skill.name}>{skill.name}</div>

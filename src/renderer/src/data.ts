@@ -36,6 +36,7 @@ export type TaskMsg =
   | { role: "tools"; steps: ToolStep[] };
 
 export interface Task {
+	schedule?: { id: string; dueAt: number };
 	archivedAt?: number;
 	ended?: boolean;
 	gates?: TaskGate[];

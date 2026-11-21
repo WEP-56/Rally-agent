@@ -1,7 +1,7 @@
 // Electron main entry: single-instance lock, Rally paths, main window. `RALLY_SMOKE=1` runs the M0 smoke check and exits.
 
 import { join } from "node:path";
-import { app, BrowserWindow, dialog, nativeTheme, shell } from "electron";
+import { app, BrowserWindow, dialog, nativeTheme, screen, shell } from "electron";
 import { broadcastChat, broadcastTask, broadcastWorkspace, broadcastServices, forwardWindowState, registerIpc } from "./ipc.ts";
 import { ensureRallyDirs, resolveRallyPaths } from "./paths.ts";
 import { runSmoke } from "./smoke.ts";
@@ -91,11 +91,15 @@ function createMainWindow(): BrowserWindow {
 	if (process.platform === "win32") app.setAppUserModelId(APP_ID);
 	const dark = nativeTheme.shouldUseDarkColors;
 	// Frameless: the renderer draws the prototype's title bar and window controls (IPC in ipc.ts).
+	const workArea = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+	const width = Math.min(1360, Math.floor(workArea.width * 0.9));
+	const height = Math.min(860, Math.floor(workArea.height * 0.9));
 	const win = new BrowserWindow({
-		width: 1360,
-		height: 860,
-		minWidth: 960,
-		minHeight: 600,
+		width, height,
+		x: workArea.x + Math.floor((workArea.width - width) / 2),
+		y: workArea.y + Math.floor((workArea.height - height) / 2),
+		minWidth: Math.min(960, width),
+		minHeight: Math.min(600, height),
 		show: false,
 		frame: false,
 		title: "Rally",
@@ -111,7 +115,6 @@ function createMainWindow(): BrowserWindow {
 
 	forwardWindowState(win);
 	win.once("ready-to-show", () => {
-		win.maximize();
 		win.show();
 	});
 

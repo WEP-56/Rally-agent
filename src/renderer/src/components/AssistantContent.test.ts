@@ -26,18 +26,19 @@ describe("Rally conversation rendering (no browser)", () => {
 		expect(html).not.toContain("COLLAPSED_TOOL_OUTPUT");
 	});
 
-	it("keeps thinking-only main messages visible and retains intermediate assistant text", () => {
+	it("hides router thinking and tool records while retaining intermediate assistant text", () => {
 		const html = renderToStaticMarkup(createElement(ChatPanel, {
 			messages: [
 				{ id: "1", role: "assistant", text: "", blocks: [{ type: "thinking", text: "THINKING_ONLY_MESSAGE" }] },
 				{ id: "2", role: "assistant", text: "INTERMEDIATE_MESSAGE", blocks: [{ type: "text", text: "INTERMEDIATE_MESSAGE" }] },
-				{ id: "3", role: "assistant", text: "" },
+				{ id: "3", role: "assistant", text: "", blocks: [{ type: "tool", toolCallId: "hidden" }], toolCalls: [{ id: "hidden", name: "read", input: "hidden.txt", startedAt: 1, status: "running" }] },
 			], tasks: [], busy: false, onSend: () => {}, onStop: () => {}, onNewChat: () => {}, rightOpen: true,
 			onToggleRight: () => {}, models: [], model: null, thinkingLevel: null, onSelectModel: () => {}, autoApprove: false, onAutoApprove: async () => {},
 		}));
-		expect(html).toContain("THINKING_ONLY_MESSAGE");
+		expect(html).not.toContain("THINKING_ONLY_MESSAGE");
 		expect(html).toContain("INTERMEDIATE_MESSAGE");
-		expect(html.match(/class="animate-rise min-w-0 text-sm leading-relaxed"/g)).toHaveLength(1);
+		expect(html).not.toContain("已读取");
+		expect(html).not.toContain("思考过程");
 		expect(html).not.toContain("正在规划");
 	});
 

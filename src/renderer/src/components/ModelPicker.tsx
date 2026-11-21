@@ -60,7 +60,7 @@ export function ModelPicker({
 				type="button"
 				onClick={() => setOpen((v) => !v)}
 				className={cn(
-					"flex h-7 max-w-[190px] items-center gap-1 rounded-md px-2 text-xs text-muted transition-colors hover:bg-hover hover:text-fg",
+					"flex h-8 max-w-[190px] items-center gap-1.5 rounded-full px-2.5 text-[12.5px] text-muted transition-colors hover:bg-hover hover:text-fg",
 					open && "bg-hover text-fg",
 				)}
 				title={current ? `${current.providerName} · ${current.id}` : "选择模型"}
@@ -69,7 +69,7 @@ export function ModelPicker({
 				<ChevronDown size={13} className={cn("shrink-0 text-faint transition-transform", open && "rotate-180")} />
 			</button>
 			{open && (
-				<div className={cn("animate-pop absolute z-50 flex rounded-xl bg-raised p-1.5 shadow-pop", direction === "up" ? "bottom-full left-0 mb-1.5" : "top-full right-0 mt-1.5")}>
+				<div className={cn("glass-strong animate-pop absolute z-50 flex rounded-2xl p-1.5 shadow-pop", direction === "up" ? "bottom-full left-0 mb-1.5" : "top-full right-0 mt-1.5")}>
 					<div className="max-h-72 w-60 overflow-auto">
 						{models.length === 0 && (
 							<div className="px-2.5 py-3 text-[11px] leading-relaxed text-faint">

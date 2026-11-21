@@ -38,6 +38,7 @@ export class ServiceManager {
 	private disposal?: Promise<void>;
 	constructor(options: ServiceOptions) {
 		this.options = options;
+		this.sequence = options.store.deletedResourceSequence("service");
 		for (const item of this.state().services) this.sequence = Math.max(this.sequence, Number(item.id.slice(2)) || 0);
 		if (existsSync(options.directory)) for (const file of readdirSync(options.directory)) this.sequence = Math.max(this.sequence, Number(/^S-(\d+)\.log$/.exec(file)?.[1]) || 0);
 	}

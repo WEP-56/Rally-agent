@@ -1,5 +1,7 @@
+import { AgentAvatar } from "./AgentAvatar";
+import { Critter } from "./brand";
 import { useEffect, useState } from "react";
-import { Plus, X, Globe, SquareTerminal, IdCard, ChevronRight } from "lucide-react";
+import { Plus, X, Globe, SquareTerminal, IdCard, ChevronRight, PanelRightClose } from "lucide-react";
 import type { Tab } from "../store";
 import { useApp } from "../store";
 import type { Task } from "../data";
@@ -8,8 +10,8 @@ import { Workstation } from "./Workstation";
 import { TaskView } from "./TaskView";
 import { BrowserView } from "./BrowserView";
 import { TerminalView } from "./TerminalView";
-import { StatusIcon, timeAgo } from "./status";
-import { Kbd } from "./ui";
+import { timeAgo } from "./status";
+import { Kbd, RoundButton } from "./ui";
 
 export const KIND_META = {
   workstation: { icon: IdCard, title: "Rally 的工位", desc: "名片与任务列表，查看每个任务的上下文", key: "Ctrl+1" },
@@ -19,26 +21,25 @@ export const KIND_META = {
 
 type NewKind = keyof typeof KIND_META;
 
-function Launcher({ onPick, tasks, compact }: { onPick: (k: NewKind) => void; tasks: Task[]; compact?: boolean }) {
+function Launcher({ onPick, tasks }: { onPick: (k: NewKind) => void; tasks: Task[] }) {
   const { openTask } = useApp();
   const recent = tasks.filter(task => task.archivedAt === undefined).sort((a, b) => b.createdAt - a.createdAt).slice(0, 3);
   return (
     <div>
-      <div className={cn("grid gap-2", compact ? "grid-cols-3" : "grid-cols-1 sm:grid-cols-3")}>
+      <div className="flex flex-col gap-0.5">
         {(Object.keys(KIND_META) as NewKind[]).map((k) => {
           const M = KIND_META[k];
           return (
             <button
               key={k}
               onClick={() => onPick(k)}
-              className="group flex flex-col items-start rounded-xl bg-sunken p-3.5 text-left transition-all hover:bg-raised hover:shadow-card active:scale-[0.98]"
+              className="group flex w-full items-center gap-3 rounded-2xl px-2.5 py-2.5 text-left transition-colors hover:bg-fg/[0.05]"
             >
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent-soft text-accent">
+              <div className="flex w-5 shrink-0 items-center justify-center text-accent">
                 <M.icon size={18} strokeWidth={1.8} />
               </div>
-              <div className="mt-3 text-sm font-medium">{M.title}</div>
-              <div className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-faint">{M.desc}</div>
-              <div className="mt-2.5"><Kbd>{M.key}</Kbd></div>
+              <div className="min-w-0 flex-1"><div className="text-[13.5px] font-medium">{M.title}</div><div className="mt-0.5 truncate text-[11.5px] text-faint">{M.desc}</div></div>
+              <Kbd>{M.key}</Kbd>
             </button>
           );
         })}
@@ -47,7 +48,7 @@ function Launcher({ onPick, tasks, compact }: { onPick: (k: NewKind) => void; ta
       <div className="mt-1.5 flex flex-col gap-0.5">
         {recent.map((t) => (
           <button key={t.id} onClick={() => openTask(t.id)} className="group flex items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-hover">
-            <StatusIcon status={t.status} size={14} />
+            <Critter seed={t.id} size={26} />
             <span className="flex-1 truncate text-[13px]">{t.title}</span>
             <span className="text-[11px] text-faint">{timeAgo(t.createdAt)}</span>
             <ChevronRight size={13} className="text-faint" />
@@ -68,6 +69,7 @@ export function RightPanel({
   tasks,
   onMention,
   renameTab,
+  onCollapse,
 }: {
 	visible?: boolean;
   tabs: Tab[];
@@ -78,6 +80,7 @@ export function RightPanel({
   tasks: Task[];
   onMention: (t: Task) => void;
   renameTab: (id: string, title: string) => void;
+  onCollapse: () => void;
 }) {
   const [drawer, setDrawer] = useState(false);
   useEffect(() => {
@@ -93,9 +96,11 @@ export function RightPanel({
   };
 
   return (
-    <div className="relative flex h-full min-w-0 flex-col">
+    <div className="stage relative flex h-full min-w-0 flex-col overflow-hidden rounded-[28px]">
       {/* tab strip */}
-      <div className="no-scrollbar flex h-10 shrink-0 items-end gap-0.5 overflow-x-auto bg-deep px-2 pt-1.5">
+      <div className="drag relative z-10 flex h-16 shrink-0 items-center justify-center px-16">
+        <div className="no-drag glass-strong flex min-w-0 max-w-full items-center gap-0.5 rounded-full p-1">
+        <div className="no-scrollbar flex min-w-0 items-center gap-0.5 overflow-x-auto">
         {tabs.map((t) => {
           const isActive = t.id === active;
           const task = t.taskId ? tasks.find((x) => x.id === t.taskId) : undefined;
@@ -104,29 +109,24 @@ export function RightPanel({
             <div
               key={t.id}
               onMouseDown={(e) => {
-                if (e.button === 1) {
+                if (e.button === 1 && t.kind !== "workstation") {
                   e.preventDefault();
                   closeTab(t.id);
                 }
               }}
               onClick={() => setActive(t.id)}
               className={cn(
-                "group relative flex h-[34px] min-w-[96px] max-w-[200px] flex-1 items-center gap-2 rounded-t-[10px] px-3 text-[12.5px] transition-colors",
-                isActive ? "z-10 bg-panel text-fg" : "text-muted hover:text-fg",
+                "group relative flex h-[30px] shrink-0 min-w-[64px] max-w-[160px] items-center gap-1.5 rounded-full px-3 text-[12px] transition-colors",
+                isActive ? "z-10 bg-ink text-white shadow-soft dark:bg-white dark:text-ink" : "text-muted hover:text-fg",
               )}
             >
               {!isActive && <span className="pointer-events-none absolute inset-x-0.5 bottom-1 top-0 rounded-lg transition-colors group-hover:bg-hover" />}
-              {isActive && (
-                <>
-                  <span className="pointer-events-none absolute -left-2.5 bottom-0 h-2.5 w-2.5" style={{ background: "radial-gradient(circle at 0 0, transparent 9.5px, var(--c-panel) 10px)" }} />
-                  <span className="pointer-events-none absolute -right-2.5 bottom-0 h-2.5 w-2.5" style={{ background: "radial-gradient(circle at 100% 0, transparent 9.5px, var(--c-panel) 10px)" }} />
-                </>
-              )}
+
               <span className={cn("relative flex shrink-0 items-center", !isActive && "-translate-y-0.5")}>
-                {task ? <StatusIcon status={task.status} size={13} /> : Icon && <Icon size={13} strokeWidth={1.9} />}
+                {task ? <Critter seed={task.id} size={19} /> : t.kind === "workstation" ? <AgentAvatar size={17} /> : Icon && <Icon size={13} strokeWidth={1.9} />}
               </span>
-              <span className={cn("relative flex-1 truncate", !isActive && "-translate-y-0.5")}>{t.title}</span>
-              <button
+              <span className={cn("relative flex-1 truncate", !isActive && "-translate-y-0.5")}>{t.kind === "workstation" ? "工位" : t.kind === "task" ? t.taskId : t.title}</span>
+              {t.kind !== "workstation" && <button
                 onClick={(e) => {
                   e.stopPropagation();
                   closeTab(t.id);
@@ -137,25 +137,28 @@ export function RightPanel({
                 )}
               >
                 <X size={12} />
-              </button>
+              </button>}
             </div>
           );
         })}
+        </div>
         <button
           onClick={() => setDrawer((v) => !v)}
-          className={cn("mb-1.5 ml-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted transition-all hover:bg-hover hover:text-fg", drawer && "rotate-45 bg-hover text-fg")}
+          className={cn("ml-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted transition-all hover:bg-hover hover:text-fg", drawer && "rotate-45 bg-hover text-fg")}
           title="新标签页"
         >
           <Plus size={16} />
         </button>
+        </div>
+        <RoundButton size={36} className="no-drag absolute right-3.5" title="收起右侧栏 (Ctrl+B)" onClick={onCollapse}><PanelRightClose size={15} strokeWidth={1.8} /></RoundButton>
       </div>
 
       {/* content */}
-      <div className="relative min-h-0 flex-1 bg-panel">
+      <div className="relative z-10 min-h-0 flex-1">
         {tabs.map((t) => {
           const task = t.taskId ? tasks.find((x) => x.id === t.taskId) : undefined;
           return (
-            <div key={t.id} className={cn("absolute inset-0", t.id !== active && "invisible")}>
+            <div key={t.id} className={cn("absolute inset-0", t.id !== active && "hidden")}>
               {t.kind === "workstation" && <Workstation tasks={tasks} />}
               {t.kind === "task" && task && <TaskView task={task} onMention={onMention} />}
               {t.kind === "browser" && <BrowserView id={t.id} visible={visible && t.id === active && !drawer} initialUrl={t.url} onTitle={(s) => renameTab(t.id, s)} />}
@@ -177,12 +180,12 @@ export function RightPanel({
         {drawer && (
           <>
             <div className="animate-fade absolute inset-0 z-20 bg-black/[0.06] dark:bg-black/30" onClick={() => setDrawer(false)} />
-            <div className="animate-drawer absolute inset-x-2 top-2 z-30 rounded-2xl bg-raised p-3.5 shadow-pop">
+            <div className="glass-strong animate-pop absolute right-4 top-0 z-30 w-[340px] max-w-[calc(100%_-_32px)] rounded-3xl p-2 shadow-pop">
               <div className="mb-3 flex items-center justify-between px-1">
                 <span className="text-[13px] font-semibold">打开新标签页</span>
                 <Kbd>Esc</Kbd>
               </div>
-              <Launcher compact onPick={pick} tasks={tasks} />
+              <Launcher onPick={pick} tasks={tasks} />
             </div>
           </>
         )}

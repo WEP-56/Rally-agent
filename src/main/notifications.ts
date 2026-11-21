@@ -82,6 +82,12 @@ export class TaskNotifications {
 		this.started = true;
 	}
 	observe(event: TaskEvent): void {
+		if (event.type === "deleted") {
+			for (const [key, item] of this.active) if (item.taskId === event.taskId) this.dismiss(key);
+			if (this.pending?.taskId === event.taskId) this.pending = null;
+			this.seen.delete(event.taskId);
+			return;
+		}
 		if (!this.started || this.disposed || event.type !== "task") return;
 		try {
 			const task = event.task;
