@@ -1,6 +1,26 @@
 # Rally 开发交接（更新 2026-11-21）
 
-## 最新交接点（2026-11-21，正式发布、VPS 更新与 Windows 修复）
+## 最新交接点（2026-11-21，附件实测反馈与下一会话任务）
+
+**新会话先读本节。用户要求本轮更新 README 和交接文档，下面四项留到新会话执行；旧章节中的“下一对话任务”是历史计划。产品决定仍以 `docs/superagent/00-问答记录.md` 的最新追加为准。**
+
+- 用户已实测新增附件系统，**仅发现 Android 附件上传问题**：点击添加附件后，文件选择器无响应；安卓模拟器和真机均复现。其它附件能力没有新增问题反馈，不能再笼统写为“整套附件尚未实测”。本轮未复现或修复此问题，根因待检查。
+- 用户已连接 Android 模拟器 ADB：`127.0.0.1:5555`。新会话先用 `adb devices -l` 核对连接，再针对该设备复现、看日志，验证选择文件到完成上传的链路。不要把旧的 JSDOM/桥接测试通过当作 Android 原生文件选择器已通过。
+- 用户提供的截图为 `docs/Windows.png` 和 `docs/Android.jpg`，README 已加入 Windows 工作台与 Android 对话演示，原图未修改；README/附件指南已标明 Android 上传已知问题。
+- 代码基线为已推送的 `514f335`：Windows 任务栏修复及开机自启已在源码中，尚未进安装包。现有 `v0.1.0` 已正式发布，tag 为 `291ad0e`，VPS 已直接更新且未创建备份。当前文档/截图改动尚未提交；新会话先检查 `git status`，不要遗漏用户提供的图片。
+
+### 新会话任务（按用户列出的顺序）
+
+1. **检查并修复 Android 附件上传。**复现“点击后无反应”，定位页面点击、GeckoView 文件提示、Android 系统选择器及结果回传中的具体断点，再验证单选/多选、取消后重选、上传和跨端显示。入口：`src/renderer/src/components/ChatPanel.tsx` 的隐藏 file input 与附件按钮、`src/renderer/src/attachments.ts`、`src/renderer/src/connection.ts`、`android/src/dev/rally/mobile/MainActivity.java` 的 `onFilePrompt` / `onActivityResult`、`android/extension/bridge.js`。**修复后仅提交推送代码，不发布更新、不改 tag、不替换 v0.1.0 产物。**调试构建与设备验证不等于发布新版本。
+2. **新增 `image_gen` 工具和设置 →「其它提供商」。**仅兼容标准 OpenAI 图像生成 API；支持配置兼容该协议的第三方地址与 Key，不扩展私有生图协议。支持配置多个图像生成模型并持久保存首选生图模型。主 Agent 和 Worker 均可用，生成结果接入已有附件资源库、展示、预览、下载和任务汇报。主 Agent 系统提示词必须明确：**单次、单个图片生成任务可以在主对话进行；批量生成、设计行为必须发布任务。**这是对原主 Agent 只读工具边界的明确补充，不开放通用写文件或 shell。
+3. **新增 `web_search` 工具。**在同一个「其它提供商」页配置多个当前热门第三方网络搜索厂商的 Key，并设置首选厂商。具体厂商尚未确定，实施时查询当时的官方资料再选型，不把文档里的候选当成已支持。沿用既定联网工具边界，主 Agent 和 Worker 可搜索；与已有 `fetch_page` / `http_request` 分工。界面保持现有设计 token，配置沿用本地/云端的存储和密钥保护边界。
+4. **调研 [PiBot](https://github.com/w01fb0ss/PiBot)。**包括其 APP 连接与浏览器使用实现，梳理连接/配对/鉴权/通信及浏览器调用路径、可复用部分、差异与许可，形成有源码依据的结论。此项当前仅为调研要求，不预设迁移 Rally 架构或直接复制实现；本轮未开展仓库调研。
+
+后两类工具的接入参考：`src/main/prompts.ts`、`src/main/supervisor/{router-tools,tools,network-tools,resource-tools}.ts`；设置与配置参考 `src/renderer/src/components/Settings.tsx`、`src/main/model-store.ts`、`src/main/cloud/{commands,vault}.ts`，主渲染通信仍统一声明在 `src/shared/ipc.ts`。服务商列表、请求字段和错误处理在新会话查阅官方资料后确定；不要把新增工具写成已实现。
+
+本轮只改文档和引用现有图片，未运行代码构建、设备操作或供应商调用。后续代码检查遵守 AGENTS.md：必要的构建、`npm run typecheck` 与单文件离线测试；根两份模型测试的已知错误单独说明，禁止全量 Vitest。界面视觉仍按项目约定由用户验收。
+
+## 上一交接点（2026-11-21，正式发布、VPS 更新与 Windows 修复）
 
 用户授权将现有 `v0.1.0` 草稿转正式、直接更新 VPS，并要求 Windows 两项修复只提交推送，随下一次版本更新交付。以下状态覆盖后文历史记录中的“草稿未发布”“VPS 未更新”。
 
@@ -66,7 +86,7 @@
 - 机器接入资料、ADB/SSH 辅助脚本、部署凭据和签名仅留本机忽略目录或用户指定文件，不写入公开仓库。此工作区 `.artifacts/vps.py` / `.artifacts/vps-access.txt` 可供已获授权的后续运维使用，不输出其中密钥。ADB 设备标识为 `127.0.0.1:5555`，调试工具使用明确设备选择。
 - **当前 GitHub workflow 已有**：匹配 package 版本的 `v*` tag 触发 Windows/Linux/Android 构建并创建草稿 Release、附 SHA256SUMS；当前 Android 仍为通用包。未发 tag、未发布 Release、未声称 GitHub 执行成功；正式 Android 签名需仓库 Secrets `ANDROID_KEYSTORE_BASE64` / `ANDROID_KEY_ALIAS` / `ANDROID_STORE_PASSWORD` / `ANDROID_KEY_PASSWORD`。
 
-### 下一对话任务（用户明确指定，按顺序推进）
+### 历史任务（当时用户指定；当前任务以文档顶部为准）
 
 1. **Windows 首次引导和运行模式 UI。**把本地/云端选择纳入完整首次体验；设置 → 运行模式应清楚显示当前模式、当前连接与两种模式的切换入口。现有 `ConnectionForm` 只是基础功能表单，用户认为非常粗糙。保持现有风格；Android 始终只有云端。不要为了改 UI 破坏已验收的模式隔离、换服验证或本地任务退出行为。
 2. **完整附件系统，先精细设计再实现。**覆盖 Windows 本地图片粘贴/拖拽；Windows 和 Android 云端文件上传；Agent 接收、生成与展示图片/文件；消息中的附件 UI；点击新建右侧预览标签；云端文件下载到本机。用户进一步强调未来很可能产生**图片、视频、音频的生成与交换**，不能只按一次性“上传按钮”设计。详细设计检查点见下一节。
