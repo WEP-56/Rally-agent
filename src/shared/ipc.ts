@@ -126,6 +126,7 @@ export const IpcChannel = {
 	windowIsMaximized: "window:is-maximized",
 	desktopState: "desktop:state",
 	desktopUpdate: "desktop:update",
+	desktopSetOpenAtLogin: "desktop:setOpenAtLogin",
 	chatState: "chat:state",
 	chatSend: "chat:send",
 	chatAbort: "chat:abort",
@@ -347,7 +348,7 @@ export interface RallyApi {
 		setEnabled(path: string, enabled: boolean): Promise<SkillsState>;
 	};
 	getAppInfo(): Promise<AppInfo>;
-	desktop: { getState(): Promise<DesktopSettings>; update(behavior: CloseBehavior): Promise<DesktopSettings> };
+	desktop: { getState(): Promise<DesktopSettings>; update(behavior: CloseBehavior): Promise<DesktopSettings>; setOpenAtLogin(enabled: boolean): Promise<DesktopSettings> };
 	window: WindowApi;
 	chat: ChatApi;
 	tasks: TasksApi;

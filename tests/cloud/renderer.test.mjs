@@ -59,7 +59,7 @@ test('a broken entry script displays a recoverable startup error', () => {
   } finally { dom.window.close(); }
 });
 
-test('warm cloud startup paints cached identity before networking and resumes its cursor without replaying writes', async () => {
+for (const platform of ['android', 'desktop']) test(`${platform} warm cloud startup paints cached identity and keeps desktop behavior local while offline`, async () => {
   const html = readFileSync('out/renderer/index.html', 'utf8');
   const failures = [];
   const virtual = new VirtualConsole(); virtual.on('jsdomError', error => failures.push(error.message));
@@ -83,8 +83,18 @@ test('warm cloud startup paints cached identity before networking and resumes it
   window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
   window.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
   const calls = [];
+  const startupWrites = [];
+  const desktop = { closeBehavior: 'quit', trayAvailable: true, openAtLogin: false, loginItemAvailable: true };
+  if (platform === 'desktop') window.rallyLocal = {
+    resources: { onSave: () => () => {} },
+    desktop: {
+      getState: async () => ({ ...desktop }),
+      update: async closeBehavior => ({ ...desktop, closeBehavior }),
+      setOpenAtLogin: async enabled => { startupWrites.push(enabled); desktop.openAtLogin = enabled; return { ...desktop }; },
+    },
+  };
   window.rallyConnection = {
-    state: async () => ({ mode: 'cloud', platform: 'android', url: 'http://server:4711', instance: 'server-instance' }),
+    state: async () => ({ mode: 'cloud', platform, url: 'http://server:4711', instance: 'server-instance' }),
     request: (route, packet) => { calls.push({ route, packet }); return new Promise(() => {}); },
   };
   try {
@@ -104,6 +114,30 @@ test('warm cloud startup paints cached identity before networking and resumes it
     assert.equal(poll.packet.seq, 42);
     assert.equal(calls.filter(call => call.route === 'rpc').length, 0);
     await assert.rejects(window.rally.chat.send('never send offline'), /未连接/);
+    const waitFor = async predicate => {
+      const end = Date.now() + 3000;
+      while (!predicate() && Date.now() < end) await setTimeout(10);
+      assert.ok(predicate());
+    };
+    window.dispatchEvent(new window.KeyboardEvent('keydown', { key: ',', ctrlKey: true }));
+    await waitFor(() => window.document.querySelector('.rally-settings'));
+    const section = window.document.querySelector('button[aria-label="桌面行为"]');
+    if (platform === 'desktop') {
+      assert.ok(section); section.click();
+      const startup = () => window.document.querySelector('[role="switch"][aria-label="开机自启"]');
+      await waitFor(() => startup() && !startup().disabled);
+      assert.equal(startup().getAttribute('aria-checked'), 'false');
+      startup().click();
+      await waitFor(() => startup().getAttribute('aria-checked') === 'true' && !startup().disabled);
+      assert.deepEqual(startupWrites, [true]);
+      desktop.openAtLogin = false;
+      window.dispatchEvent(new window.Event('focus'));
+      await waitFor(() => startup().getAttribute('aria-checked') === 'false');
+      assert.deepEqual(startupWrites, [true]);
+    } else {
+      assert.equal(section, null);
+      await assert.rejects(window.rally.desktop.setOpenAtLogin(true), /仅适用于桌面客户端/);
+    }
     assert.equal(calls.filter(call => call.route === 'rpc').length, 0);
     assert.deepEqual(failures, []);
   } finally { window.close(); }

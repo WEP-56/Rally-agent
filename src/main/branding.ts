@@ -11,6 +11,17 @@ export function applicationIcon(): string {
   : join(root, "icon.png");
 }
 
+/** Bind the running window and its pinned taskbar entry to Rally before showing it. */
+export function applyWindowBranding(window: BrowserWindow): void {
+ const root = app.isPackaged ? process.resourcesPath : app.getAppPath();
+ // Use a decoded bitmap for the window; the ICO remains the shell/tray resource.
+ window.setIcon(join(root, "icon.png"));
+ if (process.platform === "win32") {
+  const command = [process.execPath, ...(!app.isPackaged ? [app.getAppPath()] : [])].map(path => `"${path}"`).join(" ");
+  window.setAppDetails({ appId: APP_ID, appIconPath: applicationIcon(), appIconIndex: 0, relaunchCommand: command, relaunchDisplayName: "Rally" });
+ }
+}
+
 export function showMainWindow(window: BrowserWindow): void {
  if (window.isDestroyed()) return;
  if (window.isMinimized()) window.restore();

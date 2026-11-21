@@ -34,7 +34,7 @@ export const SECTIONS = [
   { id: "mcp", label: "MCP 服务器", icon: Plug, desc: "通过 Model Context Protocol 扩展工具" },
   { id: "skills", label: "Skills", icon: Wand2, desc: "可复用的能力包，按需加载" },
   { id: "appearance", label: "外观", icon: Palette, desc: "主题、强调色与字号" },
-  { id: "desktop", label: "桌面行为", icon: Monitor, desc: "关闭窗口与托盘驻留" },
+  { id: "desktop", label: "桌面行为", icon: Monitor, desc: "开机自启、关闭窗口与托盘驻留" },
   { id: "notifications", label: "通知", icon: Bell, desc: "窗口在后台时的任务提醒" },
   { id: "about", label: "关于", icon: Info, desc: "版本信息与更新" },
 ];
@@ -69,21 +69,38 @@ function DesktopSection() {
  const [state, setState] = useState<DesktopSettings>();
  const [saving, setSaving] = useState(false);
  const [error, setError] = useState("");
- useEffect(() => { let alive = true; void window.rally.desktop.getState().then(value => { if (alive) setState(value); }).catch(reason => { if (alive) setError(String(reason)); }); return () => { alive = false; }; }, []);
+ useEffect(() => {
+  let alive = true;
+  const refresh = () => { if (!saving) void window.rally.desktop.getState().then(value => { if (alive) setState(value); }).catch(reason => { if (alive) setError(String(reason)); }); };
+  refresh(); window.addEventListener("focus", refresh);
+  return () => { alive = false; window.removeEventListener("focus", refresh); };
+ }, [saving]);
  const update = async (value: CloseBehavior) => {
   setSaving(true); setError("");
   try { setState(await window.rally.desktop.update(value)); } catch (reason) { setError(String(reason)); } finally { setSaving(false); }
  };
- return <Group title="关闭窗口时">
+ const updateStartup = async (value: boolean) => {
+  setSaving(true); setError("");
+  try { setState(await window.rally.desktop.setOpenAtLogin(value)); } catch (reason) { setError(String(reason)); } finally { setSaving(false); }
+ };
+ return <>
+ <Group title="启动">
+  <Row title="开机自启" desc="登录 Windows 后自动打开 Rally，沿用上次选择的运行模式。">
+   <Toggle label="开机自启" checked={state?.openAtLogin ?? false} disabled={!state?.loginItemAvailable || saving} onChange={value => void updateStartup(value)} />
+  </Row>
+  {state && !state.loginItemAvailable && <p className="px-5 py-3 text-xs text-muted">此功能在 Windows 安装版中可用。</p>}
+ </Group>
+ <Group title="关闭窗口时">
   <div className="space-y-3 p-5" role="radiogroup" aria-label="关闭窗口时">
    {([{ value: "quit", title: "退出应用", desc: window.runtime.mode === "cloud" ? "关闭此客户端，服务器上的任务继续运行。" : "结束本机 Agent、后台作业与服务，保存状态后退出。" }, { value: "tray", title: "收起至托盘", desc: "保持 Rally 运行。点击托盘图标恢复窗口，在托盘菜单选择退出。" }] as const).map(item => <button key={item.value} role="radio" aria-checked={state?.closeBehavior === item.value} disabled={!state || saving || (item.value === "tray" && !state.trayAvailable)} onClick={() => void update(item.value)} className={cn("flex w-full items-center gap-4 rounded-2xl p-4 text-left ring-1 transition-colors disabled:opacity-50", state?.closeBehavior === item.value ? "bg-accent/10 ring-accent/40" : "bg-sunken ring-line hover:bg-hover")}>
     <span className="min-w-0 flex-1"><span className="block text-sm font-medium">{item.title}</span><span className="mt-1 block text-xs leading-relaxed text-muted">{item.desc}</span></span>{state?.closeBehavior === item.value && <Check size={16} className="shrink-0 text-accent" />}
    </button>)}
    <p className="text-xs text-muted">此设置保存在当前电脑，切换本地或云端模式后继续生效。托盘菜单中的“退出 Rally”始终退出应用。</p>
    {state && !state.trayAvailable && <p className="text-xs text-muted">系统托盘暂不可用，关闭窗口将退出应用。</p>}
-   {error && <p role="alert" className="text-xs text-danger">{error}</p>}
   </div>
- </Group>;
+ </Group>
+ {error && <p role="alert" className="px-2 text-xs text-danger">{error}</p>}
+ </>;
 }
 
 function NotificationsSection() {

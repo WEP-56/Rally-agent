@@ -12,7 +12,7 @@ import { Supervisor } from "./supervisor/index.ts";
 import { StateDirectoryLock } from "./supervisor/state-lock.ts";
 import { ApplicationShutdown } from "./application-shutdown.ts";
 import { TaskNotifications } from "./notifications.ts";
-import { APP_ID, applicationIcon, showMainWindow } from "./branding.ts";
+import { APP_ID, applicationIcon, applyWindowBranding, showMainWindow } from "./branding.ts";
 
 const paths = resolveRallyPaths();
 
@@ -131,6 +131,7 @@ function createMainWindow(partition?: string): BrowserWindow {
 		},
 	});
 
+	applyWindowBranding(win);
 	forwardWindowState(win);
 	win.once("ready-to-show", () => {
 		win.show();

@@ -155,9 +155,11 @@ export async function connect() {
 	}
 	window.rally = createApi({
 		async invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
-			if (channel === C.desktopState || channel === C.desktopUpdate) {
+			if (channel === C.desktopState || channel === C.desktopUpdate || channel === C.desktopSetOpenAtLogin) {
 				if (!window.rallyLocal?.desktop) throw Error("此设置仅适用于桌面客户端");
-				return (channel === C.desktopState ? await window.rallyLocal.desktop.getState() : await window.rallyLocal.desktop.update(args[0] as CloseBehavior)) as T;
+				if (channel === C.desktopState) return await window.rallyLocal.desktop.getState() as T;
+				if (channel === C.desktopSetOpenAtLogin) return await window.rallyLocal.desktop.setOpenAtLogin(args[0] as boolean) as T;
+				return await window.rallyLocal.desktop.update(args[0] as CloseBehavior) as T;
 			}
 			if (channel === C.windowIsMaximized) return ((await nativeWindow?.isMaximized()) ?? false) as T;
 			if (channel === C.notificationsTarget) return null as T;

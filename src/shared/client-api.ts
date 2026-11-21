@@ -14,7 +14,7 @@ export interface ClientTransport {
 }
 export function createApi(ipcRenderer: ClientTransport): RallyApi {
 	return {
-		desktop: { getState: () => ipcRenderer.invoke(IpcChannel.desktopState), update: value => ipcRenderer.invoke(IpcChannel.desktopUpdate, value) },
+		desktop: { getState: () => ipcRenderer.invoke(IpcChannel.desktopState), update: value => ipcRenderer.invoke(IpcChannel.desktopUpdate, value), setOpenAtLogin: value => ipcRenderer.invoke(IpcChannel.desktopSetOpenAtLogin, value) },
 		resources: {
 			begin: input => ipcRenderer.invoke(IpcChannel.resourceBegin, input),
 			status: id => ipcRenderer.invoke(IpcChannel.resourceStatus, id),
