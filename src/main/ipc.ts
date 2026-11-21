@@ -1,4 +1,8 @@
 import { businessHandlers } from "./business.ts";
+import { ResourcePreviewHost } from "./resource-preview.ts";
+import { createReadStream } from "node:fs";
+import { ResourceDownloads, saveResource } from "./resource-download.ts";
+import type { UploadRequest } from "../shared/resources.ts";
 import type { WorkspaceState } from "../shared/workspace.ts";
 // Main-process IPC handlers. Every channel is declared in src/shared/ipc.ts.
 
@@ -18,24 +22,26 @@ import { readAvatar } from "./identity-avatar.ts";
 /** Register all IPC handlers. Call once after app ready. */
 export function registerIpc(paths: RallyPaths, supervisor: Supervisor, notifications?: TaskNotifications): () => Promise<void> {
 	const browser = new BrowserManager();
+	const resourcePreview = new ResourcePreviewHost(supervisor.resources);
+	const downloads = new ResourceDownloads();
 	const terminals = new TerminalManager(taskId => {
 		if (!taskId) return supervisor.workspace.base();
 		const task = supervisor.store.get(taskId); if (!task) throw new Error("TERMINAL_TASK_NOT_FOUND"); return task.cwd;
 	});
 	const channels: string[] = [];
-	const listeners: Array<{ channel: string; listener: Parameters<typeof ipcMain.on>[1] }> = [];
 	const pending = new Set<Promise<unknown>>();
 	let closing: Promise<void> | undefined;
 	const stop = () => {
 		if (closing) return closing;
 		for (const channel of channels) ipcMain.removeHandler(channel);
-		for (const item of listeners) ipcMain.removeListener(item.channel, item.listener);
 		// Accepted requests can be stuck in a third-party provider. Close native views
 		// and terminal trees concurrently so their lifetime never depends on that request.
 		closing = Promise.allSettled([
 			Promise.allSettled([...pending]),
 			Promise.resolve().then(() => browser.dispose()),
 			Promise.resolve().then(() => terminals.dispose()),
+			Promise.resolve().then(() => resourcePreview.close()),
+			downloads.close(),
 		]).then(results => {
 			const failures = results.filter(result => result.status === "rejected");
 			if (failures.length) throw new AggregateError(failures.map(result => result.reason), "Rally view cleanup failed");
@@ -51,10 +57,29 @@ export function registerIpc(paths: RallyPaths, supervisor: Supervisor, notificat
 		});
 		channels.push(channel);
 	};
-	const on = (channel: string, listener: Parameters<typeof ipcMain.on>[1]) => {
-		ipcMain.on(channel, listener); listeners.push({ channel, listener });
-	};
 	try {
+		handle(IpcChannel.resourceBegin, (event, input: UploadRequest) => { browser.owner(event); return supervisor.resources.begin("desktop", input); });
+		handle(IpcChannel.resourceStatus, (event, id: string) => { browser.owner(event); return supervisor.resources.status("desktop", id); });
+		handle(IpcChannel.resourceAppend, (event, id: string, offset: number, bytes: Uint8Array) => { browser.owner(event); return supervisor.resources.append("desktop", id, offset, bytes); });
+		handle(IpcChannel.resourceComplete, (event, id: string) => { browser.owner(event); return supervisor.resources.complete("desktop", id); });
+		handle(IpcChannel.resourceCancel, (event, id: string) => { browser.owner(event); return supervisor.resources.cancel("desktop", id); });
+		handle(IpcChannel.resourceGet, (event, id: string) => { browser.owner(event); return supervisor.resources.get(id, "desktop"); });
+		handle(IpcChannel.resourcePreview, async (event, id: string, thumbnail?: boolean) => { browser.owner(event); return resourcePreview.url(thumbnail ? (await supervisor.resources.thumbnail(id, "desktop")).id : id); });
+		handle(IpcChannel.resourceSave, (event, id: string, downloadId: string) => {
+			const owner = browser.owner(event);
+			const resource = supervisor.resources.get(id, "desktop");
+			return downloads.start(downloadId, async signal => {
+				const result = await dialog.showSaveDialog(owner, { title: "保存附件", defaultPath: resource.name.replace(/[<>:"/\\|?*]/g, "_") });
+				if (result.canceled || !result.filePath) return false;
+				signal.throwIfAborted();
+				const source = createReadStream(supervisor.resources.path(id, "desktop"), { signal });
+				await saveResource(source, result.filePath, resource, signal, received => {
+					if (!owner.isDestroyed()) owner.webContents.send(IpcEvent.resourceSave, { id: downloadId, received, size: resource.size });
+				});
+				return true;
+			});
+		});
+		handle(IpcChannel.resourceCancelSave, (event, id: string) => { browser.owner(event); downloads.cancel(id); });
 		if (notifications) {
 			handle(IpcChannel.notificationsState, event => { browser.owner(event); return notifications.state(); });
 			handle(IpcChannel.notificationsUpdate, (event, value: unknown) => { browser.owner(event); return notifications.update(value); });
@@ -111,16 +136,6 @@ export function registerIpc(paths: RallyPaths, supervisor: Supervisor, notificat
 				paths,
 			}),
 		);
-
-		on(IpcChannel.windowMinimize, (event) => senderWindow(event)?.minimize());
-		on(IpcChannel.windowToggleMaximize, (event) => {
-			const win = senderWindow(event);
-			if (!win) return;
-			if (win.isMaximized()) win.unmaximize();
-			else win.maximize();
-		});
-		on(IpcChannel.windowClose, (event) => senderWindow(event)?.close());
-		handle(IpcChannel.windowIsMaximized, (event) => senderWindow(event)?.isMaximized() ?? false);
 
 		handle(IpcChannel.workspacePick, async (event) => {
 			const win = senderWindow(event);

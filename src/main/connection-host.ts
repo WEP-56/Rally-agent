@@ -1,9 +1,12 @@
-import { app, BrowserWindow, ipcMain, safeStorage } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage } from "electron";
 import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { parseConnections, profilePartition, type SavedConnections } from "./connection-profiles.ts";
-import { IpcChannel as C } from "../shared/ipc.ts";
+import { IpcChannel as C, IpcEvent } from "../shared/ipc.ts";
 import { connectionUrl, type ConnectionState } from "../shared/connection.ts";
+import { CloudResourceClient } from "./cloud/resource-client.ts";
+import { ResourceDownloads } from "./resource-download.ts";
+import type { Resource } from "../shared/resources.ts";
 export function connectionHost(existing: boolean, owner: () => BrowserWindow | undefined) {
 	const path = join(app.getPath("userData"), "connections-v1.json");
 	let saved: SavedConnections = { active: existing ? "local" : "choose", profiles: [] };
@@ -15,6 +18,9 @@ export function connectionHost(existing: boolean, owner: () => BrowserWindow | u
 		error = "连接档案无法读取，请重新选择模式并配对。";
 	}
 	const profile = saved.profiles.find((p) => p.url === saved.active);
+	const controller = new AbortController();
+	const downloads = new ResourceDownloads();
+	const client = profile ? new CloudResourceClient(profile.url, profile.instance, () => safeStorage.decryptString(Buffer.from(profile.secret, "base64"))) : undefined;
 	const mode = profile ? "cloud" : saved.active === "local" ? "local" : "choose";
 	const state: ConnectionState = {
 		mode,
@@ -35,7 +41,7 @@ export function connectionHost(existing: boolean, owner: () => BrowserWindow | u
 		const res = await fetch(`${url}/v1/${route}`, {
 			method: "POST",
 			redirect: "error",
-			signal: AbortSignal.timeout(60000),
+			signal: AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]),
 			headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
 			body: JSON.stringify(body),
 		});
@@ -47,6 +53,7 @@ export function connectionHost(existing: boolean, owner: () => BrowserWindow | u
 		return result;
 	}
 	function guard(event: Electron.IpcMainInvokeEvent) {
+		controller.signal.throwIfAborted();
 		if (owner()?.webContents !== event.sender || event.senderFrame !== event.sender.mainFrame)
 			throw Error("无效窗口");
 	}
@@ -100,5 +107,28 @@ export function connectionHost(existing: boolean, owner: () => BrowserWindow | u
 			protocol: 1,
 		});
 	});
-	return { mode, partition: profile ? profilePartition(profile) : mode === "choose" ? "rally-setup" : undefined };
+	ipcMain.handle(C.connectionUpload, (e, id: string, offset: number, bytes: Uint8Array) => {
+		guard(e); if (!client) throw Error("连接不可用"); return client.append(id, offset, bytes, controller.signal);
+	});
+	ipcMain.handle(C.connectionSave, (e, id: string, downloadId: string) => {
+		guard(e); if (!client || !profile) throw Error("连接不可用");
+		const win = owner()!;
+		return downloads.start(downloadId, async signal => {
+			const resource = await post(profile.url, safeStorage.decryptString(Buffer.from(profile.secret, "base64")), "rpc", { instance: profile.instance, protocol: 1, channel: C.resourceGet, args: [id] }) as Resource;
+			signal.throwIfAborted();
+			const choice = await dialog.showSaveDialog(win, { title: "保存云端附件", defaultPath: resource.name.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_") });
+			if (choice.canceled || !choice.filePath) return false;
+			signal.throwIfAborted();
+			await client.save(resource, choice.filePath, signal, received => { if (!win.isDestroyed()) win.webContents.send(IpcEvent.resourceSave, { id: downloadId, received, size: resource.size }); });
+			return true;
+		});
+	});
+	ipcMain.handle(C.connectionCancelSave, (e, id: string) => { guard(e); downloads.cancel(id); });
+	return { mode, partition: profile ? profilePartition(profile) : mode === "choose" ? "rally-setup" : undefined,
+		close: async () => {
+			controller.abort();
+			for (const channel of [C.connectionState, C.connectionSelect, C.connectionRequest, C.connectionUpload, C.connectionSave, C.connectionCancelSave]) ipcMain.removeHandler(channel);
+			await downloads.close();
+		},
+	};
 }

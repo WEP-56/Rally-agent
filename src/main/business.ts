@@ -86,7 +86,7 @@ export function businessHandlers(
 			return skills.state(skillProjects());
 		},
 		[IpcChannel.chatState]: () => chat.state(),
-		[IpcChannel.chatSend]: (text: unknown) => chat.send(typeof text === "string" ? text : ""),
+		[IpcChannel.chatSend]: (text: unknown, attachments?: string[]) => chat.send(typeof text === "string" ? text : "", attachments),
 		[IpcChannel.chatAbort]: () => chat.abort(),
 		[IpcChannel.chatReset]: () => chat.reset(),
 		[IpcChannel.chatNewConversation]: () => chat.newConversation(),

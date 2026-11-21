@@ -11,6 +11,7 @@ import { StatusBadge, clock } from "./status";
 
 import { ArchiveTaskButton } from "./ArchiveTaskButton";
 import { ScheduledWorkerBadge } from "./ScheduledWorkerBadge";
+import { AttachmentCards } from "./Attachments";
 
 export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task) => void }) {
   const { config, openTab } = useApp();
@@ -44,6 +45,7 @@ export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task)
             {task.messages.map((m, i) => {
               if (m.role === "assistant") return <div key={m.message.id} className="animate-rise min-w-0">
                 <AssistantContent blocks={m.message.blocks} calls={m.message.toolCalls} streaming={m.message.streaming} avatar={<Critter seed={task.id} size={28} className="mt-0.5 shrink-0" />} />
+				<AttachmentCards items={m.message.attachments} />
                 {m.message.streaming && !m.message.blocks.length && <div className="py-1 pl-[38px] text-sm text-muted">正在思考…</div>}
               </div>;
               if (m.role === "rally")
@@ -55,6 +57,7 @@ export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task)
                     </div>
                     <div className="bubble-user max-w-[88%] rounded-[22px] rounded-tr-md px-4 py-3 text-sm leading-[1.65]">
                       <RichText text={m.text} />
+                      <AttachmentCards items={m.attachments} />
                     </div>
                   </div>
                 );

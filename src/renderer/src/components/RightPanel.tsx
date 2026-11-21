@@ -1,4 +1,6 @@
 import { AgentAvatar } from "./AgentAvatar";
+import { File } from "lucide-react";
+import { ResourceView } from "./Attachments";
 import { Critter } from "./brand";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Cable, Plus, X, Globe, SquareTerminal, IdCard, ChevronRight, PanelRightClose } from "lucide-react";
@@ -170,7 +172,7 @@ export function RightPanel({
         {tabs.map((t) => {
           const isActive = t.id === active;
           const task = t.taskId ? tasks.find((x) => x.id === t.taskId) : undefined;
-          const Icon = t.kind === "task" ? null : KIND_META[t.kind].icon;
+          const Icon = t.kind === "task" ? null : t.kind === "resource" ? File : KIND_META[t.kind].icon;
           return (
             <div
               key={t.id}
@@ -228,6 +230,7 @@ export function RightPanel({
             <div key={t.id} className={cn("absolute inset-0", t.id !== active && "hidden")}>
               {t.kind === "workstation" && <Workstation tasks={tasks} />}
               {t.kind === "connections" && <ConnectionsView visible={visible && t.id === active} />}
+              {t.kind === "resource" && t.resource && <ResourceView resource={t.resource} visible={visible && t.id === active} />}
               {t.kind === "task" && task && <TaskView task={task} onMention={onMention} />}
               {t.kind === "browser" && <BrowserView id={t.id} visible={visible && t.id === active && !drawer} initialUrl={t.url} onTitle={(s) => renameTab(t.id, s)} />}
               {t.kind === "terminal" && <TerminalView id={t.id} taskId={t.taskId} visible={visible && t.id === active && !drawer} />}

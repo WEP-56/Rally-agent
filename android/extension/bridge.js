@@ -9,6 +9,8 @@ window.RallyAndroid = {
 port.onMessage.addListener(message => {
   if (message.type === 'back') {
     send({ type: 'back', handled: !window.dispatchEvent(new Event('rally-back', { cancelable: true })) });
+  } else if (message.type === 'resource-save-progress') {
+    window.dispatchEvent(new CustomEvent('rally-resource-save', { detail: JSON.parse(message.json) }));
   } else {
     const reply = JSON.parse(message.json);
     window.rallyReply?.(reply.id, reply.ok, reply.value);

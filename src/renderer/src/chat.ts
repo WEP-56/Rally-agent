@@ -26,7 +26,7 @@ export interface ChatController {
 	thinkingLevel: string | null;
 	thinkingLevels: string[];
 	notice: string | null;
-	send(text: string): Promise<void>;
+	send(text: string, attachments?: string[]): Promise<void>;
 	abort(): void;
 	reset(): Promise<boolean>;
 	newConversation(): Promise<void>;
@@ -53,8 +53,8 @@ export function useChat(): ChatController {
 	}, []);
 
 	// The backend records failures as system lines, so these only guard IPC transport errors.
-	const send = useCallback((text: string) => {
-		return window.rally.chat.send(text);
+	const send = useCallback((text: string, attachments?: string[]) => {
+		return window.rally.chat.send(text, attachments);
 	}, []);
 	const abort = useCallback(() => {
 		void window.rally.chat.abort().catch((error: unknown) => console.error("chat.abort failed", error));

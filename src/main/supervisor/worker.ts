@@ -44,6 +44,10 @@ import type { ServiceManager } from "./services.ts";
 import { createServiceTools } from "./service-tools.ts";
 import { createJobTools } from "./job-tools.ts";
 import { managedSearchExecution } from "./search-process.ts";
+import type { ResourceStore } from "../resource-store.ts";
+import { AttachmentQueue, attachmentMessage } from "./attachments.ts";
+import { resourceTools } from "./resource-tools.ts";
+import type { ResourceRef } from "../../shared/resources.ts";
 
 export interface ReportResult {
 	taskId: string;
@@ -54,6 +58,7 @@ export interface ReportResult {
 }
 
 export interface WorkerManagerOptions {
+	resources?(): ResourceStore;
 	paths: RallyPaths;
 	store: TaskStore;
 	models: ModelStore;
@@ -84,6 +89,7 @@ interface Worker {
 	taskId: string;
 	runId: string;
 	session: AgentSession;
+	submissions: AttachmentQueue;
 	unsubscribe: () => void;
 	streaming: boolean;
 	lastText: string;
@@ -177,6 +183,10 @@ export class WorkerManager {
 		if (!runtime || !selection) throw new WorkerError("NO_MODEL", "尚未配置任务 agent 的模型，请在设置 → 供应商中选择任务 agent 模型与思考强度");
 		const sessionManager = SessionManager.open(file, paths.sessionsTasksDir, task.cwd);
 		const versions = new FileVersions(sessionManager);
+		const mcp = workerMcpExtensions(paths.agentDir, task, run, () => !this.disposed && !task.ended && !run.endedAt, {
+			gates: this.options.gates, audit: this.options.audit, processes: this.options.processes,
+			external: tool => store.recordExternalAction(task.id, tool), feishu: this.options.feishu,
+		});
 		const { session } = await createRoleSession({
 			startupSignal: opening.controller.signal,
 			onSessionCreated: session => { opening.session = session; },
@@ -189,10 +199,12 @@ export class WorkerManager {
 			rolePrompt: WORKER_SYSTEM_PROMPT,
 			loadProjectContext: true,
 			loadProjectSkills: true,
-			...workerMcpExtensions(paths.agentDir, task, run, () => !this.disposed && !task.ended && !run.endedAt, {
-				gates: this.options.gates, audit: this.options.audit, processes: this.options.processes,
-				external: (tool) => store.recordExternalAction(task.id, tool), feishu: this.options.feishu,
-			}),
+			extensions: [...mcp.extensions, ...(this.options.resources ? [resourceTools({ store: this.options.resources, owner: `task:${task.id}`, cwd: () => task.cwd,
+				roots: () => [task.cwd, task.outputDir], active: () => !this.disposed && !task.ended && !run.endedAt,
+				allowedIds: () => [...task.quotes, ...task.inputs.flatMap(input => input.quotes ?? [])].flatMap(quote => quote.attachments?.map(ref => ref.id) ?? [])
+					.concat(task.inputs.flatMap(input => input.attachments?.map(ref => ref.id) ?? []), [task.id, ...task.dependsOn].flatMap(id => store.timeline(id).flatMap(call => call.attachments?.map(ref => ref.id) ?? []))),
+				publish: (id, refs) => this.publish(task, run, id, refs) })] : [])],
+			extensionTools: [...mcp.extensionTools, ...(this.options.resources ? ["resource_publish"] : [])],
 			tools: [],
 			customTools: [...this.options.createTools(task), ...buildTools(task, versions, (path) => this.assertWritable(task, run, path), this.options.processes),
 				...createQqMailTools(this.options.qqMail, { task, run, gates: this.options.gates, audit: this.options.audit, store }),
@@ -221,6 +233,7 @@ export class WorkerManager {
 			taskId: task.id,
 			runId: run.id,
 			session,
+			submissions: new AttachmentQueue(session),
 			unsubscribe: () => {},
 			streaming: true,
 			lastText: "",
@@ -237,10 +250,10 @@ export class WorkerManager {
 		this.opening.delete(task.id);
 		this.options.onBusyChange();
 
+		store.inheritResources(task.id, this.upstreams(task).flatMap(upstream => upstream.runs.at(-1)?.lastReport?.attachments ?? []));
 		const pending = task.inputs.filter((input) => !input.deliveredAt);
 		const message = [assignmentMessage(task, run, this.upstreams(task)), ...pending.map(inputBlock)].join("\n\n");
-		for (const input of pending) store.markDelivered(task.id, input.id);
-		void session.sendUserMessage(message).catch((error: unknown) => this.fail(worker, error));
+		void this.sendMessage(worker, message, [...task.quotes, ...pending.flatMap(input => input.quotes ?? [])], pending.map(input => input.id)).catch((error: unknown) => this.fail(worker, error));
 	}
 
 	/** Remember that this turn reported, so the end-of-turn nudge logic stays quiet. */
@@ -262,10 +275,8 @@ export class WorkerManager {
 			this.options.onBusyChange();
 			return false;
 		}
-		void worker.session
-			.sendUserMessage(text, { deliverAs: "steer" })
+		void this.sendMessage(worker, text, task.inputs.find(input => input.id === inputId)?.quotes ?? [], inputId ? [inputId] : [])
 			.catch((error: unknown) => this.fail(worker, error));
-		if (inputId) this.options.store.markDelivered(taskId, inputId);
 		worker.streaming = true;
 		this.options.onBusyChange();
 		return true;
@@ -285,8 +296,7 @@ export class WorkerManager {
 		const pending = task.inputs.filter(input => !input.deliveredAt);
 		worker.streaming = true;
 		worker.lastActivity = this.now();
-		for (const input of pending) this.options.store.markDelivered(task.id, input.id);
-		void worker.session.sendUserMessage(pending.map(inputBlock).join("\n\n")).catch((error: unknown) => this.fail(worker, error));
+		void this.sendMessage(worker, pending.map(inputBlock).join("\n\n"), pending.flatMap(input => input.quotes ?? []), pending.map(input => input.id)).catch((error: unknown) => this.fail(worker, error));
 	}
 
 	/** Shell output is activity even before a command becomes a background job. */
@@ -337,6 +347,7 @@ export class WorkerManager {
 
 	private async retryStalled(worker: Worker): Promise<void> {
 		try {
+			worker.submissions.cancel();
 			await worker.session.abort();
 			const task = this.options.store.get(worker.taskId); const run = task?.runs.find(run => run.id === worker.runId);
 			if (this.disposed || worker.disposed || !task || task.ended || !run || run.endedAt) return;
@@ -344,14 +355,30 @@ export class WorkerManager {
 			worker.nudged = false; worker.reportedThisTurn = false; worker.reportedState = undefined;
 			this.options.store.nudge(task.id, STALL_TEXT);
 			const pending = task.inputs.filter(input => !input.deliveredAt);
-			for (const input of pending) this.options.store.markDelivered(task.id, input.id);
 			worker.recovering = false; worker.lastActivity = this.now(); worker.streaming = true;
-			void worker.session.sendUserMessage(pending.map(inputBlock).join("\n\n")).catch(error => this.fail(worker, error));
+			void this.sendMessage(worker, pending.map(inputBlock).join("\n\n"), pending.flatMap(input => input.quotes ?? []), pending.map(input => input.id)).catch(error => this.fail(worker, error));
 		} catch (error) {
 			if (this.disposed || worker.disposed) return;
 			this.options.store.failStalled(worker.taskId, worker.runId, `worker 卡死恢复失败：${String(error)}`);
 			void this.disposeWorker(worker);
 		}
+	}
+
+	private sendMessage(worker: Worker, text: string, quotes: readonly Quote[], inputIds: string[] = []): Promise<void> {
+		const task = this.options.store.get(worker.taskId);
+		const refs = [...quotes.flatMap(quote => quote.attachments ?? []), ...(task?.inputs.filter(input => inputIds.includes(input.id)).flatMap(input => input.attachments ?? []) ?? [])];
+		const resources = this.options.resources?.();
+		return worker.submissions.send(() => attachmentMessage(resources, text, refs, worker.session.model), () => {
+			const task = this.options.store.get(worker.taskId);
+			return !this.disposed && !worker.disposed && !task?.ended && !task?.runs.find(run => run.id === worker.runId)?.endedAt;
+		}, () => { for (const id of inputIds) this.options.store.markDelivered(worker.taskId, id); });
+	}
+
+	private publish(task: Task, run: TaskRun, toolCallId: string, refs: ResourceRef[]): void {
+		const call = this.options.store.timeline(task.id).find(call => call.id === `${run.id}:${toolCallId}`);
+		if (!call) return; // A nested MCP call is attached to its visible parent instead.
+		this.options.resources?.().retain(`task:${task.id}`, refs.map(ref => ref.id));
+		this.options.store.recordTool(task.id, { ...call, attachments: [...new Map([...(call.attachments ?? []), ...refs].map(ref => [ref.id, ref])).values()] });
 	}
 
 	private now(): number { return this.options.watchdogNow?.() ?? performance.now(); }
@@ -557,9 +584,11 @@ export class WorkerManager {
 		if (worker.disposed) return this.closing.get(worker.taskId) ?? Promise.resolve();
 		try { this.finishMessage(worker); } catch (error) { this.closeErrors.push(error); }
 		worker.disposed = true;
+		worker.submissions.cancel();
 		worker.unsubscribe();
 		this.interruptTools(worker);
-		const closing = closeRoleSession(worker.session)
+		const closing = Promise.all([closeRoleSession(worker.session), worker.submissions.idle()])
+			.then(() => {})
 			.catch((error: unknown) => { this.closeErrors.push(error); console.error("Worker session shutdown failed", error); })
 			.finally(() => { if (this.closing.get(worker.taskId) === closing) this.closing.delete(worker.taskId); });
 		this.closing.set(worker.taskId, closing);
@@ -658,6 +687,7 @@ function inputBlock(input: TaskInput): string {
 	if (input.note) lines.push(`Note: ${input.note}`);
 	if (input.body) lines.push(input.body);
 	for (const quote of input.quotes ?? []) lines.push(formatQuote(quote));
+	if (input.attachments?.length) lines.push(`Attachments: ${JSON.stringify(input.attachments)}`);
 	lines.push("</rally-input>");
 	return lines.join("\n");
 }
@@ -682,7 +712,7 @@ function formatQuote(quote: Quote): string {
 	const when = clock(quote.at);
 	const text = quote.text.replace(/\n/g, "\n> ");
 	const tag = quote.kind === "proposal" ? " · 用户已确认主 agent 提议" : "";
-	return `[${quote.messageId} ${when}${tag}] ${text}`;
+	return `[${quote.messageId} ${when}${tag}] ${text}${quote.attachments?.length ? `\nAttachments: ${JSON.stringify(quote.attachments)}` : ""}`;
 }
 
 function clock(at: number): string {

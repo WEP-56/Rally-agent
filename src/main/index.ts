@@ -2,8 +2,7 @@
 
 import { existsSync } from "node:fs";
 import { connectionHost } from "./connection-host.ts";
-import { IpcChannel } from "../shared/ipc.ts";
-import { ipcMain } from "electron";
+import { desktopHost } from "./desktop-host.ts";
 import { join } from "node:path";
 import { app, BrowserWindow, dialog, nativeTheme, safeStorage, screen, shell } from "electron";
 import { broadcastChat, broadcastTask, broadcastWorkspace, broadcastServices, forwardWindowState, registerIpc } from "./ipc.ts";
@@ -13,7 +12,7 @@ import { Supervisor } from "./supervisor/index.ts";
 import { StateDirectoryLock } from "./supervisor/state-lock.ts";
 import { ApplicationShutdown } from "./application-shutdown.ts";
 import { TaskNotifications } from "./notifications.ts";
-import { APP_ID, applicationIcon, createApplicationTray } from "./branding.ts";
+import { APP_ID, applicationIcon, showMainWindow } from "./branding.ts";
 
 const paths = resolveRallyPaths();
 
@@ -28,8 +27,7 @@ if (process.env.RALLY_SMOKE === "1") {
 	app.on("second-instance", () => {
 		const win = BrowserWindow.getAllWindows()[0];
 		if (!win) return;
-		if (win.isMinimized()) win.restore();
-		win.focus();
+		showMainWindow(win);
 	});
 	app.on("window-all-closed", () => app.quit());
 	void app.whenReady().then(startApplication);
@@ -42,12 +40,12 @@ async function startApplication(): Promise<void> {
 	let stopIpc: (() => Promise<void>) | undefined;
 	let startupError: unknown;
 	let notifications: TaskNotifications | undefined;
-	let destroyTray: (() => void) | undefined;
+	let stopDesktop: (() => void) | undefined;
 	const shutdown = new ApplicationShutdown({
 		close: async () => {
-			try { notifications?.dispose(); destroyTray?.(); } finally {
+			try { notifications?.dispose(); stopDesktop?.(); } finally {
 				// Draining requests can depend on session cancellation, so start both together.
-				const pending = stopIpc?.();
+				const pending = Promise.all([stopIpc?.(), connection.close()]).then(() => {});
 				if (supervisor) await supervisor.dispose(pending); else await pending;
 			}
 		},
@@ -61,11 +59,7 @@ async function startApplication(): Promise<void> {
 	try {
 		if (connection.mode !== "local") {
 			owner = createMainWindow(connection.partition);
-			const win = owner;
-			ipcMain.on(IpcChannel.windowClose, e => { if(e.sender===win.webContents) win.close(); });
-			ipcMain.on(IpcChannel.windowMinimize, e => { if(e.sender===win.webContents) win.minimize(); });
-			ipcMain.on(IpcChannel.windowToggleMaximize, e => { if(e.sender===win.webContents) win.isMaximized()?win.unmaximize():win.maximize(); });
-			ipcMain.handle(IpcChannel.windowIsMaximized, () => win.isMaximized());
+			stopDesktop = desktopHost(owner, () => shutdown.started, connection.mode);
 			return;
 		}
 		// Supervisor locks the state directory before any recovery or state writes.
@@ -84,7 +78,8 @@ async function startApplication(): Promise<void> {
 		stopIpc = registerIpc(paths, supervisor, notifications);
 		await supervisor.start();
 		if (!shutdown.started) {
-			destroyTray = createApplicationTray(owner = createMainWindow());
+			owner = createMainWindow();
+			stopDesktop = desktopHost(owner, () => shutdown.started, connection.mode);
 			notifications.start(supervisor.store.list().map(task => supervisor!.store.view(task)));
 		}
 	} catch (error) {

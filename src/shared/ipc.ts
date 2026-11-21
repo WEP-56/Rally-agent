@@ -1,4 +1,6 @@
 import type { ScheduledTask } from "./schedules.ts";
+import type { ResourceApi, ResourceRef } from "./resources.ts";
+import type { CloseBehavior, DesktopSettings } from "./desktop.ts";
 import type { FeishuConnectionState, FeishuCredentials, ImBotCredentials, ImBotState, ImSource, QqMailCredentials, QqMailState } from "./connections.ts";
 import type { IdentityState, IdentityText } from "./identity.ts";
 // IPC contract shared by main, preload and renderer: channel names and the typed API the preload exposes.
@@ -60,6 +62,18 @@ export interface RallyPaths {
 
 /** Invoke channels (renderer -> main, request/response). */
 export const IpcChannel = {
+	resourceBegin: "resources:begin",
+	resourceStatus: "resources:status",
+	resourceAppend: "resources:append",
+	resourceComplete: "resources:complete",
+	resourceCancel: "resources:cancel",
+	resourceGet: "resources:get",
+	resourcePreview: "resources:preview",
+	resourceSave: "resources:save",
+	resourceCancelSave: "resources:cancel-save",
+	connectionUpload: "connection:upload",
+	connectionSave: "connection:save-resource",
+	connectionCancelSave: "connection:cancel-save",
 	connectionState: "connection:state",
 	connectionSelect: "connection:select",
 	connectionRequest: "connection:request",
@@ -110,6 +124,8 @@ export const IpcChannel = {
 	windowToggleMaximize: "window:toggle-maximize",
 	windowClose: "window:close",
 	windowIsMaximized: "window:is-maximized",
+	desktopState: "desktop:state",
+	desktopUpdate: "desktop:update",
 	chatState: "chat:state",
 	chatSend: "chat:send",
 	chatAbort: "chat:abort",
@@ -146,6 +162,7 @@ export const IpcChannel = {
 
 /** Event channels (main -> renderer). */
 export const IpcEvent = {
+	resourceSave: "resources:save-progress",
 	identity: "identity:changed",
 	notification: "notifications:event",
 	browser: "browser:event",
@@ -171,6 +188,7 @@ export interface WindowApi {
 export type ChatRole = "user" | "assistant" | "system";
 
 export interface ChatLine {
+	attachments?: ResourceRef[];
 	source?: ImSource;
 	relayId?: string;
 	blocks?: AssistantBlock[];
@@ -216,7 +234,7 @@ export type ChatEvent =
 /** Main-conversation API. Only the main agent talks to the user (docs 01 section 4.6). */
 export interface ChatApi {
 	getState(): Promise<ChatState>;
-	send(text: string): Promise<void>;
+	send(text: string, attachments?: string[]): Promise<void>;
 	abort(): Promise<void>;
 	/** Compact context without clearing the conversation. */
 	reset(): Promise<boolean>;
@@ -254,6 +272,7 @@ export interface ModelsApi {
 
 /** API exposed on `window.rally` by the preload script. */
 export interface RallyApi {
+	resources: ResourceApi;
 	qqMail: {
 		getState(): Promise<QqMailState>;
 		save(credentials: QqMailCredentials): Promise<QqMailState>;
@@ -328,6 +347,7 @@ export interface RallyApi {
 		setEnabled(path: string, enabled: boolean): Promise<SkillsState>;
 	};
 	getAppInfo(): Promise<AppInfo>;
+	desktop: { getState(): Promise<DesktopSettings>; update(behavior: CloseBehavior): Promise<DesktopSettings> };
 	window: WindowApi;
 	chat: ChatApi;
 	tasks: TasksApi;

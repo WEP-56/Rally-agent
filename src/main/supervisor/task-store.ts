@@ -20,6 +20,7 @@ import type {
 import { questionViews, taskView } from "../../shared/task.ts";
 import type { ToolCall } from "../../shared/tools.ts";
 import type { AssistantMessageView } from "../../shared/conversation.ts";
+import type { ResourceRef } from "../../shared/resources.ts";
 import type { TaskGate } from "../../shared/gate.ts";
 import type { JobRecord } from "../../shared/jobs.ts";
 import type { ServiceRecord } from "../../shared/services.ts";
@@ -71,6 +72,14 @@ export class TaskStore {
 	/** Persisted tasks, newest first. */
 	list(): Task[] {
 		return [...this.tasks.values()].sort((a, b) => b.createdAt - a.createdAt);
+	}
+
+	/** Freeze upstream deliverables so deleting the producer cannot break a completed consumer. */
+	inheritResources(taskId: string, attachments: ResourceRef[]): void {
+		const task = this.require(taskId);
+		const known = new Set(task.inputs.flatMap(input => input.attachments?.map(ref => ref.id) ?? []));
+		const fresh = [...new Map(attachments.filter(ref => !known.has(ref.id)).map(ref => [ref.id, ref])).values()];
+		if (fresh.length) this.addInput(task, "upstream", { attachments: structuredClone(fresh), body: "Upstream published deliverables are attached." });
 	}
 
 	get(id: string): Task | undefined {
@@ -154,6 +163,7 @@ export class TaskStore {
 		const calls = new Map(this.timeline(taskId).map((call) => [call.id, call]));
 		const task = this.require(taskId);
 		return (this.conversations.get(taskId) ?? []).map((message) => ({ ...message,
+			attachments: [...new Map(message.blocks.flatMap(block => block.type === "tool" ? calls.get(block.toolCallId)?.attachments ?? [] : []).map(ref => [ref.id, ref])).values()],
 			blocks: message.blocks.map((block) => ({ ...block })),
 			streaming: message.streaming && !task.ended && !task.runs.find((run) => run.id === message.runId)?.endedAt,
 			toolCalls: message.blocks.flatMap((block) => { const call = block.type === "tool" ? calls.get(block.toolCallId) : undefined; return call ? [{ ...call }] : []; }),
@@ -445,12 +455,13 @@ export class TaskStore {
 		summary: string,
 		question?: string | null,
 		options?: string[],
+		attachments?: ResourceRef[],
 	): { task: Task; attention?: TaskAttention; attentionOpened: boolean; ended: boolean } {
 		const task = this.require(taskId);
 		const run = task.runs.find((item) => item.id === runId);
 		if (!run) throw new TaskError("RUN_NOT_FOUND", "运行不存在");
 		if (task.ended || run.endedAt) throw new TaskError("ALREADY_ENDED", "任务或运行已结束，不能再汇报");
-		run.lastReport = { state, summary, at: Date.now() };
+		run.lastReport = { state, summary, at: Date.now(), ...(attachments?.length ? { attachments: structuredClone(attachments) } : {}) };
 		let attention: TaskAttention | undefined;
 		let attentionOpened = false;
 		if (state === "progress" || state === "blocked") {
@@ -573,12 +584,13 @@ export class TaskStore {
 	private addInput(
 		task: Task,
 		kind: TaskInputKind,
-		payload: { note?: string; body?: string; quotes?: Quote[]; questionId?: string; jobId?: string },
+		payload: { note?: string; body?: string; quotes?: Quote[]; attachments?: ResourceRef[]; questionId?: string; jobId?: string },
 	): TaskInput {
 		const input: TaskInput = {
 			id: `I-${task.inputs.length + 1}`,
 			kind,
 			quotes: payload.quotes,
+			attachments: payload.attachments,
 			note: payload.note,
 			body: payload.body,
 			questionId: payload.questionId,

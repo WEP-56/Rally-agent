@@ -1,6 +1,7 @@
 // Task domain shared by the supervisor and the renderer (docs 01 section 2 / 3).
 // Facts only: approval, runs, reports, attention, gates, endings. Display status is derived.
 import type { ImSource } from "./connections.ts";
+import type { ResourceRef } from "./resources.ts";
 import type { ToolCall } from "./tools.ts";
 import type { AssistantMessageView } from "./conversation.ts";
 import type { TaskGate } from "./gate.ts";
@@ -19,7 +20,7 @@ export interface Quote {
 	kind: "user" | "proposal";
 	text: string;
 	at: number;
-	attachments?: { path: string; mime: string }[];
+	attachments?: ResourceRef[];
 }
 
 /** What the model passes to "needs a quote" tools. */
@@ -36,7 +37,7 @@ export interface TaskRun {
 	startedAt: number;
 	endedAt?: number;
 	endReason?: "ready" | "failed" | "dropped" | "cancelled" | "interrupted" | "stalled" | "blocked";
-	lastReport?: { state: ReportState; summary: string; at: number };
+	lastReport?: { state: ReportState; summary: string; at: number; attachments?: ResourceRef[] };
 	/** One automatic inactivity retry per run, preserved in task facts. */
 	stallRetries?: number;
 }
@@ -46,6 +47,7 @@ export type TaskInputKind = "steer" | "answer" | "resume" | "upstream" | "job_do
 export interface TaskInput {
 	id: string;
 	kind: TaskInputKind;
+	attachments?: ResourceRef[];
 	quotes?: Quote[];
 	note?: string;
 	body?: string;
@@ -162,7 +164,7 @@ export interface TaskView {
 	jobs?: JobRecord[];
 	services?: ServiceRecord[];
 	lastExternalAction?: Task["lastExternalAction"];
-	lastReport?: { state: ReportState; summary: string; at: number };
+	lastReport?: TaskRun["lastReport"];
 	ended?: Task["ended"];
 	archivedAt?: number;
 	changedFiles?: string[];

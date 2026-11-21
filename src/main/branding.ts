@@ -11,17 +11,20 @@ export function applicationIcon(): string {
   : join(root, "icon.png");
 }
 
-/** The tray offers show/quit; closing the window retains the existing app-exit behavior. */
-export function createApplicationTray(window: BrowserWindow): () => void {
+export function showMainWindow(window: BrowserWindow): void {
+ if (window.isDestroyed()) return;
+ if (window.isMinimized()) window.restore();
+ window.show(); window.focus();
+}
+
+export function createApplicationTray(window: BrowserWindow, mode = "local"): () => void {
  const tray = new Tray(applicationIcon());
  let disposed = false;
  const show = () => {
   if (disposed || window.isDestroyed()) return;
-  if (window.isMinimized()) window.restore();
-  window.show();
-  window.focus();
+  showMainWindow(window);
  };
- tray.setToolTip("Rally");
+ tray.setToolTip(`Rally · ${mode === "cloud" ? "云端" : mode === "local" ? "本地" : "选择运行模式"}`);
  tray.setContextMenu(Menu.buildFromTemplate([
   { label: "显示 Rally", click: show },
   { type: "separator" },

@@ -17,14 +17,18 @@ import { GateCard } from "./GateCard";
 import { QuestionCard } from "./QuestionCard";
 import { StatusBadge } from "./status";
 import { conversationItems } from "../conversation";
+import type { ResourceRef } from "../../../shared/resources";
+import { useAttachments } from "../attachments";
+import { AttachmentCards, PendingThumbnail, fileSize } from "./Attachments";
 
-function UserBubble({ text, source }: { text: string; source?: ImSource }) {
+function UserBubble({ text, source, attachments }: { text: string; source?: ImSource; attachments?: ResourceRef[] }) {
   const [expanded, setExpanded] = useState(false);
   const long = text.length > 160 || text.split("\n").length > 5;
   return (
     <div className="flex justify-end">
       <div className="bubble-user max-w-[82%] rounded-[22px] rounded-br-md px-4 py-2.5 text-[14.5px] leading-[1.65]">
         {source && <div className="mb-1 text-[11px] font-medium text-muted">来自{IM_SOURCE_LABELS[source.platform]}</div>}
+        <AttachmentCards items={attachments} />
         <div
           className={cn("relative overflow-hidden", long && !expanded && "max-h-[7.6em]")}
           style={long && !expanded ? { maskImage: "linear-gradient(to bottom, black 60%, transparent)", WebkitMaskImage: "linear-gradient(to bottom, black 60%, transparent)" } : undefined}
@@ -105,7 +109,7 @@ export function ChatPanel({
 	questions?: TaskQuestionView[];
 	tasks: Task[];
 	busy: boolean;
-	onSend: (t: string) => void | Promise<void>;
+	onSend: (t: string, attachments?: string[]) => void | Promise<void>;
 	onStop: () => void;
 	onNewChat: () => void;
 	onCompactChat: () => void;
@@ -123,11 +127,14 @@ export function ChatPanel({
 	const [actionError, setActionError] = useState<string | null>(null);
 	const action = (operation: Promise<unknown>) => { setActionError(null); void operation.catch((error: unknown) => setActionError(error instanceof Error ? error.message : String(error))); };
 	const [draft, setDraft] = useState("");
+	const attachments = useAttachments(conversationId);
+	const fileInput = useRef<HTMLInputElement>(null);
+	const [sendPending, setSendPending] = useState(false);
 	const scroller = useRef<HTMLDivElement>(null);
 	const followTail = useRef(true);
 	const focusedNotice = useRef<number | undefined>(undefined);
 	const ta = useRef<HTMLTextAreaElement>(null);
-	const visibleMessages = messages.filter((message) => message.text.trim() || message.blocks?.some(block => block.type === "text" && block.text.trim()) || message.taskRef);
+	const visibleMessages = messages.filter((message) => message.attachments?.length || message.text.trim() || message.blocks?.some(block => block.type === "text" && block.text.trim()) || message.taskRef);
 	const conversation = conversationItems(visibleMessages, questions, tasks, historyBefore);
 	const latestGateId = conversation.findLast(item => item.role === "gate")?.id;
 	const activityLabel = header.activity ? ACTIVITY_LABEL[header.activity] : "待命";
@@ -169,14 +176,15 @@ export function ChatPanel({
 
   const sending = useRef(false);
   const send = async () => {
-    if (!draft.trim() || sending.current) return;
+    if ((!draft.trim() && !attachments.items.length) || !attachments.ready || sending.current) return;
     followTail.current = true;
-    sending.current=true;
-    try {await onSend(draft);setDraft(current=>current===draft?"":current);setActionError(null);}catch(e){setActionError(String(e));}finally{sending.current=false;}
+    sending.current=true; setSendPending(true);
+    const submitted = attachments.items;
+    try {await onSend(draft, submitted.map(item => item.resource!.id));setDraft(current=>current===draft?"":current); for (const item of submitted) attachments.remove(item.id); setActionError(null);}catch(e){setActionError(String(e));}finally{sending.current=false;setSendPending(false);}
   };
 
   return (
-    <div className="left-ambient relative flex h-full min-w-0 flex-col">
+    <div className="left-ambient relative flex h-full min-w-0 flex-col" onDragOver={event => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }} onDrop={event => { if (event.dataTransfer.files.length) { event.preventDefault(); if (!sendPending) attachments.add(Array.from(event.dataTransfer.files)); } }}>
       <div className="chat-mobile-header drag relative z-10 flex h-16 shrink-0 items-center justify-between gap-2 px-3">
         <div className="chat-session-actions no-drag flex gap-2">
           {header.showNewConversation && <RoundButton size={36} title="新建会话 (Ctrl+N)" onClick={onNewChat}><SquarePen size={15} strokeWidth={1.8} /></RoundButton>}
@@ -224,14 +232,16 @@ export function ChatPanel({
             m.role === "question" ? <QuestionCard key={m.id} {...m.record} answer={(option) => window.rally.tasks.answerOption(m.record.taskId, m.record.question.id, option)} /> : m.role === "system" ? (
               <div key={m.id} className="animate-rise whitespace-pre-wrap break-words text-center text-[12px] leading-relaxed text-faint">
                 {m.text}
+                <AttachmentCards items={m.attachments} />
               </div>
             ) : m.role === "user" ? (
               <div key={m.id} className="animate-rise">
-                <UserBubble text={m.text} source={m.source} />
+                <UserBubble text={m.text} source={m.source} attachments={m.attachments} />
               </div>
             ) : (
               <div key={m.id} className="animate-rise relative ml-8 min-w-0 max-w-[88%] self-start rounded-[22px] rounded-tl-md bg-panel p-4 text-sm leading-relaxed shadow-soft">
                 <AgentAvatar size={28} className="absolute -left-9 top-1 rounded-full" />
+                <AttachmentCards items={m.attachments} />
                 {m.blocks?.length ? m.blocks.filter(block => block.type === "text").map((block, index) => block.type === "text" ? <RichText key={index} text={block.text} /> : null) : m.text.trim() && <RichText text={m.text} className="text-fg" />}
                 {m.taskRef && tasks.find((t) => t.id === m.taskRef) && <TaskCard task={tasks.find((t) => t.id === m.taskRef)!} />}
               </div>
@@ -241,7 +251,7 @@ export function ChatPanel({
             <div key={`approval-${task.id}`} className="ml-8 max-w-[440px] rounded-[22px] border border-warn/30 bg-panel p-4 text-sm shadow-soft">
               <div className="flex items-center gap-3"><Critter seed={task.id} size={40} /><div className="min-w-0 flex-1"><div className="truncate font-medium" title={task.title}>{task.title}</div><div className="mt-0.5 truncate text-[11.5px] text-faint" title={task.cwd}>{task.id}{taskSourceLabel(task)} · {task.mode === "readonly" ? "只读" : "改写"} · {task.cwd}</div></div><StatusBadge status={task.status} /></div>
               <details className="mt-2 text-xs text-muted"><summary className="cursor-pointer py-1">原话 · 任务简报</summary><div className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs leading-relaxed">
-                {task.quotes?.map((quote) => <div key={quote.messageId} className="mb-1">{quote.messageId}{quote.source && ` · ${IM_SOURCE_LABELS[quote.source.platform]}`} · {quote.text}</div>)}
+                {task.quotes?.map((quote) => <div key={quote.messageId} className="mb-1">{quote.messageId}{quote.source && ` · ${IM_SOURCE_LABELS[quote.source.platform]}`} · {quote.text}<AttachmentCards items={quote.attachments} /></div>)}
                 {task.note && <div>备注：{task.note}</div>}
                 {!!task.dependsOn?.length && <div>依赖：{task.dependsOn.join("、")}</div>}
               </div></details>
@@ -259,9 +269,13 @@ export function ChatPanel({
       {/* composer */}
       <div className="chat-composer relative z-10 shrink-0 px-3 pb-3.5">
         <div className="glass-strong mx-auto max-w-[760px] rounded-[28px] p-2 transition-shadow focus-within:shadow-pop">
+          <input ref={fileInput} type="file" multiple hidden onChange={event => { attachments.add(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
+          {!!attachments.items.length && <div className="flex max-h-44 flex-wrap gap-2 overflow-auto p-2">{attachments.items.map(item => <div key={item.id} className="max-w-full rounded-xl bg-sunken p-3 text-xs"><PendingThumbnail file={item.file} /><div className="max-w-52 truncate font-medium">{item.file.name}</div><div className="mt-1 text-muted">{item.resource ? `${fileSize(item.file.size)} · 已就绪` : item.error ?? `上传 ${Math.round(item.offset / Math.max(1, item.file.size) * 100)}%`}</div><div className="mt-2 flex gap-2">{item.error && <button disabled={sendPending} onClick={() => attachments.retry(item.id)} className="text-accent">重试</button>}<button disabled={sendPending} onClick={() => attachments.remove(item.id)} className="text-muted">{item.running ? "取消" : "移除"}</button></div></div>)}</div>}
+          {attachments.error && <p role="alert" className="p-2 text-xs text-danger">{attachments.error}</p>}
           <textarea
             ref={ta}
             value={draft}
+            onPaste={event => { const files = Array.from(event.clipboardData.files); if (files.length && !sendPending) { event.preventDefault(); attachments.add(files); } }}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && (window.runtime.platform !== "android" || e.ctrlKey || e.metaKey)) {
@@ -274,7 +288,7 @@ export function ChatPanel({
             className="block max-h-[200px] min-h-[42px] w-full resize-none bg-transparent px-3.5 pb-1 pt-2.5 text-[14.5px] leading-relaxed text-fg placeholder:text-faint"
           />
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-0.5">
-            <IconButton className="no-drag" title="添加附件">
+            <IconButton className="no-drag" title="添加附件" disabled={sendPending} onClick={() => fileInput.current?.click()}>
               <Paperclip size={15} strokeWidth={1.8} />
             </IconButton>
             <IconButton className="no-drag" title="引用任务" onClick={() => setDraft((d) => d + "@")}>
@@ -296,7 +310,7 @@ export function ChatPanel({
             ) : (
               <button
                 onClick={send}
-                disabled={!draft.trim()}
+                disabled={sendPending || !attachments.ready || (!draft.trim() && !attachments.items.length)}
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-accent-fg shadow-soft transition-all active:scale-95 disabled:bg-press disabled:text-faint disabled:shadow-none"
               >
                 <ArrowUp size={16} strokeWidth={2.2} />

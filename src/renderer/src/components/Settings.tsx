@@ -5,6 +5,7 @@ import { Archive, Bell, ArrowLeft, UserRound, Brain, Server, Plug, Wand2, Palett
 import type { Task } from "../data";
 import { ArchivedTasksSection } from "./ArchivedTasksSection";
 import type { AppInfo } from "../../../shared/ipc";
+import type { CloseBehavior, DesktopSettings } from "../../../shared/desktop";
 import { OrbitRing } from "./brand";
 import { ACCENTS, useApp } from "../store";
 import { cn } from "../utils/cn";
@@ -33,6 +34,7 @@ export const SECTIONS = [
   { id: "mcp", label: "MCP 服务器", icon: Plug, desc: "通过 Model Context Protocol 扩展工具" },
   { id: "skills", label: "Skills", icon: Wand2, desc: "可复用的能力包，按需加载" },
   { id: "appearance", label: "外观", icon: Palette, desc: "主题、强调色与字号" },
+  { id: "desktop", label: "桌面行为", icon: Monitor, desc: "关闭窗口与托盘驻留" },
   { id: "notifications", label: "通知", icon: Bell, desc: "窗口在后台时的任务提醒" },
   { id: "about", label: "关于", icon: Info, desc: "版本信息与更新" },
 ];
@@ -61,6 +63,27 @@ function Row({ title, desc, children }: { title: React.ReactNode; desc?: React.R
       {children}
     </div>
   );
+}
+
+function DesktopSection() {
+ const [state, setState] = useState<DesktopSettings>();
+ const [saving, setSaving] = useState(false);
+ const [error, setError] = useState("");
+ useEffect(() => { let alive = true; void window.rally.desktop.getState().then(value => { if (alive) setState(value); }).catch(reason => { if (alive) setError(String(reason)); }); return () => { alive = false; }; }, []);
+ const update = async (value: CloseBehavior) => {
+  setSaving(true); setError("");
+  try { setState(await window.rally.desktop.update(value)); } catch (reason) { setError(String(reason)); } finally { setSaving(false); }
+ };
+ return <Group title="关闭窗口时">
+  <div className="space-y-3 p-5" role="radiogroup" aria-label="关闭窗口时">
+   {([{ value: "quit", title: "退出应用", desc: window.runtime.mode === "cloud" ? "关闭此客户端，服务器上的任务继续运行。" : "结束本机 Agent、后台作业与服务，保存状态后退出。" }, { value: "tray", title: "收起至托盘", desc: "保持 Rally 运行。点击托盘图标恢复窗口，在托盘菜单选择退出。" }] as const).map(item => <button key={item.value} role="radio" aria-checked={state?.closeBehavior === item.value} disabled={!state || saving || (item.value === "tray" && !state.trayAvailable)} onClick={() => void update(item.value)} className={cn("flex w-full items-center gap-4 rounded-2xl p-4 text-left ring-1 transition-colors disabled:opacity-50", state?.closeBehavior === item.value ? "bg-accent/10 ring-accent/40" : "bg-sunken ring-line hover:bg-hover")}>
+    <span className="min-w-0 flex-1"><span className="block text-sm font-medium">{item.title}</span><span className="mt-1 block text-xs leading-relaxed text-muted">{item.desc}</span></span>{state?.closeBehavior === item.value && <Check size={16} className="shrink-0 text-accent" />}
+   </button>)}
+   <p className="text-xs text-muted">此设置保存在当前电脑，切换本地或云端模式后继续生效。托盘菜单中的“退出 Rally”始终退出应用。</p>
+   {state && !state.trayAvailable && <p className="text-xs text-muted">系统托盘暂不可用，关闭窗口将退出应用。</p>}
+   {error && <p role="alert" className="text-xs text-danger">{error}</p>}
+  </div>
+ </Group>;
 }
 
 function NotificationsSection() {
@@ -175,7 +198,7 @@ export function Settings({ section, setSection, onBack, tasks }: { section: stri
           <div className="min-w-0"><div className="font-display text-[22px] font-semibold leading-none">设置</div><div className="mt-1 truncate text-xs text-faint">{config.name}</div></div>
         </div>
         <nav className="no-scrollbar flex gap-1 overflow-x-auto px-2 md:flex-1 md:flex-col md:overflow-y-auto md:overflow-x-visible md:px-0">
-          {SECTIONS.filter(s=>window.runtime.mode!=="cloud"||s.id!=="notifications").map((s) => (
+          {SECTIONS.filter(s => (window.runtime.mode !== "cloud" || s.id !== "notifications") && (window.runtime.platform !== "android" || s.id !== "desktop")).map((s) => (
             <button
               key={s.id}
               aria-label={s.label}
@@ -206,6 +229,7 @@ export function Settings({ section, setSection, onBack, tasks }: { section: stri
           {cur.id === "mcp" && <McpSection />}
           {cur.id === "skills" && <SkillsSection />}
           {cur.id === "appearance" && <AppearanceSection />}
+          {cur.id === "desktop" && window.runtime.platform !== "android" && <DesktopSection />}
           {cur.id === "notifications" && <NotificationsSection />}
           {cur.id === "about" && <AboutSection />}
           </div>

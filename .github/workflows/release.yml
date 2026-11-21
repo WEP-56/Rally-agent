@@ -4,6 +4,9 @@ on:
     tags: ['v*']
 permissions:
   contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   client-and-server:
     strategy:
@@ -22,17 +25,33 @@ jobs:
         run: test "$GITHUB_REF_NAME" = "v$(node -p 'require("./package.json").version')"
       - run: npm ci --ignore-scripts
       - run: npm run hydrate:model-data
+      - run: npm run build:packages
       - run: node node_modules/typescript/bin/tsc --noEmit -p tsconfig.node.json
       - run: node node_modules/typescript/bin/tsc --noEmit -p tsconfig.web.json
       - run: node --test tests/cloud/profiles.test.mjs
       - run: node --test tests/cloud/cache.test.mjs
+      - run: node --test tests/release.test.mjs
+      - if: matrix.target == 'windows'
+        run: node node_modules/electron/install.js
       - if: matrix.target == 'windows'
         run: npm run dist
+      - if: matrix.target == 'windows'
+        run: node scripts/verify-windows.mjs
+      - if: matrix.target == 'windows'
+        run: node --experimental-vm-modules --test tests/attachments/renderer.test.mjs tests/attachments/client-bridge.test.mjs tests/cloud/connection-ui.test.mjs
       - if: matrix.target == 'linux'
         run: npm run build:server && bash scripts/cloud/package-linux.sh
+      - if: matrix.target != 'android'
+        run: node --test tests/attachments/resource-store.test.mjs tests/attachments/lifecycle.test.mjs tests/attachments/preview.test.mjs tests/attachments/download.test.mjs tests/attachments/gateway.test.mjs tests/attachments/message.test.mjs tests/attachments/directory-read.test.mjs tests/attachments/tools.test.mjs
       - if: matrix.target == 'windows'
         working-directory: packages/coding-agent
         run: node ../../node_modules/vitest/dist/cli.js --run test/suite/rally-ipc-lifecycle.test.ts
+      - if: matrix.target == 'windows'
+        working-directory: packages/coding-agent
+        run: node ../../node_modules/vitest/dist/cli.js --run test/suite/rally-desktop.test.ts
+      - if: matrix.target == 'windows'
+        working-directory: packages/coding-agent
+        run: node ../../node_modules/vitest/dist/cli.js --run test/suite/rally-main-shutdown.test.ts
       - if: matrix.target == 'android'
         uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '17' }
@@ -43,6 +62,7 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_CERT_SHA256: ${{ vars.ANDROID_CERT_SHA256 }}
         run: |
           sdkmanager 'platforms;android-37.2' 'build-tools;36.0.0'
           test -n "$STORE" && test -n "$ANDROID_KEY_ALIAS" && test -n "$ANDROID_STORE_PASSWORD" && test -n "$ANDROID_KEY_PASSWORD"
@@ -51,6 +71,7 @@ jobs:
           printf %s "$STORE" | base64 -d > "$ANDROID_KEYSTORE"
           npm run dist:android
           node --experimental-vm-modules --test tests/cloud/renderer.test.mjs
+          node --experimental-vm-modules --test tests/attachments/client-bridge.test.mjs
       - if: always() && matrix.target == 'android'
         shell: bash
         run: rm -f -- "$RUNNER_TEMP/rally.p12"
@@ -60,17 +81,23 @@ jobs:
           if-no-files-found: error
           path: |
             release/*-setup.exe
-            release/*-android.apk
+            release/*-android-arm64-v8a.apk
+            release/*-android-armeabi-v7a.apk
+            release/*-android-x86_64.apk
             release/rally-server-*.tar.gz
   draft:
     needs: client-and-server
     runs-on: ubuntu-24.04
     permissions: { contents: write }
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24.11.1' }
       - uses: actions/download-artifact@v4
         with: { path: dist, merge-multiple: true }
+      - run: node scripts/release-checksums.mjs dist --tag "$GITHUB_REF_NAME"
       - working-directory: dist
         env: { GH_TOKEN: '${{ github.token }}' }
         run: |
-          sha256sum *.exe *.apk *.tar.gz > SHA256SUMS
+          sha256sum -c SHA256SUMS
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --generate-notes *.exe *.apk *.tar.gz SHA256SUMS

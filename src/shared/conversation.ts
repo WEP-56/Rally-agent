@@ -1,4 +1,5 @@
 import type { ToolCall } from "./tools.ts";
+import type { ResourceRef } from "./resources.ts";
 
 /** Displayable provider content only; signatures and opaque reasoning data never enter the UI. */
 export type AssistantBlock =
@@ -7,6 +8,7 @@ export type AssistantBlock =
 	| { type: "tool"; toolCallId: string };
 
 export interface AssistantMessageView {
+	attachments?: ResourceRef[];
 	id: string;
 	runId: string;
 	at: number;

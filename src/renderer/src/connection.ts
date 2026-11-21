@@ -4,6 +4,8 @@ import { IpcChannel as C, IpcEvent, type RallyApi } from "../../shared/ipc";
 import { serverPath } from "./server-path";
 import { flushCloudCache, openCloudCache, saveCloudCache } from "./cloud-cache";
 import type { CloudEvents } from "../../shared/cloud-state";
+import type { UploadState, ResourceSaveProgress } from "../../shared/resources";
+import type { CloseBehavior } from "../../shared/desktop";
 
 interface Native {
 	call(id: string, method: string, json: string): void;
@@ -20,7 +22,7 @@ declare global {
 function androidBridge(native: Native): ConnectionBridge {
 	const pending = new Map<
 		string,
-		{ done: (value: unknown) => void; fail: (err: Error) => void; timeout: ReturnType<typeof setTimeout> }
+		{ done: (value: unknown) => void; fail: (err: Error) => void; timeout?: ReturnType<typeof setTimeout> }
 	>();
 	window.rallyReply = (id, ok, value) => {
 		const p = pending.get(id);
@@ -33,10 +35,10 @@ function androidBridge(native: Native): ConnectionBridge {
 	function call<T>(method: string, args: unknown[]): Promise<T> {
 		const id = crypto.randomUUID();
 		return new Promise((done, fail) => {
-			const timeout = setTimeout(() => {
+			const timeout = method === "saveResource" ? undefined : setTimeout(() => {
 				pending.delete(id);
 				fail(Error("连接超时，请核对服务器状态后重试"));
-			}, 75000);
+			}, method === "upload" ? 150000 : 75000);
 			pending.set(id, { done: (value) => done(value as T), fail, timeout });
 			try {
 				native.call(id, method, JSON.stringify(args));
@@ -51,6 +53,18 @@ function androidBridge(native: Native): ConnectionBridge {
 		state: () => call("state", []),
 		select: (...args) => call("select", args),
 		request: (...args) => call("request", args),
+		upload: async (id, offset, bytes) => {
+			// Each native message remains below the bridge's 1 MiB JSON bound.
+			let state;
+			for (let part = 0; part < bytes.length; part += 256 * 1024) {
+				const chunk = bytes.subarray(part, part + 256 * 1024);
+				let binary = ""; for (let start = 0; start < chunk.length; start += 8192) binary += String.fromCharCode(...chunk.subarray(start, start + 8192));
+				state = await call<UploadState>("upload", [id, offset + part, btoa(binary)]);
+			}
+			if (!state) throw Error("上传分块为空"); return state;
+		},
+		saveResource: (...args) => call("saveResource", args),
+		cancelSave: id => call("cancelSave", [id]),
 	};
 }
 export const bridge = window.rallyConnection ?? (window.RallyAndroid ? androidBridge(window.RallyAndroid) : undefined);
@@ -107,12 +121,19 @@ export async function connect() {
 	const stopWindow = nativeWindow?.onMaximizedChange((value) => {
 		for (const cb of listeners.get(IpcEvent.windowMaximizedChanged) ?? []) cb(null, value as never);
 	});
+	const stopDownloads = window.rallyLocal?.resources.onSave(progress => {
+		for (const cb of listeners.get(IpcEvent.resourceSave) ?? []) cb(null, progress as never);
+	});
+	const androidProgress = (event: Event) => { for (const cb of listeners.get(IpcEvent.resourceSave) ?? []) cb(null, (event as CustomEvent<ResourceSaveProgress>).detail as never); };
+	window.addEventListener("rally-resource-save", androidProgress);
 	dispose = () => {
 		flushCloudCache();
 		stopped = true;
 		connected = online = false;
 		clearTimeout(timer);
 		stopWindow?.();
+		stopDownloads?.();
+		window.removeEventListener("rally-resource-save", androidProgress);
 		listeners.clear();
 	};
 	const inflight = new Map<string, Promise<unknown>>();
@@ -134,6 +155,10 @@ export async function connect() {
 	}
 	window.rally = createApi({
 		async invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
+			if (channel === C.desktopState || channel === C.desktopUpdate) {
+				if (!window.rallyLocal?.desktop) throw Error("此设置仅适用于桌面客户端");
+				return (channel === C.desktopState ? await window.rallyLocal.desktop.getState() : await window.rallyLocal.desktop.update(args[0] as CloseBehavior)) as T;
+			}
 			if (channel === C.windowIsMaximized) return ((await nativeWindow?.isMaximized()) ?? false) as T;
 			if (channel === C.notificationsTarget) return null as T;
 			if (channel === C.workspacePick || channel === C.memoryPick)
@@ -144,6 +169,11 @@ export async function connect() {
 				if (saved !== undefined) return saved;
 			}
 			if (!online || stopped) throw Error("未连接到服务器");
+			if (channel === C.resourceAppend || channel === C.resourceSave || channel === C.resourceCancelSave) {
+				const result = channel === C.resourceAppend ? await bridge!.upload(args[0] as string, args[1] as number, args[2] as Uint8Array)
+					: channel === C.resourceSave ? await bridge!.saveResource(args[0] as string, args[1] as string) : await bridge!.cancelSave(args[0] as string);
+				if (stopped) throw Error("连接已切换"); return result as T;
+			}
 			if (channel === C.identityPickAvatar) {
 				const image = await avatar();
 				if (!image) return null as T;
@@ -151,11 +181,15 @@ export async function connect() {
 			}
 			let requestId: string | undefined;
 			if (channel === C.chatSend) {
-				const text = String(args[0]);
+				const text = JSON.stringify([args[0], args[1] ?? []]);
 				if (submission?.text !== text) submission = { text, id: crypto.randomUUID() };
 				requestId = submission.id;
 			}
 			const result = await rpc<T>(channel, args, requestId);
+			if (channel === C.resourcePreview) {
+				if (typeof result !== "string" || !result.startsWith("/v1/resources/")) throw Error("无效预览地址");
+				const url = new URL(result, state.url); if (url.origin !== state.url) throw Error("无效预览地址"); return url.href as T;
+			}
 			if (requestId && submission?.id === requestId) submission = undefined;
 			return result;
 		},

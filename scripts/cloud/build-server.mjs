@@ -3,6 +3,6 @@ import { join } from 'node:path';
 const dest='out/server'; mkdirSync(dest,{recursive:true});
 // Preserve the module layout: worker_threads and process hosts resolve their siblings by URL.
 for(const dir of ['shared','main/supervisor','main/cloud'])cpSync(`src/${dir}`,`${dest}/src/${dir}`,{recursive:true});
-for(const file of readdirSync('src/main'))if(file.endsWith('.ts')&&!/^(application-shutdown|branding|browser|connection-host|identity-avatar|index|ipc|notifications|shutdown-guard.*|smoke|terminal.*)\.ts$/.test(file))cpSync(`src/main/${file}`,join(dest,'src/main',file));
+for(const file of readdirSync('src/main'))if(file.endsWith('.ts')&&!/^(application-shutdown|branding|browser|connection-host|desktop-.*|identity-avatar|index|ipc|notifications|shutdown-guard.*|smoke|terminal.*)\.ts$/.test(file))cpSync(`src/main/${file}`,join(dest,'src/main',file));
 const consoleDir=dest+'/src/main/cloud/console';cpSync('src/console',consoleDir,{recursive:true});cpSync('src/renderer/src/assets/rally-mark.png',consoleDir+'/mark.png');writeFileSync(consoleDir+'/console.css',readFileSync('src/shared/theme.css','utf8')+'\n'+readFileSync('src/console/console.css','utf8'));
 writeFileSync(dest+'/package.json',JSON.stringify({type:'module',version:JSON.parse(readFileSync('package.json')).version}));

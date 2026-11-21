@@ -7,9 +7,11 @@ import { cn } from "../utils/cn";
 import { Button, RallyLogo } from "./ui";
 import { IdentityForm, MemoryForm, ProvidersForm } from "./forms";
 import { WindowControls } from "./TitleBar";
+import { ConnectionForm } from "./ConnectionForm";
 
 const STEPS = [
   { key: "welcome" },
+  { key: "connection", title: "选择 Rally 的运行位置", desc: "在本机工作，或连接一台持续在线的服务器。你可以随时在设置中切换。" },
   { key: "identity", title: "认识一下你的 Agent", desc: "给它起个名字，设定性格和工作方式。这些都可以稍后在设置中修改。", skippable: true },
   { key: "memory", title: "记忆存放在哪里", desc: "记忆保存在运行 Agent 的设备上。云端模式使用服务器上的目录。", skippable: true },
   { key: "providers", title: "添加模型供应商", desc: "填写 Base URL 与 API Key，获取可用模型。支持添加多个供应商；模型可在对话框底部切换。", skippable: true },
@@ -40,7 +42,7 @@ export function Onboarding({ onDone, maximized, onMin, onMax, onClose }: { onDon
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).tagName === "TEXTAREA" || (e.target as HTMLElement).tagName === "INPUT") return;
-      if (e.key === "ArrowRight" && step > 0 && step < last) next();
+      if (e.key === "ArrowRight" && step > 0 && step < last && STEPS[step].key !== "connection") next();
       if (e.key === "ArrowLeft" && step > 1) prev();
     };
     window.addEventListener("keydown", k);
@@ -67,7 +69,7 @@ export function Onboarding({ onDone, maximized, onMin, onMax, onClose }: { onDon
       <div className="relative min-h-0 flex-1">
         <div className="flex h-full transition-transform duration-500 ease-[cubic-bezier(.2,.8,.2,1)]" style={{ transform: `translateX(-${step * 100}%)` }}>
           {STEPS.map((st, i) => (
-            <div key={st.key} className={cn("h-full w-full shrink-0 overflow-y-auto transition-opacity duration-500", i === step ? "opacity-100" : "pointer-events-none opacity-0")}>
+            <div key={st.key} inert={i !== step} className={cn("h-full w-full shrink-0 overflow-y-auto transition-opacity duration-500", i === step ? "opacity-100" : "pointer-events-none opacity-0")}>
               <div className="onboarding-slide mx-auto flex min-h-full max-w-[560px] flex-col justify-center px-8 py-10">
                 {st.key === "welcome" && (
                   <div className="flex flex-col items-center text-center">
@@ -92,9 +94,10 @@ export function Onboarding({ onDone, maximized, onMin, onMax, onClose }: { onDon
                 {st.key !== "welcome" && st.key !== "done" && (
                   <div>
                     <div className="mb-2 text-xs font-medium text-accent">步骤 {i} / {last - 1}</div>
-                    <h2 className="text-2xl font-semibold tracking-tight">{st.title}</h2>
-                    <p className="mb-7 mt-2 text-sm text-muted">{st.desc}</p>
+                    <h2 className="text-2xl font-semibold tracking-tight">{st.key === "connection" && window.runtime.platform === "android" ? "连接你的云端 Rally" : st.title}</h2>
+                    <p className="mb-7 mt-2 text-sm text-muted">{st.key === "connection" && window.runtime.platform === "android" ? "确认服务器连接，继续设置你的 Agent。" : st.desc}</p>
                     <div className="rounded-3xl bg-panel p-5 shadow-card">
+                      {st.key === "connection" && <ConnectionForm onContinue={next} />}
                       {st.key === "identity" && <IdentityForm />}
                       {st.key === "memory" && <MemoryForm />}
                       {st.key === "providers" && <ProvidersForm />}
@@ -111,6 +114,7 @@ export function Onboarding({ onDone, maximized, onMin, onMax, onClose }: { onDon
                     <p className="mt-2 text-sm text-muted">{config.name || "Rally"} 已经到岗，随时可以开始工作。</p>
                     <div className="mt-8 grid w-full grid-cols-2 gap-2 text-left">
                       {[
+                        { icon: Server, k: "运行位置", v: window.runtime.mode === "cloud" ? window.runtime.url : "这台电脑" },
                         { icon: UserRound, k: "名称", v: config.name || "Rally" },
                         { icon: Brain, k: "记忆", v: config.memoryPath },
                         { icon: Server, k: "供应商", v: models.state?.providers.length ? models.state.providers.map((p) => p.name || "未命名").join("、") : "未添加" },
@@ -136,7 +140,7 @@ export function Onboarding({ onDone, maximized, onMin, onMax, onClose }: { onDon
       {/* footer nav */}
       <div className={cn("onboarding-footer relative flex h-20 shrink-0 items-center justify-between px-8 transition-opacity duration-300", step === 0 && "pointer-events-none opacity-0")}>
         <div className="w-40">
-          {step > 1 && (
+          {step > 0 && (
             <Button variant="ghost" onClick={prev}>
               <ArrowLeft size={14} />上一步
             </Button>
@@ -148,7 +152,7 @@ export function Onboarding({ onDone, maximized, onMin, onMax, onClose }: { onDon
           ))}
         </div>
         <div className="flex w-40 justify-end gap-1">
-          {step > 0 && step < last && (
+          {step > 0 && step < last && s.key !== "connection" && (
             <>
               {s.skippable && (
                 <Button variant="ghost" onClick={next}>

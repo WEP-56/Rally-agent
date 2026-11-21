@@ -6,6 +6,7 @@ import { taskSchedule } from "../../shared/task.ts";
 import type { EventLog } from "./event-log.ts";
 import type { TaskGate } from "../../shared/gate.ts";
 import type { TaskStore } from "./task-store.ts";
+import type { ResourceRef } from "../../shared/resources.ts";
 
 export type RelayInput =
 	| { kind: "gate_request"; task: Task; gate: TaskGate }
@@ -14,13 +15,13 @@ export type RelayInput =
 	| { kind: "dependency_failed"; task: Task; upstream: Task }
 	| { kind: "interrupted"; tasks: Task[] };
 
-export interface RelayMessage { id: string; text: string }
+export interface RelayMessage { id: string; text: string; attachments?: ResourceRef[] }
 export type RelayMode = "turn" | "steer" | "notice";
 export interface RelayTransport {
 	isBusy(): boolean;
 	canReceiveRelay(): boolean;
 	sendRelay(items: RelayMessage[], mode: RelayMode): Promise<void>;
-	addSystemLine(text: string, relayId?: string): void;
+	addSystemLine(text: string, relayId?: string, attachments?: ResourceRef[]): void;
 }
 interface RelayRecord extends RelayMessage {
 	kind: RelayInput["kind"] | "notice";
@@ -66,7 +67,7 @@ export class Relay {
 	start(): void {
 		if (this.disposed) return;
 		this.captureSources();
-		for (const item of this.pending.values()) if (item.systemLine && (!item.taskId || this.store.get(item.taskId))) this.main.addSystemLine(item.systemLine, item.id);
+		for (const item of this.pending.values()) if (item.systemLine && (!item.taskId || this.store.get(item.taskId))) this.main.addSystemLine(item.systemLine, item.id, item.attachments);
 		this.started = true;
 		this.available();
 	}
@@ -127,12 +128,13 @@ export class Relay {
 		const systemLine = input.kind === "worker_question" ? `${input.task.id} 提问：${input.attention.question}`
 			: input.kind === "worker_report" ? `${input.task.id} · ${input.task.title} · ${input.state === "ready" ? "已完成" : input.state === "failed" ? "失败" : input.state === "blocked" ? "受阻" : "无需处理"}` : undefined;
 		const item: RelayRecord = { id, kind: input.kind, sources, systemLine,
+			attachments: input.kind === "worker_report" ? input.task.runs.at(-1)?.lastReport?.attachments : undefined,
 			text: render(input).replace("<rally-event ", `<rally-event relayId="${id}" `),
 			taskId: input.kind === "interrupted" ? undefined : input.task.id,
 			gateId: input.kind === "gate_request" ? input.gate.id : undefined,
 			questionId: input.kind === "worker_question" ? input.attention.id : undefined };
 		this.persist(item);
-		if (systemLine) this.main.addSystemLine(systemLine, id);
+		if (systemLine) this.main.addSystemLine(systemLine, id, item.attachments);
 		this.available();
 		return id;
 	}
@@ -210,7 +212,7 @@ export class Relay {
 				this.pending.delete(item.id);
 				continue;
 			}
-			if (item.systemLine) this.main.addSystemLine(item.systemLine, item.id);
+			if (item.systemLine) this.main.addSystemLine(item.systemLine, item.id, item.attachments);
 			items.push(item);
 		}
 		if (!items.length) return;

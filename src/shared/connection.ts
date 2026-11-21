@@ -11,6 +11,9 @@ export interface ConnectionBridge {
 	state(): Promise<ConnectionState>;
 	select(mode: "local" | "cloud", url: string, key: string): Promise<void>;
 	request<T>(endpoint: "rpc" | "events", body: object): Promise<T>;
+	upload(id: string, offset: number, bytes: Uint8Array): Promise<UploadState>;
+	saveResource(id: string, downloadId: string): Promise<boolean>;
+	cancelSave(downloadId: string): Promise<void>;
 }
 
 export function connectionUrl(input: string): string {
@@ -27,3 +30,4 @@ export function connectionUrl(input: string): string {
 	}
 	return url.origin;
 }
+import type { UploadState } from "./resources.ts";

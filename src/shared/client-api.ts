@@ -4,6 +4,7 @@ import type { ServicesState } from "./services";
 import type { BrowserEvent } from "./browser";
 import type { TerminalEvent } from "./terminal";
 import type { IdentityState } from "./identity";
+import type { ResourceSaveProgress } from "./resources";
 
 export interface ClientTransport {
 	invoke<T>(channel: string, ...args: unknown[]): Promise<T>;
@@ -13,6 +14,22 @@ export interface ClientTransport {
 }
 export function createApi(ipcRenderer: ClientTransport): RallyApi {
 	return {
+		desktop: { getState: () => ipcRenderer.invoke(IpcChannel.desktopState), update: value => ipcRenderer.invoke(IpcChannel.desktopUpdate, value) },
+		resources: {
+			begin: input => ipcRenderer.invoke(IpcChannel.resourceBegin, input),
+			status: id => ipcRenderer.invoke(IpcChannel.resourceStatus, id),
+			append: (id, offset, bytes) => ipcRenderer.invoke(IpcChannel.resourceAppend, id, offset, bytes),
+			complete: id => ipcRenderer.invoke(IpcChannel.resourceComplete, id),
+			cancel: id => ipcRenderer.invoke(IpcChannel.resourceCancel, id),
+			get: id => ipcRenderer.invoke(IpcChannel.resourceGet, id),
+			preview: (id, thumbnail) => ipcRenderer.invoke(IpcChannel.resourcePreview, id, thumbnail),
+			save: (id, downloadId) => ipcRenderer.invoke(IpcChannel.resourceSave, id, downloadId),
+			cancelSave: id => ipcRenderer.invoke(IpcChannel.resourceCancelSave, id),
+			onSave: listener => {
+				const handler = (_event: unknown, progress: ResourceSaveProgress) => listener(progress);
+				ipcRenderer.on(IpcEvent.resourceSave, handler); return () => ipcRenderer.off(IpcEvent.resourceSave, handler);
+			},
+		},
 		qqMail: {
 			getState: () => ipcRenderer.invoke(IpcChannel.qqMailState),
 			save: (credentials) => ipcRenderer.invoke(IpcChannel.qqMailSave, credentials),
@@ -133,7 +150,7 @@ export function createApi(ipcRenderer: ClientTransport): RallyApi {
 		},
 		chat: {
 			getState: () => ipcRenderer.invoke(IpcChannel.chatState),
-			send: (text) => ipcRenderer.invoke(IpcChannel.chatSend, text),
+			send: (text, attachments) => ipcRenderer.invoke(IpcChannel.chatSend, text, attachments),
 			abort: () => ipcRenderer.invoke(IpcChannel.chatAbort),
 			reset: () => ipcRenderer.invoke(IpcChannel.chatReset),
 			newConversation: () => ipcRenderer.invoke(IpcChannel.chatNewConversation),

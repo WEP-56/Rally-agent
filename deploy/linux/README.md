@@ -47,10 +47,63 @@ curl --fail http://127.0.0.1:4711/health
 
 ## 升级与备份
 
-安装新版本前下载并核验对应 Release。运行新版 `install.sh`，安装器会停止旧服务，将 `/etc/rally`、`/var/lib/rally`、`/var/lib/rally-control` 备份到 `/var/backups/rally/pre-版本-时间.tar.gz`，切换版本后重新启动并检查运行时。重复安装同版本会拒绝覆盖。用户自行配置在数据目录之外的工作区需另行备份。
+安装新版本前下载并核验对应 Release，在客户端确认当前任务、后台作业和文件传输已经结束或可以中断，再运行新版 `install.sh`。安装器会停止旧服务，将 `/etc/rally`、`/var/lib/rally`、`/var/lib/rally-control` 备份到 `/var/backups/rally/pre-版本-时间.tar.gz`，切换版本后重新启动并检查运行时。重复安装同版本会拒绝覆盖。用户自行配置在数据目录之外的工作区需另行备份。
 
 升级后检查服务日志与设备重连。安装失败不会自动回滚；先查明原因。要回退时停止两个服务，恢复与旧版本匹配的数据和密钥，再将 `/opt/rally/current` 切回保留的旧版本并启动。禁止只回退二进制却继续使用已发生不兼容迁移的数据。
 
 首次安装和升级都不会覆盖已有密钥。请将配置、业务数据和控制台数据作为一套备份；缺少 `/etc/rally/vault.key` 会导致原连接器凭据无法解密。管理密钥轮换可在服务器本机生成新随机密钥写入原文件，保持 `root:rally-control`、`0640` 权限，再重启 `rally-control`。
 
 云端客户端首版不提供用户交互终端、内嵌浏览器、私有服务预览或系统通知。Worker 的 shell、文件、作业、MCP 和定时任务仍在服务器运行。
+
+## HTTPS 代理与附件传输
+
+保留 Rally 监听 `127.0.0.1:4711`，在已有 HTTPS 站点中将请求代理到它。以下 Nginx 片段放在配置好证书的 `server` 内，按自己的域名与证书路径配置 TLS：
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:4711;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_read_timeout 180s;
+    proxy_send_timeout 180s;
+    client_max_body_size 2m;
+    proxy_request_buffering off;
+    proxy_buffering off;
+    proxy_cache off;
+    # 默认 combined 日志记录查询参数；预览 URL 含短期只读票据，避免将其写入日志。
+    access_log off;
+}
+```
+
+客户端每次最多上传 1 MiB 字节块，Android 原生桥将块继续分为 256 KiB；单文件上限 1 GiB 不意味着需要允许 1 GiB 请求体。JSON API 仍有 1 MiB 限制。不要在代理层移除 Authorization、X-Rally-Instance、X-Rally-Protocol、Range、If-Range 或响应 CORS/Content-Range 头；不要缓存 `/v1/`。
+
+预览票据仅授权单个资源的 GET/HEAD，有效期 2 分钟；设备吊销会撤销票据并关闭活跃字节传输。不要用日志、长期链接或公开文件目录替代接口。Windows 与 Android 的设备凭据由原生层持有。
+
+修改代理后先执行 `nginx -t`，确认再重载。用测试设备上传和下载一个大于 1 MiB 的文件，检查重试、跨端预览、音视频定位与取消；仅 `/health` 返回 200 不足以验证附件链路。
+
+## 完整数据备份与迁移
+
+主要路径：
+
+| 路径 | 内容 |
+| --- | --- |
+| `/var/lib/rally/.rally` | 供应商配置、事件、任务、会话、记忆、资源库 |
+| `/var/lib/rally/.rally/resources` | 附件 SQLite 元数据、incoming 和按 SHA-256 保存的原件 |
+| `/var/lib/rally/rally` | 默认工作区；自定义目录另行备份 |
+| `/var/lib/rally-control` | 实例和已配对设备数据、幂等请求记录 |
+| `/etc/rally` | 管理密钥、vault 加密密钥、监听配置 |
+
+停止两个服务后再整体备份，可避免遗漏 SQLite WAL 或复制到半条事件。示例在服务器本机执行，备份目录只对 root 开放：
+
+```bash
+sudo systemctl stop rally-control rally-runtime
+sudo install -d -m 0700 /var/backups/rally
+sudo sh -c 'umask 077; tar -czf "/var/backups/rally/manual-$(date +%Y%m%d-%H%M%S).tar.gz" -C / etc/rally var/lib/rally var/lib/rally-control'
+sudo systemctl start rally-runtime rally-control
+```
+
+迁移到新服务器时先安装相同代码版本，停止新服务器服务，按原路径恢复这三部分数据，检查用户/组拥有权与 `0640` 密钥权限，然后启动。不要把新安装产生的密钥混入旧数据，也不要让两台实例同时写同一数据目录。新 URL 需要客户端重新验证连接；没有完整恢复控制台实例和设备库时应重新配对。
+
+附件资源的引用恢复在启动清理之前执行；损坏的事件会停用自动资源回收。普通文件在新系统上缺失时不会通过文件名猜测重建。升级/迁移后检查旧消息附件、任务产物、模型配置、设备重连以及一轮测试文件收发，再继续运行真实任务。

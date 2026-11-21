@@ -1,4 +1,5 @@
 import type { ImSource } from "../../shared/connections";
+import type { ResourceRef } from "../../shared/resources";
 import type { Quote } from "../../shared/task";
 export type StepKind = "cmd" | "read" | "write" | "edit" | "delete" | "search" | "web" | "memory" | "think" | "task" | "tool";
 import type { ToolCall } from "../../shared/tools";
@@ -17,6 +18,7 @@ export interface ToolStep {
 }
 
 export interface ChatMsg {
+	attachments?: ResourceRef[];
 	source?: ImSource;
 	runId?: string;
 	blocks?: AssistantBlock[];
@@ -34,7 +36,7 @@ export type TaskStatus = "running" | "done" | "failed" | "queued" | "cancelled" 
 
 export type TaskMsg =
 	| { role: "assistant"; message: AssistantMessageView }
-  | { role: "rally"; text: string; label?: string; id?: string }
+  | { role: "rally"; text: string; label?: string; id?: string; attachments?: ResourceRef[] }
   | { role: "agent"; text: string }
   | { role: "tools"; steps: ToolStep[] };
 
@@ -59,7 +61,7 @@ export interface Task {
   mode?: "write" | "readonly";
   scope?: string[];
   cwd?: string;
-  quotes?: Pick<Quote, "messageId" | "text" | "source">[];
+  quotes?: Pick<Quote, "messageId" | "text" | "source" | "attachments">[];
   note?: string;
   dependsOn?: string[];
 }

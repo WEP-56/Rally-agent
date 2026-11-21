@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AccessStore } from "./access.ts";
 import { failure, PublicError, readBody, reply } from "./http.ts";
+import { ResourceGateway } from "./resource-gateway.ts";
+import { IpcChannel } from "../../shared/ipc.ts";
 
 process.umask(0o077);
 const secrets = process.env.RALLY_CREDENTIALS_DIR || "/etc/rally";
@@ -12,6 +14,7 @@ const access = new AccessStore(
 	admin,
 );
 const socket = process.env.RALLY_SOCKET || "/run/rally-runtime/service.sock";
+const resources = new ResourceGateway(socket, access);
 const assets = new Map(
 	[
 		["/", "index.html"],
@@ -33,6 +36,7 @@ const server = createServer(async (req, res) => {
 	);
 	try {
 		if (stopping) throw new PublicError("服务正在停止", 503);
+		if (resources.handles(req.url ?? "")) { resources.handle(req, res); return; }
 		const path = req.url ?? "",
 			asset = assets.get(path);
 		if (req.method === "GET" && asset) {
@@ -88,6 +92,7 @@ const server = createServer(async (req, res) => {
 				case "revoke":
 					if (typeof body.id !== "string") throw new PublicError("无效设备");
 					access.revoke(body.id);
+					resources.revoke(body.id);
 					break;
 				case "pairing":
 					if (typeof body.enabled !== "boolean") throw new PublicError("无效配对设置");
@@ -101,15 +106,23 @@ const server = createServer(async (req, res) => {
 		}
 		// Recheck after receiving the body: a device may have been revoked during upload.
 		const device = access.authenticate(auth);
-		if (!device) denied();
+		if (!device) return denied();
 		if (body.instance !== access.instance || body.protocol !== 1)
 			throw new PublicError("服务器实例或协议已变更，请重新连接", 409);
 		const upstream = request(
 			{ socketPath: socket, path, method: "POST", headers: { "Content-Type": "application/json" }, timeout: 65000 },
-			(result) => {
+			async (result) => {
 				if (!access.authenticate(auth)) {
 					result.destroy();
 					reply(res, 401, { error: "设备已被吊销" });
+					return;
+				}
+				if (body.channel === IpcChannel.resourcePreview && result.statusCode === 200) {
+					try {
+						const data = await readBody(result);
+						if (typeof data.id !== "string") throw new PublicError("资源响应无效");
+						reply(res, 200, resources.ticket(device, data.id));
+					} catch (error) { failure(res, error); }
 					return;
 				}
 				res.writeHead(result.statusCode ?? 502, { "Content-Type": "application/json" });
@@ -124,7 +137,7 @@ const server = createServer(async (req, res) => {
 		failure(res, error);
 	}
 });
-server.requestTimeout = 30000;
+server.requestTimeout = 300000;
 server.headersTimeout = 10000;
 const port = Number(process.env.RALLY_PORT ?? 4711);
 if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("RALLY_PORT 无效");
@@ -134,6 +147,7 @@ server.listen(port, process.env.RALLY_HOST || "127.0.0.1", () =>
 function stop() {
 	if (stopping) return;
 	stopping = true;
+	resources.close();
 	server.close(() => access.db.close());
 	server.closeAllConnections();
 }

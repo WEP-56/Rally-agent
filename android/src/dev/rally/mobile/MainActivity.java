@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.net.Uri;
+import android.provider.DocumentsContract;
 import android.os.Build;
 import android.os.Bundle;
 import android.security.keystore.KeyGenParameterSpec;
@@ -54,6 +55,7 @@ public final class MainActivity extends Activity {
     private GeckoView view;
     private volatile GeckoSession session;
     private Bridge bridge;
+    private Bridge.Download pickingDownload;
     private FrameLayout root;
     private final ExecutorService pool = Executors.newFixedThreadPool(4);
 
@@ -183,7 +185,13 @@ public final class MainActivity extends Activity {
             @Override public GeckoResult<PromptResponse> onFilePrompt(GeckoSession source, FilePrompt prompt) {
                 cancelFile(); filePrompt = prompt; fileResult = new GeckoResult<>();
                 GeckoResult<PromptResponse> result = fileResult;
-                Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*");
+                Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");
+                if (prompt.mimeTypes != null && prompt.mimeTypes.length > 0) {
+                    String[] types = Arrays.stream(prompt.mimeTypes).filter(type -> type.contains("/")).toArray(String[]::new);
+                    if (types.length == 1) pick.setType(types[0]);
+                    else if (types.length > 1) pick.putExtra(Intent.EXTRA_MIME_TYPES, types);
+                }
+                pick.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, prompt.type == FilePrompt.Type.MULTIPLE);
                 try { startActivityForResult(pick, 70); } catch (Exception error) { cancelFile(); }
                 return result;
             }
@@ -241,9 +249,20 @@ public final class MainActivity extends Activity {
         private WebExtension.Port port;
         private volatile boolean active = true;
         private final Set<HttpURLConnection> connections = ConcurrentHashMap.newKeySet();
+        private final Map<String, Download> downloads = new ConcurrentHashMap<>();
+
+        private final class Download {
+            final String id;
+            final CompletableFuture<Uri> target = new CompletableFuture<>();
+            volatile boolean cancelled;
+            volatile HttpURLConnection connection;
+            Download(String id) { this.id = id; }
+            void check() throws IOException { if (cancelled || !active) throw new IOException("已取消保存"); }
+            void cancel() { cancelled = true; target.complete(null); if (connection != null) connection.disconnect(); }
+        }
 
         Bridge(GeckoSession page, String profile) { this.page = page; this.profile = profile; }
-        void close() { active = false; if (port != null) port.disconnect(); for (HttpURLConnection connection : connections) connection.disconnect(); }
+        void close() { active = false; for (Download download : downloads.values()) download.cancel(); if (port != null) port.disconnect(); for (HttpURLConnection connection : connections) connection.disconnect(); }
         @Override public void onConnect(WebExtension.Port connection) {
             WebExtension.MessageSender sender = connection.sender;
             if (!active || sender.session != page || !sender.isTopLevel() || !sender.url.equals(extension.metaData.baseUrl + "ui/index.html")) { connection.disconnect(); return; }
@@ -300,8 +319,27 @@ public final class MainActivity extends Activity {
 
         private void call(String id, String method, String args) {
             if (!active || id == null || !id.matches("[0-9a-f-]{36}") || args == null || args.length() > 1024 * 1024) return;
+            // Cancellation must not wait behind network reads in the four-worker pool.
+            if (method.equals("cancelSave")) {
+                try { Download download = downloads.get(new JSONArray(args).getString(0)); if (download != null) download.cancel(); reply(id, true, null); }
+                catch (Exception error) { reply(id, false, "无效下载编号"); }
+                return;
+            }
+            // Register on the message thread, before queuing network work, so immediate cancel sees it.
+            final Download scheduledDownload;
+            try {
+                if (method.equals("saveResource") && !profile.isEmpty()) {
+                    JSONArray values = new JSONArray(args);
+                    String resourceId = values.getString(0), downloadId = values.getString(1);
+                    if (!resourceId.matches("[a-f0-9-]{36}") || !downloadId.matches("[a-f0-9-]{36}")) throw new IOException("无效下载编号");
+                    synchronized (downloads) {
+                        if (downloads.size() >= 2 || downloads.containsKey(downloadId)) throw new IOException("下载已在进行或下载过多");
+                        scheduledDownload = new Download(downloadId); downloads.put(downloadId, scheduledDownload);
+                    }
+                } else scheduledDownload = null;
+            } catch (Exception error) { reply(id, false, error.getMessage()); return; }
             pool.execute(() -> {
-                if (!active) return;
+                if (!active) { if (scheduledDownload != null) downloads.remove(scheduledDownload.id); return; }
                 try {
                     JSONArray values = new JSONArray(args);
                     JSONObject info = new JSONObject().put("instance", get(profile + ".instance")).put("protocol", 1);
@@ -315,6 +353,10 @@ public final class MainActivity extends Activity {
                         if (!route.equals("rpc") && !route.equals("events")) throw new IOException("不支持此接口");
                         JSONObject body = values.getJSONObject(1).put("instance", get(profile + ".instance")).put("protocol", 1);
                         result = post(get(profile + ".url"), token(profile), route, body);
+                    } else if (method.equals("upload") && !profile.isEmpty()) {
+                        result = upload(values.getString(0), values.getLong(1), values.getString(2));
+                    } else if (method.equals("saveResource") && !profile.isEmpty()) {
+                        result = saveResource(values.getString(0), scheduledDownload);
                     } else if (method.equals("select") && values.getString(0).equals("cloud")) {
                         String url = normalizeUrl(values.getString(1)), key = values.getString(2), next = get("url:" + url);
                         SharedPreferences.Editor edit = prefs.edit();
@@ -337,6 +379,99 @@ public final class MainActivity extends Activity {
             });
         }
 
+        private HttpURLConnection resourceConnection(String path) throws Exception {
+            if (!active) throw new IOException("连接已切换");
+            HttpURLConnection connection = (HttpURLConnection) new URL(get(profile + ".url") + path).openConnection();
+            connection.setInstanceFollowRedirects(false); connection.setConnectTimeout(10000); connection.setReadTimeout(120000);
+            connection.setRequestProperty("Authorization", "Bearer " + token(profile));
+            connection.setRequestProperty("X-Rally-Instance", get(profile + ".instance"));
+            connection.setRequestProperty("X-Rally-Protocol", "1");
+            return connection;
+        }
+
+        private Object upload(String id, long offset, String encoded) throws Exception {
+            if (!id.matches("[a-f0-9-]{36}") || offset < 0 || encoded.length() > 350000) throw new IOException("上传分块无效");
+            byte[] bytes = Base64.decode(encoded, Base64.NO_WRAP);
+            if (bytes.length == 0 || bytes.length > 256 * 1024) throw new IOException("上传分块过大");
+            HttpURLConnection connection = resourceConnection("/v1/uploads/" + id + "?offset=" + offset); connections.add(connection);
+            try {
+                connection.setRequestMethod("PUT"); connection.setDoOutput(true); connection.setFixedLengthStreamingMode(bytes.length);
+                connection.setRequestProperty("Content-Type", "application/octet-stream");
+                try (OutputStream output = connection.getOutputStream()) { output.write(bytes); }
+                int status = connection.getResponseCode();
+                InputStream stream = status == 200 ? connection.getInputStream() : connection.getErrorStream();
+                if (stream == null) throw new IOException("上传失败：" + status);
+                StringBuilder text = new StringBuilder();
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, UTF_8))) {
+                    char[] buffer = new char[4096]; int count;
+                    while ((count = reader.read(buffer)) != -1) { if (text.length() + count > 65536) throw new IOException("上传响应过大"); text.append(buffer, 0, count); }
+                }
+                JSONObject value = new JSONObject(text.toString());
+                if (status != 200) throw new IOException(value.optString("error", "上传失败：" + status));
+                if (!active) throw new IOException("连接已切换");
+                return value;
+            } finally { connections.remove(connection); connection.disconnect(); }
+        }
+
+        private boolean saveResource(String resourceId, Download download) throws Exception {
+            String downloadId = download.id;
+            File temporary = null; Uri target = null; boolean saved = false;
+            try {
+                download.check();
+                JSONObject resource = (JSONObject) post(get(profile + ".url"), token(profile), "rpc", new JSONObject().put("instance", get(profile + ".instance")).put("protocol", 1).put("channel", "resources:get").put("args", new JSONArray().put(resourceId)));
+                long size = resource.getLong("size"); String hash = resource.getString("sha256");
+                if (size < 0 || size > 1024L * 1024 * 1024 || !hash.matches("[a-f0-9]{64}")) throw new IOException("资源元数据无效");
+                download.check();
+                runOnUiThread(() -> {
+                    if (!active || download.cancelled) { download.target.complete(null); return; }
+                    if (pickingDownload != null) { download.target.completeExceptionally(new IOException("请先完成当前保存位置选择")); return; }
+                    pickingDownload = download;
+                    Intent save = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(resource.optString("mime", "application/octet-stream"));
+                    save.putExtra(Intent.EXTRA_TITLE, resource.optString("name", "attachment").replaceAll("[\\x00-\\x1f/\\\\]", "_"));
+                    try { startActivityForResult(save, 71); } catch (Exception error) { pickingDownload = null; download.target.completeExceptionally(error); }
+                });
+                target = download.target.get(); if (target == null) return false; download.check();
+                temporary = File.createTempFile("rally-resource-", ".partial", getCacheDir());
+                HttpURLConnection connection = resourceConnection("/v1/resources/" + resourceId + "/content"); download.connection = connection; connections.add(connection);
+                try {
+                    if (connection.getResponseCode() != 200) throw new IOException("下载失败：" + connection.getResponseCode());
+                    MessageDigest digest = MessageDigest.getInstance("SHA-256"); long received = 0, lastProgress = 0;
+                    try (InputStream input = connection.getInputStream(); FileOutputStream output = new FileOutputStream(temporary)) {
+                        byte[] buffer = new byte[65536]; int count;
+                        while ((count = input.read(buffer)) != -1) {
+                            download.check(); received += count; if (received > size) throw new IOException("下载文件大小不一致");
+                            digest.update(buffer, 0, count); output.write(buffer, 0, count);
+                            if (System.currentTimeMillis() - lastProgress > 200 || received == size) { progress(downloadId, received, size); lastProgress = System.currentTimeMillis(); }
+                        }
+                        output.getFD().sync();
+                    }
+                    StringBuilder actual = new StringBuilder(); for (byte value : digest.digest()) actual.append(String.format(Locale.ROOT, "%02x", value & 255));
+                    if (received != size || !actual.toString().equals(hash)) throw new IOException("下载校验不一致，请重试");
+                } finally { download.connection = null; connections.remove(connection); connection.disconnect(); }
+                download.check();
+                try (InputStream input = new FileInputStream(temporary); OutputStream output = getContentResolver().openOutputStream(target, "wt")) {
+                    if (output == null) throw new IOException("无法打开所选保存位置");
+                    byte[] buffer = new byte[65536]; int count;
+                    while ((count = input.read(buffer)) != -1) { download.check(); output.write(buffer, 0, count); }
+                    output.flush(); download.check();
+                }
+                saved = true; return true;
+            } catch (Exception error) { if (download.cancelled || !active) return false; throw error; }
+            finally {
+                downloads.remove(downloadId); if (temporary != null) temporary.delete();
+                // ACTION_CREATE_DOCUMENT returns a new document; remove incomplete files on cancellation.
+                if (!saved && target != null) deleteDocument(target);
+            }
+        }
+
+        private void progress(String id, long received, long size) {
+            runOnUiThread(() -> {
+                if (!active || page != session || port == null) return;
+                try { port.postMessage(new JSONObject().put("type", "resource-save-progress").put("json", new JSONObject().put("id", id).put("received", received).put("size", size).toString())); }
+                catch (JSONException error) { Log.e("Rally", "Cannot encode download progress", error); }
+            });
+        }
+
         private void reply(String id, boolean ok, Object result) {
             runOnUiThread(() -> {
                 if (!active || page != session || port == null) return;
@@ -352,10 +487,21 @@ public final class MainActivity extends Activity {
     @Override protected void onActivityResult(int code, int status, Intent data) {
         super.onActivityResult(code, status, data);
         if (code == 70 && filePrompt != null) {
-            if (status == RESULT_OK && data != null && data.getData() != null && !filePrompt.isComplete()) fileResult.complete(filePrompt.confirm(this, data.getData()));
+            if (status == RESULT_OK && data != null && !filePrompt.isComplete()) {
+                List<Uri> files = new ArrayList<>();
+                if (data.getClipData() != null) for (int i = 0; i < data.getClipData().getItemCount(); i++) files.add(data.getClipData().getItemAt(i).getUri());
+                else if (data.getData() != null) files.add(data.getData());
+                if (!files.isEmpty()) fileResult.complete(filePrompt.type == GeckoSession.PromptDelegate.FilePrompt.Type.MULTIPLE ? filePrompt.confirm(this, files.toArray(new Uri[0])) : filePrompt.confirm(this, files.get(0)));
+            }
             cancelFile();
         }
+        if (code == 71 && pickingDownload != null) {
+            Bridge.Download download = pickingDownload; pickingDownload = null;
+            Uri uri = status == RESULT_OK && data != null ? data.getData() : null;
+            if (!download.target.complete(uri) && uri != null) deleteDocument(uri);
+        }
     }
+    private void deleteDocument(Uri uri) { try { DocumentsContract.deleteDocument(getContentResolver(), uri); } catch (Exception ignored) { } }
     @Override protected void onPause() { if (session != null) session.setActive(false); super.onPause(); }
     @Override protected void onResume() { super.onResume(); if (session != null) session.setActive(true); }
     @Override public void onBackPressed() {

@@ -21,6 +21,7 @@ export function conversationItems(messages: ChatMsg[], questions: TaskQuestionVi
 		const previous = result.at(-1);
 		if (item.role === "assistant" && previous?.role === "assistant" && item.runId === previous.runId && !item.taskRef && !previous.taskRef && !item.steps?.length && !previous.steps?.length) {
 			result[result.length - 1] = { ...previous, text: previous.text + "\n\n" + item.text,
+				attachments: [...new Map([...(previous.attachments ?? []), ...(item.attachments ?? [])].map(ref => [ref.id, ref])).values()],
 				blocks: [...blocksOf(previous), ...blocksOf(item)], toolCalls: [...(previous.toolCalls ?? []), ...(item.toolCalls ?? [])], streaming: item.streaming };
 		} else result.push(item);
 	}

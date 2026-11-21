@@ -1,5 +1,7 @@
+import type { ResourceRef } from "./resources.ts";
 /** Bounded tool activity for display; never a worker conversation transcript. */
 export interface ToolCall {
+	attachments?: ResourceRef[];
 	id: string;
 	runId?: string;
 	name: string;

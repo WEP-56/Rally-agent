@@ -15,6 +15,7 @@ coverage/
 example/
 packages/ai/src/providers/data/
 .artifacts/
+/.signing/
 *.tsbuildinfo
 
 # Local agent configuration and runtime data

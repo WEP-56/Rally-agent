@@ -4,7 +4,7 @@ import "./index.css";
 import App from "./App";
 import { connect, disconnect, isConnected } from "./connection";
 import { ConnectionForm } from "./components/ConnectionForm";
-import { Button } from "./components/ui";
+import { Button, RallyLogo } from "./components/ui";
 
 declare global {
 	interface Window {
@@ -62,9 +62,15 @@ function setup(reason = "") {
 					</button>
 				</div>
 			)}
-			<div className="grid flex-1 place-content-center gap-4 p-4">
-				<ConnectionForm reason={reason} />
-				{reason && <Button onClick={() => location.reload()}>重试原连接</Button>}
+			<div className="relative mx-auto flex w-full max-w-[600px] flex-1 flex-col justify-center gap-6 px-5 py-8">
+				<header className="text-center">
+					<RallyLogo size={64} className="mx-auto rounded-2xl shadow-pop" />
+					<p className="mt-5 text-xs tracking-[0.25em] text-faint">RALLY · {reason ? "CONNECTION" : "WELCOME"}</p>
+					<h1 className="mt-2 text-2xl font-semibold tracking-tight">{reason ? "重新连接你的 Rally" : "让 Rally 从这里开始"}</h1>
+					<p className="mt-2 text-sm text-muted">{reason ? "检查当前连接，或选择另一处运行位置。" : "先选择运行位置，接着设置你的 Agent、记忆与模型。"}</p>
+				</header>
+				<div className="glass-strong rounded-3xl p-5 sm:p-6"><ConnectionForm reason={reason} /></div>
+				{reason && <Button onClick={() => location.reload()}>返回并重试原连接</Button>}
 			</div>
 		</main>,
 	);

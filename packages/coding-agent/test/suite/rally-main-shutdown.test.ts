@@ -12,7 +12,7 @@ const state = vi.hoisted(() => {
 	return { agentDir, ready, whenReady, armed, arm, stopped, requests, closed, sessions, order, listeners,
 		exit: vi.fn(), dispose: vi.fn(async (pending: Promise<void>) => { order.push("supervisor"); await Promise.all([pending, sessions]); order.push("saved"); }), windows: vi.fn(), cancel: vi.fn(async () => { order.push("cancelled"); }) };
 });
-vi.mock("../../../../src/main/connection-host.ts", () => ({ connectionHost: () => ({mode:"local"}) }));
+vi.mock("../../../../src/main/connection-host.ts", () => ({ connectionHost: () => ({mode:"local", close: async () => { state.order.push("connection"); }}) }));
 vi.mock("electron", () => ({
 	app: { requestSingleInstanceLock: () => true, whenReady: () => state.whenReady, on: (name: string, callback: (...args: unknown[]) => void) => state.listeners.set(name, callback), exit: state.exit },
 	BrowserWindow: state.windows, nativeTheme: { shouldUseDarkColors: false }, dialog: {}, shell: {},
@@ -35,8 +35,8 @@ it("routes repeated Electron quit requests through the guard before concurrent I
 	const event = { preventDefault: vi.fn() }; const quit = state.listeners.get("before-quit")!;
 	quit(event); quit(event); await vi.waitFor(() => expect(state.order).toEqual(["arm"]));
 	expect(event.preventDefault).toHaveBeenCalledTimes(2); expect(state.dispose).not.toHaveBeenCalled();
-	state.armed(); await vi.waitFor(() => expect(state.order).toEqual(["arm", "ipc", "supervisor"]));
+	state.armed(); await vi.waitFor(() => expect(state.order).toEqual(["arm", "ipc", "connection", "supervisor"]));
 	state.stopped(); await Promise.resolve(); expect(state.exit).not.toHaveBeenCalled();
 	state.closed(); await vi.waitFor(() => expect(state.exit).toHaveBeenCalledExactlyOnceWith(0));
-	expect(state.order).toEqual(["arm", "ipc", "supervisor", "saved", "cancelled"]); expect(state.windows).not.toHaveBeenCalled();
+	expect(state.order).toEqual(["arm", "ipc", "connection", "supervisor", "saved", "cancelled"]); expect(state.windows).not.toHaveBeenCalled();
 });

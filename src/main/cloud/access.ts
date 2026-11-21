@@ -57,4 +57,5 @@ export class AccessStore {
 	revoke(id: string) {
 		this.db.prepare("DELETE FROM devices WHERE id=?").run(id);
 	}
+	hasDevice(id: string): boolean { return Boolean(this.db.prepare("SELECT 1 FROM devices WHERE id=? AND token IS NOT NULL").get(id)); }
 }

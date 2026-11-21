@@ -10,6 +10,7 @@ import { businessHandlers } from "../business.ts";
 import { Supervisor } from "../supervisor/index.ts";
 import { ensureRallyDirs, resolveRallyPaths } from "../paths.ts";
 import { IpcEvent, IpcChannel } from "../../shared/ipc.ts";
+import { RESOURCE_COMMANDS, resourceBytes, resourceCommand } from "./resources.ts";
 
 process.umask(0o077);
 const paths = resolveRallyPaths();
@@ -58,6 +59,11 @@ let stopping = false;
 const server = createServer(async (req, res) => {
 	try {
 		if (stopping) throw new PublicError("服务正在停止", 503);
+		if (/^\/v1\/(uploads|resources)\//.test(req.url ?? "")) {
+			const operation = resourceBytes(req, res, supervisor.resources); pending.add(operation);
+			try { await operation; } finally { pending.delete(operation); }
+			return;
+		}
 		if (req.method !== "POST" || !["/v1/rpc", "/v1/events"].includes(req.url ?? ""))
 			throw new PublicError("接口不存在", 404);
 		const body = await readBody(req);
@@ -83,7 +89,7 @@ const server = createServer(async (req, res) => {
 		}
 		if (
 			typeof body.channel !== "string" ||
-			!Object.hasOwn(methods, body.channel) ||
+			(!Object.hasOwn(methods, body.channel) && !RESOURCE_COMMANDS.has(body.channel)) ||
 			!Array.isArray(body.args) ||
 			body.args.length > 5
 		)
@@ -93,9 +99,10 @@ const server = createServer(async (req, res) => {
 		const call = Promise.resolve().then(() =>
 			channel === IpcChannel.chatSend
 				? requests.run(body.device, body.requestId, args, () =>
-						supervisor.main.send(typeof args[0] === "string" ? args[0] : ""),
+							supervisor.main.send(typeof args[0] === "string" ? args[0] : "", args[1] as string[] | undefined, String(body.device)),
 					)
-				: Reflect.apply(methods[channel as keyof typeof methods], undefined, args),
+					: RESOURCE_COMMANDS.has(channel) ? resourceCommand(supervisor.resources, String(body.device ?? ""), channel, args)
+					: Reflect.apply(methods[channel as keyof typeof methods], undefined, args),
 		);
 		pending.add(call);
 		try {
@@ -114,12 +121,13 @@ const server = createServer(async (req, res) => {
 		failure(res, error);
 	}
 });
-server.requestTimeout = 30000;
+server.requestTimeout = 300000;
 
 async function stop() {
 	if (stopping) return;
 	stopping = true;
 	server.close();
+	server.closeAllConnections();
 	try {
 		await supervisor.dispose(Promise.allSettled([...pending]).then(() => {}));
 	} catch {

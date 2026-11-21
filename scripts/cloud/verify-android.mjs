@@ -4,7 +4,7 @@ import { posix } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 
 /** Check the same local ZIP names that Android AssetManager consumes, not just jar's listing. */
-export function verifyAndroid(path) {
+export function verifyAndroid(path, expectedAbi) {
   const bytes = readFileSync(path);
   let end = bytes.length - 22;
   while (end >= Math.max(0, bytes.length - 65557) && bytes.readUInt32LE(end) !== 0x06054b50) end--;
@@ -35,7 +35,16 @@ export function verifyAndroid(path) {
     if (/^(data:|https?:)/.test(match[1])) continue;
     assert.ok(entries.has(posix.normalize('assets/extension/ui/' + match[1])), `Missing entry resource: ${match[1]}`);
   }
-  assert.ok(JSON.parse(read('assets/extension/manifest.json')).permissions.includes('nativeMessaging'));
-  assert.ok(entries.has('lib/arm64-v8a/libxul.so'), 'Gecko engine is missing');
-  console.log('APK assets, ZIP paths and bundled Gecko engine verified');
+  const manifest = JSON.parse(read('assets/extension/manifest.json'));
+  assert.ok(manifest.permissions.includes('nativeMessaging'));
+  assert.match(manifest.content_security_policy, /img-src [^;]*blob:/, 'Attachment thumbnails need Blob URLs');
+  assert.match(manifest.content_security_policy, /media-src [^;]*https:/, 'Media preview policy is missing');
+  assert.match(manifest.content_security_policy, /connect-src [^;]*https:/, 'Text preview policy is missing');
+  const abis = [...new Set([...entries.keys()].flatMap(name => /^lib\/([^/]+)\//.exec(name)?.[1] ?? []))].sort();
+  assert.ok(abis.length > 0, 'No native libraries');
+  if (expectedAbi) assert.deepEqual(abis, [expectedAbi], 'APK must contain exactly its declared ABI');
+  for (const abi of abis) assert.ok(entries.has(`lib/${abi}/libxul.so`), `Gecko engine is missing for ${abi}`);
+  assert.ok(entries.has('assets/licenses/geckoview-MPL-2.0.txt'));
+  assert.ok(entries.has('assets/licenses/geckoview-sources.txt'));
+  console.log(`APK assets, ZIP paths and Gecko verified (${abis.join(', ')})`);
 }

@@ -1972,22 +1972,25 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		await vi.waitFor(() => expect(supervisor.workers.has(first.id) && supervisor.workers.streamingCount() === 0).toBe(true));
 		const second = createTask(supervisor);
 		const third = createTask(supervisor);
-		supervisor.approve(second.id);
-		supervisor.approve(third.id);
-		await vi.waitFor(() => expect(supervisor.workers.streamingCount()).toBe(2));
-		if (kind === "answer") {
-			const id = first.attention!.id;
-			supervisor.store.escalateAttention(first.id, id);
-			supervisor.answerOption(first.id, id, "逐字原话");
-		} else expect((await toolsFor(supervisor)("task_steer", { taskId: first.id, quotes: [{ id: "#fixture" }] })).isError).not.toBe(true);
-		const input = first.inputs.at(-1)!;
-		expect(input.deliveredAt).toBeDefined();
-		expect(first.queue).toBeUndefined();
-		await vi.waitFor(() => expect(first.ended?.outcome).toBe("done"));
-		expect(input.deliveredAt).toBeDefined();
-		expect(supervisor.workers.streamingCount()).toBeLessThanOrEqual(3);
-		releaseSecond();
-		releaseThird();
+		try {
+			supervisor.approve(second.id);
+			supervisor.approve(third.id);
+			await vi.waitFor(() => expect(supervisor.workers.streamingCount()).toBe(2));
+			if (kind === "answer") {
+				const id = first.attention!.id;
+				supervisor.store.escalateAttention(first.id, id);
+				supervisor.answerOption(first.id, id, "逐字原话");
+			} else expect((await toolsFor(supervisor)("task_steer", { taskId: first.id, quotes: [{ id: "#fixture" }] })).isError).not.toBe(true);
+			const input = first.inputs.at(-1)!;
+			// Delivery is recorded after attachment preparation and actual Pi admission.
+			await vi.waitFor(() => expect(input.deliveredAt).toBeDefined());
+			expect(first.queue).toBeUndefined();
+			await vi.waitFor(() => expect(first.ended?.outcome).toBe("done"));
+			expect(supervisor.workers.streamingCount()).toBeLessThanOrEqual(3);
+		} finally {
+			releaseSecond();
+			releaseThird();
+		}
 		await vi.waitFor(() => expect(supervisor.workers.streamingCount()).toBe(0));
 	});
 
@@ -2210,14 +2213,15 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 				return fauxAssistantMessage(fauxToolCall("task_report", { state: "ready", summary: "已保留" }), { stopReason: "toolUse" });
 			}, fauxAssistantMessage("完成。"),
 		]);
-		supervisor.approve(task.id);
-		await vi.waitFor(() => expect(harness.faux.state.callCount).toBe(2));
-		const id = task.attention!.id;
-		supervisor.store.escalateAttention(task.id, id);
-		supervisor.answerOption(task.id, id, "保留");
-		expect(task.inputs.at(-1)?.deliveredAt).toBeDefined();
-		expect(supervisor.workers.streamingCount()).toBe(1);
-		release();
+		try {
+			supervisor.approve(task.id);
+			await vi.waitFor(() => expect(harness.faux.state.callCount).toBe(2));
+			const id = task.attention!.id;
+			supervisor.store.escalateAttention(task.id, id);
+			supervisor.answerOption(task.id, id, "保留");
+			await vi.waitFor(() => expect(task.inputs.at(-1)?.deliveredAt).toBeDefined());
+			expect(supervisor.workers.streamingCount()).toBe(1);
+		} finally { release(); }
 		await vi.waitFor(() => expect(task.ended?.outcome).toBe("done"));
 		expect(task.runs).toHaveLength(1);
 	});

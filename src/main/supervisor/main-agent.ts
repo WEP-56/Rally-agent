@@ -23,6 +23,10 @@ import { searchChat, type ChatSearchParams } from "./chat-search.ts";
 import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
+import type { ResourceStore } from "../resource-store.ts";
+import type { ResourceRef } from "../../shared/resources.ts";
+import { AttachmentQueue, attachmentMessage, resolveAttachments } from "./attachments.ts";
+import { resourceTools } from "./resource-tools.ts";
 
 /** Tools the main agent may call: read-only file access only (docs 02 section 2). */
 const MAIN_TOOLS = ["read", "grep", "find", "ls"];
@@ -30,6 +34,7 @@ const QUERY_TOOLS = new Set([...MAIN_TOOLS, "chat_search", "git_inspect", "githu
 const NEW_CONVERSATION_COMPACTIONS = 4;
 
 export interface MainAgentOptions {
+	resources?(): ResourceStore;
 	models: ModelStore;
 	customTools?: ToolDefinition[];
 	workspace?(): WorkspaceState;
@@ -60,6 +65,7 @@ export class MainAgent {
 	private compactions = 0;
 	private header: ChatHeaderState = { activity: null, showCompact: false, showNewConversation: false };
 	private localSubmissions = 0;
+	private submissions?: AttachmentQueue;
 	private remoteTurn?: Promise<string | null>;
 	private readonly receivedIm = new Set<string>();
 	private model: string | null = null;
@@ -72,6 +78,7 @@ export class MainAgent {
 	private readonly emit: (event: ChatEvent) => void;
 	private readonly customTools: ToolDefinition[];
 	private readonly models: ModelStore;
+	private readonly resources?: () => ResourceStore;
 	private readonly workspace?: () => WorkspaceState;
 	private readonly memory?: () => string;
 	private readonly identity?: () => string;
@@ -92,6 +99,7 @@ export class MainAgent {
 		this.emit = emit;
 		this.customTools = options.customTools ?? [];
 		this.models = options.models;
+		this.resources = options.resources;
 		this.workspace = options.workspace;
 		this.memory = options.memory;
 		this.identity = options.identity;
@@ -129,7 +137,7 @@ export class MainAgent {
 				kind = "proposal";
 			} else return null;
 		}
-		return { messageId: line.id, kind, text, at: line.at, source: line.source };
+		return { messageId: line.id, kind, text, at: line.at, source: line.source, attachments: line.attachments?.map(ref => ({ ...ref })) };
 	}
 
 	/** Durable relay metadata deduplicates an ambiguous send after restart. */
@@ -149,7 +157,8 @@ export class MainAgent {
 			? [`<rally-resume relays="${recovered.map((item) => item.id).join(",")}">Process the relay facts already in history. Their delivery acknowledgement was interrupted; do not repeat completed actions.</rally-resume>`] : [])].join("\n\n");
 		this.localSubmissions++;
 		try {
-			await session.sendCustomMessage({ customType: "rally-relay", content, display: false, details: { relayIds: ids } },
+			const payload = await attachmentMessage(this.resources?.(), content, items.flatMap(item => item.attachments ?? []), session.model);
+			await session.sendCustomMessage({ customType: "rally-relay", content: payload, display: false, details: { relayIds: ids } },
 				mode === "notice" ? { triggerTurn: false, deliverAs: "nextTurn" } : { triggerTurn: true, deliverAs: "steer" });
 		} catch (error) {
 			for (const item of fresh) this.queuedRelays.delete(item.id);
@@ -158,9 +167,9 @@ export class MainAgent {
 	}
 
 	/** Surface a supervisor fact in the conversation (system line, docs 01 §6). */
-	addSystemLine(text: string, relayId?: string): void {
+	addSystemLine(text: string, relayId?: string, attachments?: ResourceRef[]): void {
 		if (relayId && this.messages.some((line) => line.relayId === relayId)) return;
-		this.addLine("system", text, false, relayId);
+		this.addLine("system", text, false, relayId, undefined, attachments);
 	}
 
 	/** Lazily create the Pi session. Safe to call repeatedly. */
@@ -245,13 +254,16 @@ export class MainAgent {
 	}
 
 	/** Steer a busy desktop turn, or wait for an IM turn to finish. */
-	async send(text: string): Promise<void> {
+	async send(text: string, attachmentIds: string[] = [], actor = "desktop"): Promise<void> {
 		const trimmed = text.trim();
-		if (!trimmed) return;
+		if (!trimmed && !attachmentIds.length) return;
+		const resources = this.resources?.();
+		if (attachmentIds.length && !resources) throw Error("附件资源库不可用");
+		const attachments = resources ? resolveAttachments(resources, attachmentIds, actor) : [];
 		await this.start();
 		while (this.replacing || this.remoteTurn) await (this.replacing ?? this.remoteTurn)?.catch(() => {});
 		if (this.disposed) return;
-		const line = this.addLine("user", text);
+		const line = this.addLine("user", text, false, undefined, undefined, attachments);
 		const session = this.session;
 		if (!session) {
 			this.addLine("system", "主会话没有启动成功，消息未送达。");
@@ -261,22 +273,16 @@ export class MainAgent {
 			this.addLine("system", "尚未配置模型。请先在设置中接入一个 provider 并选择模型。");
 			return;
 		}
-		const deliverAs = session.isStreaming ? ("steer" as const) : undefined;
 		this.localSubmissions++;
 		this.onAvailable?.();
-		try {
-			// Do not await the whole turn: the run streams back through events.
-			void session.sendUserMessage(`[User message ${line.id}]\n${text}`, deliverAs ? { deliverAs } : undefined).catch((error: unknown) => {
-				this.fail(error);
-			}).finally(() => { this.localSubmissions--; });
-			this.onAvailable?.();
-		} catch (error) {
-			this.localSubmissions--;
-			this.fail(error);
-		}
+		// Do not await the whole turn; preserve order through image preparation and Pi admission.
+		void this.submissions!.send(() => attachmentMessage(resources, `[User message ${line.id}]\n${text}`, attachments, session.model), () => !this.disposed)
+			.catch((error: unknown) => { if (!this.disposed) this.fail(error); })
+			.finally(() => { this.localSubmissions--; if (!this.disposed) this.onAvailable?.(); });
 	}
 
 	async abort(): Promise<void> {
+		this.submissions?.cancel();
 		const session = this.session;
 		if (!session) return;
 		try {
@@ -325,11 +331,13 @@ export class MainAgent {
 	dispose(): Promise<void> {
 		if (this.disposal) return this.disposal;
 		this.disposed = true;
+		this.submissions?.cancel();
 		this.unsubscribe?.();
 		this.unsubscribe = null;
 		const session = this.session;
 		this.session = null;
 		this.disposal = Promise.allSettled([
+			this.submissions?.idle(),
 			this.starting,
 			this.replacing,
 			session ? closeRoleSession(session) : undefined,
@@ -361,6 +369,9 @@ export class MainAgent {
 				rolePrompt: MAIN_SYSTEM_PROMPT,
 				tools: MAIN_TOOLS,
 				customTools: this.customTools,
+				...(this.resources ? { extensions: [resourceTools({ store: this.resources, owner: "main", cwd: () => this.workspace?.().defaultWorkspace ?? this.paths.mainCwd,
+					roots: () => [this.workspace?.().defaultWorkspace ?? this.paths.mainCwd], active: () => !this.disposed,
+					publish: (id, refs) => this.publish(id, refs) })], extensionTools: ["resource_publish"] } : {}),
 			});
 			candidate = session;
 			if (this.disposed) { await closeRoleSession(session); return; }
@@ -375,6 +386,7 @@ export class MainAgent {
 				this.queuedRelays.clear();
 			}
 			this.session = session;
+			this.submissions = new AttachmentQueue(session);
 			this.compactions = compactions;
 			candidate = undefined;
 			const transform = session.agent.transformContext;
@@ -593,12 +605,23 @@ export class MainAgent {
 		this.emit({ type: "message", message: clone(line) });
 	}
 
-	private addLine(role: ChatRole, text: string, streaming = false, relayId?: string, source?: ImSource): ChatLine {
-		const line: ChatLine = { id: `#${this.nextLine++}`, role, text, at: Date.now(), streaming, relayId, source };
+	private addLine(role: ChatRole, text: string, streaming = false, relayId?: string, source?: ImSource, attachments?: ResourceRef[]): ChatLine {
+		const line: ChatLine = { id: `#${this.nextLine++}`, role, text, at: Date.now(), streaming, relayId, source, ...(attachments?.length ? { attachments } : {}) };
+		if (attachments?.length) this.resources?.().retain(`message:${line.id}`, attachments.map(ref => ref.id));
 		this.messages.push(line);
 		if (!streaming) this.logLine(line);
 		this.emit({ type: "message", message: clone(line) });
 		return line;
+	}
+
+	private publish(toolCallId: string, attachments: ResourceRef[]): void {
+		const line = this.toolLines.get(toolCallId);
+		if (!line) throw Error("找不到附件对应的工具调用");
+		this.resources?.().retain(`message:${line.id}`, attachments.map(ref => ref.id));
+		line.attachments = [...new Map([...(line.attachments ?? []), ...attachments].map(ref => [ref.id, ref])).values()];
+		const call = line.toolCalls?.find(call => call.id === toolCallId);
+		if (call) call.attachments = attachments;
+		this.logLine(line); this.emit({ type: "message", message: clone(line) });
 	}
 
 	private logLine(line: ChatLine): void {
@@ -611,6 +634,7 @@ export class MainAgent {
 			blocks: line.blocks,
 			relayId: line.relayId,
 			source: line.source,
+			attachments: line.attachments,
 		});
 	}
 
@@ -667,7 +691,8 @@ export class MainAgent {
 			const relayId = typeof event.data.relayId === "string" ? event.data.relayId : undefined;
 			const source = event.data.source as ImSource | undefined;
 			if (source?.platform === "feishu" || source?.platform === "qq") this.receivedIm.add(imKey(source));
-			const line = { id: `#${n}`, role, text, at, streaming: false, toolCalls, blocks, relayId, source };
+			const attachments = event.data.attachments as ResourceRef[] | undefined;
+			const line = { id: `#${n}`, role, text, at, streaming: false, toolCalls, blocks, relayId, source, attachments };
 			const index = this.messages.findIndex((item) => item.id === line.id);
 			if (index === -1) this.messages.push(line);
 			else this.messages[index] = line;
@@ -704,7 +729,7 @@ function imKey(source: ImSource): string {
 }
 
 function clone(line: ChatLine): ChatLine {
-	return { ...line, blocks: line.blocks?.map((block) => ({ ...block })), toolCalls: line.toolCalls?.map((call) => ({ ...call })) };
+	return { ...line, attachments: line.attachments?.map(ref => ({ ...ref })), blocks: line.blocks?.map((block) => ({ ...block })), toolCalls: line.toolCalls?.map((call) => ({ ...call })) };
 }
 
 function relayIds(details: unknown): string[] {

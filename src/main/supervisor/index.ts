@@ -15,6 +15,8 @@ import type { CredentialVault } from "../credential-vault.ts";
 import { QqMailConnection } from "../qqmail-connection.ts";
 import type { QqMailTransport } from "../qqmail-transport.ts";
 import { IdentityStore } from "../identity-store.ts";
+import { ResourceStore } from "../resource-store.ts";
+import { recoverResourceReferences } from "./resource-lifecycle.ts";
 import { MemoryStore } from "../memory-store.ts";
 import { createMemoryTools } from "./memory-tools.ts";
 import { createChatSearchTool } from "./chat-search.ts";
@@ -83,6 +85,7 @@ export class Supervisor {
 	readonly scheduler: Scheduler;
 	readonly schedules: ScheduledTasks;
 	readonly identity: IdentityStore;
+	readonly resources: ResourceStore;
 	readonly feishu: FeishuConnection;
 	readonly qqBot: QqBotConnection;
 	readonly qqMail: QqMailConnection;
@@ -98,6 +101,8 @@ export class Supervisor {
 	private autoApprove = false;
 	private disposed = false;
 	private disposal?: Promise<void>;
+	private resourceTimer?: ReturnType<typeof setInterval>;
+	private resourceMaintenance?: Promise<void>;
 
 	constructor(paths: RallyPaths, options: SupervisorOptions) {
 		this.paths = paths;
@@ -144,6 +149,7 @@ export class Supervisor {
 				notice: () => this.relay.captureSources() });
 			this.schedules = new ScheduledTasks(this.events, this.store, () => this.autoApprove, () => this.scheduler.tick());
 			this.main = new MainAgent(paths, this.events, options.emitChat, {
+				resources: () => this.resources,
 				models: this.models,
 				segmentBytes: options.mainSegmentBytes,
 				segmentCompactions: options.mainSegmentCompactions,
@@ -165,6 +171,7 @@ export class Supervisor {
 			});
 			this.relay = new Relay(this.main, this.events, this.store);
 			this.workers = new WorkerManager({
+				resources: () => this.resources,
 				network: this.network,
 				paths,
 				store: this.store,
@@ -192,6 +199,7 @@ export class Supervisor {
 				start: (task, run) => this.startRun(task, run),
 				onDependencyFailed: () => this.relay.captureSources(),
 			});
+			this.resources = new ResourceStore(join(paths.home, "resources"));
 		} catch (error) {
 			// No sessions start in the constructor. Drop partial timers before unlocking.
 			try { snapshot?.dispose(false); } finally { events?.close(); this.stateLock.release(); }
@@ -202,6 +210,9 @@ export class Supervisor {
 	async start(): Promise<void> {
 		if (this.disposed) return;
 		try {
+			const missingResources = recoverResourceReferences(this.resources, this.events, this.store);
+			if (!this.events.warnings.length) await this.maintainResources();
+			if (missingResources) this.main.addSystemLine(`${missingResources} 个附件的资源记录缺失，请从完整备份恢复资源目录。`);
 			await this.processes.recover();
 			if (this.disposed) return;
 			this.jobs.recover();
@@ -216,6 +227,10 @@ export class Supervisor {
 			this.feishu.start();
 			this.qqBot.start();
 			this.scheduler.tick();
+			if (!this.events.warnings.length) {
+				this.resourceTimer = setInterval(() => void this.maintainResources(), 60 * 60 * 1000);
+				this.resourceTimer.unref();
+			}
 		} catch (error) {
 			// The application arms its independent deadline before cleanup can await a stuck session.
 			const failures: unknown[] = [error];
@@ -235,12 +250,14 @@ export class Supervisor {
 
 	private async close(pendingRequests?: Promise<void>): Promise<void> {
 		const errors: unknown[] = [];
+		clearInterval(this.resourceTimer);
 		for (const stop of [() => this.qqMail.dispose(), () => this.qqBot.dispose(), () => this.schedules.dispose(), () => this.scheduler.dispose(), () => this.relay.dispose(), () => this.gates.dispose()]) {
 			try { stop(); } catch (error) { errors.push(error); }
 		}
 		// allSettled prevents an early rejection from releasing the lock while another session still closes.
 		const results = await Promise.allSettled([
 			pendingRequests,
+			this.resourceMaintenance,
 			Promise.resolve().then(() => this.feishu.dispose()),
 			Promise.resolve().then(() => this.jobs.dispose()),
 			Promise.resolve().then(() => this.services.dispose()),
@@ -250,11 +267,18 @@ export class Supervisor {
 			Promise.resolve().then(() => this.main.dispose()),
 		]);
 		errors.push(...results.flatMap(result => result.status === "rejected" ? [result.reason] : []));
+		try { await this.resources.close(); } catch (error) { errors.push(error); }
 		try { this.snapshot.dispose(); } catch (error) { errors.push(error); }
 		this.events.close();
 		// If cleanup is uncertain, retain ownership until process exit releases the OS lock.
 		if (errors.length) throw new AggregateError(errors, "Rally shutdown failed; state lock retained until exit");
 		this.stateLock.release();
+	}
+
+	private maintainResources(): Promise<void> {
+		return this.resourceMaintenance ??= this.resources.sweep().catch(error => {
+			console.error("Resource maintenance failed", error);
+		}).finally(() => { this.resourceMaintenance = undefined; });
 	}
 
 	board(): TaskBoard {
@@ -283,6 +307,7 @@ export class Supervisor {
 				...(task.services ?? []).filter(service => /^S-\d+$/.test(service.id)).map(service => join(this.paths.jobsDir, `${service.id}.log`))];
 			for (const file of files) { try { unlinkSync(file); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; } }
 			this.store.finishDelete(taskId);
+			this.resources.release(`task:${taskId}`);
 			this.options.emitServices?.(this.services.state());
 			return this.board();
 		} finally { this.store.abortDelete(taskId); }
@@ -324,6 +349,10 @@ export class Supervisor {
 			this.options.emitTask({ type: "deleted", taskId: task.id, board: this.board() });
 			return;
 		}
+		if (["task_created", "task_updated", "task_input"].includes(kind)) {
+			const attachments = [...[...task.quotes, ...task.inputs.flatMap(input => input.quotes ?? [])].flatMap(quote => quote.attachments ?? []), ...task.inputs.flatMap(input => input.attachments ?? [])];
+			if (attachments.length) this.resources?.retain(`task:${task.id}`, attachments.map(ref => ref.id));
+		}
 		if (["task_report", "gate_requested", "task_queued", "task_approved", "attention_answered", "gate_decided"].includes(kind)) this.relay?.captureSources();
 		if (kind === "task_ended") this.gates?.closeTask(task.id, "Task ended.");
 		if (kind === "task_ended") void this.jobs?.killTask(task.id).catch(error => console.error("Task job cleanup failed", error));
@@ -358,7 +387,8 @@ export class Supervisor {
 		question?: string | null,
 		options?: string[],
 	): ReportResult {
-		const result = this.store.report(task.id, runId, state, summary, question, options);
+		const attachments = [...new Map(this.store.timeline(task.id).filter(call => call.runId === runId && call.name === "resource_publish" && call.status === "ok").flatMap(call => call.attachments ?? []).map(ref => [ref.id, ref])).values()];
+		const result = this.store.report(task.id, runId, state, summary, question, options, attachments);
 		this.workers.noteReport(task.id, state);
 		const notifiedMain = result.attentionOpened || (!result.attention && state !== "progress");
 		this.scheduler.tick();

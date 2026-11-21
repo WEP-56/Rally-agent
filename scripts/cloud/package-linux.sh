@@ -28,4 +28,6 @@ chmod +x "$bundle/install.sh"
 chmod -R a+rX "$bundle"
 RALLY_TEST_SERVER="$bundle" node --test tests/cloud/server.test.mjs
 RALLY_TEST_SERVER="$bundle" node --test tests/cloud/agent.test.mjs
+RALLY_TEST_SERVER="$bundle" node --test tests/attachments/cloud.test.mjs
+RALLY_TEST_SERVER="$bundle" node --test tests/attachments/agent.test.mjs
 archive="release/rally-server-$ver-linux-$arch.tar.gz"; tar -czf "$archive" -C "$stage" "rally-server-$ver"; echo "$archive"

@@ -1,5 +1,6 @@
 import type { NotificationTarget } from "../../shared/notifications";
 import type { IdentityState } from "../../shared/identity";
+import type { ResourceRef } from "../../shared/resources";
 import { Cable, Globe, IdCard, Info, Moon, Palette, PanelRight, Plug, ListRestart, Settings as SettingsIcon, SquarePen, SquareTerminal, Sun, Wand2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "./chat";
@@ -20,7 +21,7 @@ import { IpcChannel } from "../../shared/ipc";
 
 
 
-const KIND_TITLE: Record<Exclude<TabKind, "task">, string> = { workstation: "Rally 的工位", browser: "新标签页", terminal: "终端", connections: "连接" };
+const KIND_TITLE: Record<Exclude<TabKind, "task" | "resource">, string> = { workstation: "Rally 的工位", browser: "新标签页", terminal: "终端", connections: "连接" };
 
 export default function App() {
   const winApi=window.rally.window, cloud=window.runtime.mode==="cloud";
@@ -105,7 +106,7 @@ export default function App() {
   }, []);
 
   const openTab = useCallback(
-    (kind: Exclude<TabKind, "task">, opts?: { url?: string; taskId?: string }) => {
+    (kind: Exclude<TabKind, "task" | "resource">, opts?: { url?: string; taskId?: string }) => {
       if(cloud && (kind==="browser" || kind==="terminal"))return;
       setView("main");
       setRightOpen(true);
@@ -117,6 +118,13 @@ export default function App() {
     },
     [tabs, addTab],
   );
+
+  const openResource = useCallback((resource: ResourceRef) => {
+    setView("main"); setRightOpen(true);
+    const existing = tabs.find(tab => tab.kind === "resource" && tab.resource?.id === resource.id);
+    if (existing) { setActive(existing.id); return; }
+    addTab({ id: uid(), kind: "resource", title: resource.name, resource });
+  }, [tabs, addTab]);
 
   const openTask = useCallback(
     (taskId: string) => {
@@ -374,7 +382,7 @@ export default function App() {
   );
 
   useEffect(()=>{const back=(e:Event)=>{if(e.defaultPrevented)return;if(palette){setPalette(false);}else if(phase){setPhase(null);}else if(view==="settings"){setView("main");}else if(rightOpen){setRightOpen(false);}else return;e.preventDefault();};window.addEventListener('rally-back',back);return()=>window.removeEventListener('rally-back',back);},[view,palette,phase,rightOpen]);
-  const ctx: AppCtx = { config, setConfig, identityReady, identityError, reloadIdentity, openTab, openTask, openSettings, rerunOnboarding };
+  const ctx: AppCtx = { config, setConfig, identityReady, identityError, reloadIdentity, openTab, openResource, openTask, openSettings, rerunOnboarding };
 
   return (
     <Ctx.Provider value={ctx}>
