@@ -10,14 +10,15 @@
 2. **浏览器能力。** 从 `src/main/browser.ts`、`src/renderer/src/browser.ts` 和 `src/main/supervisor/network-tools.ts` 区分用户工作台与 Agent 工具能力。评估 Worker 浏览器的最小范围、会话归属、人工接管与释放、操作审批；云端运行位置、登录态和浏览器扩展另行取舍。主 Agent 与 Worker 的既有分工、Rally 云端拓扑都不因调研自动改变。
 3. **定范围并开工。** 将涉及产品边界的决定写进 [问答记录](docs/superagent/00-问答记录.md)，把顺序、验收项和延后项写进 [实施 TODO](docs/开发实施TODO.md)。选定一项能独立验收的能力后直接开发。先复用 Rally 现有模块；若决定复用 PiBot 源码，按调研中的许可和第三方声明逐项核对。需要真实浏览器验证时使用仓库已有的浏览器测试方式，并按项目要求将视觉验收留给用户。
 
-目前只有 PiBot 源码调研结论；Rally 的新连接或浏览器能力尚未选定、实施。用户要求在**下一会话**开始这项工作，本轮仅提交前序开发并交接。
+目前只有 PiBot 源码调研结论；Rally 的新连接或浏览器能力尚未选定、实施。用户要求在**下一会话**开始这项工作，本轮只交付前序开发、发布和部署。
 
 ### 本轮已交付
 
 - **生图、搜索与设置**：见 [其它提供商配置](docs/其它提供商.md) 和 [工具规格](docs/superagent/02-工具规格.md)。生图普通请求省略可选字段，提供商可单独配置返回方式；结果接入主对话和任务附件。生图 5xx 提供追踪 ID，参数拒绝与成功返回后取图失败分开提示，结果不明或取图失败不自动重发。实际测试中首个服务的最小生图请求仍返回 502；第二个服务使用 `gpt-image-2.6-flare` 并指定 `response_format: "b64_json"` 成功取得可解码的 1024 × 1024 PNG，未验证 `sunburst`。
 - **聊天框**：模型和思考强度统一在设置 → 供应商调整。聊天框 `@` 向上展开可搜索的任务列表；选中或从任务详情引用后显示可移除标签，发送仍传递 `@T-编号`，已发送的标签可打开任务详情。
 - **Android 已收口**：源码修复 `a3753fe` 已推送；原生选择文件、上传及另一设备下载验过。证据在 `.artifacts/android-attachment-verification.json`，模拟器已关闭，用户明确不用再处理。
-- **验证与发布**：桌面构建、主进程和渲染端类型检查通过；生图/搜索专项 11 项、聊天与附件界面功能 4 项、云端双设备集成测试通过。全仓 `npm run typecheck` 仍只有 `fireworks-models` 与 `anthropic-empty-thinking-signature-compat` 的既有报错。视觉验收留给用户；本轮提交源码及文档，不推送、不发版、不更新 VPS。
+- **验证与发布**：桌面构建、主进程和渲染端类型检查通过；生图/搜索专项 11 项、聊天与附件界面功能 4 项、云端双设备集成测试通过。全仓 `npm run typecheck` 仍只有 `fireworks-models` 与 `anthropic-empty-thinking-signature-compat` 的既有报错。视觉验收留给用户。源码已推送（功能提交 `f4799a7`，版本提交 `ffeaa05`）。
+- **v0.2.0 已发布并部署（2026-11-22）**：[正式 Release](https://github.com/WEP-56/Rally-agent/releases/tag/v0.2.0)；[Actions 运行 #44988805971](https://github.com/WEP-56/Rally-agent/actions/runs/44988805971) 的 Windows、Linux、Android 和草稿任务全部通过。VPS 用正式 Linux 包升到 `0.2.0`，按用户要求未创建备份；`rally-runtime`、`rally-control` 均为 `active`，本机 `/health` 和运行时 `tasks:state` 正常。
 
 ## 上批交接点（2026-11-21，历史任务安排，已由上文收口）
 
