@@ -27,14 +27,17 @@ import type { ResourceStore } from "../resource-store.ts";
 import type { ResourceRef } from "../../shared/resources.ts";
 import { AttachmentQueue, attachmentMessage, resolveAttachments } from "./attachments.ts";
 import { resourceTools } from "./resource-tools.ts";
+import { createMainImageTool } from "./provider-tools.ts";
+import type { ToolProviderStore } from "../tool-provider-store.ts";
 
 /** Tools the main agent may call: read-only file access only (docs 02 section 2). */
 const MAIN_TOOLS = ["read", "grep", "find", "ls"];
-const QUERY_TOOLS = new Set([...MAIN_TOOLS, "chat_search", "git_inspect", "github_read", "fetch_page", "task_read", "schedule_list"]);
+const QUERY_TOOLS = new Set([...MAIN_TOOLS, "chat_search", "git_inspect", "github_read", "fetch_page", "web_search", "task_read", "schedule_list"]);
 const NEW_CONVERSATION_COMPACTIONS = 4;
 
 export interface MainAgentOptions {
 	resources?(): ResourceStore;
+	toolProviders?: ToolProviderStore;
 	models: ModelStore;
 	customTools?: ToolDefinition[];
 	workspace?(): WorkspaceState;
@@ -79,6 +82,7 @@ export class MainAgent {
 	private readonly customTools: ToolDefinition[];
 	private readonly models: ModelStore;
 	private readonly resources?: () => ResourceStore;
+	private imageAttempt?: { messageId: string; toolCallId: string; request: string; canCorrect: boolean };
 	private readonly workspace?: () => WorkspaceState;
 	private readonly memory?: () => string;
 	private readonly identity?: () => string;
@@ -97,7 +101,11 @@ export class MainAgent {
 		this.paths = paths;
 		this.events = events;
 		this.emit = emit;
-		this.customTools = options.customTools ?? [];
+		this.customTools = [...(options.customTools ?? [])];
+		if (options.resources && options.toolProviders) this.customTools.push(createMainImageTool({
+			providers: options.toolProviders, store: options.resources, owner: "main",
+			active: () => !this.disposed, publish: (id, refs) => this.publish(id, refs),
+		}, (message, id, request) => this.claimImageRequest(message, id, request)));
 		this.models = options.models;
 		this.resources = options.resources;
 		this.workspace = options.workspace;
@@ -612,6 +620,24 @@ export class MainAgent {
 		if (!streaming) this.logLine(line);
 		this.emit({ type: "message", message: clone(line) });
 		return line;
+	}
+
+	private claimImageRequest(messageId: string, toolCallId: string, request: string): (parametersRejected: boolean) => void {
+		const index = this.messages.findLastIndex(message => message.role === "user");
+		if (index < 0 || this.messages[index].id !== messageId) throw Error("主对话生图需要引用最近一条明确授权的用户消息");
+		const preceding = this.messages.slice(index + 1).flatMap(line => line.toolCalls ?? []).filter(call => call.name === "image_gen" && call.id !== toolCallId);
+		const previous = this.imageAttempt?.messageId === messageId ? this.imageAttempt : undefined;
+		if (previous) {
+			if (!previous.canCorrect || !preceding.some(call => call.id === previous.toolCallId && call.status === "error")) {
+				throw Error("主对话每条请求只能生成一次单张图片；批量生成或设计请发布任务");
+			}
+			if (previous.request === request) throw Error("参数没有变化，请按提供商文档调整参数，或向用户索要文档");
+		} else if (preceding.some(call => call.status !== "running")) {
+			throw Error("这条请求已有生图尝试；若仍需生成图片，请让用户在新的消息里确认");
+		}
+		const attempt = { messageId, toolCallId, request, canCorrect: false };
+		this.imageAttempt = attempt;
+		return (parametersRejected) => { if (!previous && parametersRejected) attempt.canCorrect = true; };
 	}
 
 	private publish(toolCallId: string, attachments: ResourceRef[]): void {

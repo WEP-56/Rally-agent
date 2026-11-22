@@ -43,6 +43,8 @@ import { createGithubReadTool } from "./github-tool.ts";
 import { managedGithubRunner } from "./github-runner.ts";
 import { NetworkRunner } from "./network-runner.ts";
 import { createFetchPageTool } from "./network-tools.ts";
+import { createWebSearchTool } from "./provider-tools.ts";
+import { ToolProviderStore } from "../tool-provider-store.ts";
 import { ProcessRegistry } from "./process-registry.ts";
 import { JobManager } from "./jobs.ts";
 import { ServiceManager } from "./services.ts";
@@ -77,6 +79,7 @@ export class Supervisor {
 	readonly store: TaskStore;
 	readonly snapshot: TaskSnapshot;
 	readonly models: ModelStore;
+	readonly toolProviders: ToolProviderStore;
 	readonly workspace: WorkspaceStore;
 	readonly memory: MemoryStore;
 	readonly main: MainAgent;
@@ -143,6 +146,7 @@ export class Supervisor {
 				onUserStop: service => { if (!this.disposed) this.main.addSystemLine(`已停止本地服务 ${service.name}（${service.id}，${service.taskId}）。`); },
 				onError: error => console.error("Rally service lifecycle failed", error),
 			});
+			this.toolProviders = new ToolProviderStore(join(paths.agentDir, "rally-tool-providers.json"), options.credentialVault);
 			this.models = new ModelStore(paths.modelsFile, managedModelConfigValue(this.processes, paths.agentDir));
 			this.gates = new GateService({ store: this.store, audit: this.audit, events: this.events,
 				quote: (ref) => this.main.quote(ref), requested: () => this.relay.captureSources(),
@@ -151,12 +155,13 @@ export class Supervisor {
 			this.main = new MainAgent(paths, this.events, options.emitChat, {
 				resources: () => this.resources,
 				models: this.models,
+				toolProviders: this.toolProviders,
 				segmentBytes: options.mainSegmentBytes,
 				segmentCompactions: options.mainSegmentCompactions,
 				taskState: () => rallyState(this.store, this.workers.streamingCount(), this.scheduler.limit, this.autoApprove),
 				scheduleState: () => this.schedules.context(),
 				capabilities: async () => (await catalog.context()) + (this.feishu.toolsEnabled() ? "\nFeishu worker MCP (rally_feishu): read shared documents and wiki nodes, search shared Bitable records. Only workers may call it." : "") + (this.qqMail.available() ? "\nQQ Mail worker tools: search/read the inbox, save attachments, and compose send/reply for explicit desktop approval. Only workers may call them." : ""),
-				customTools: [...createScheduleTools(() => this.schedules, ref => this.main.quote(ref)), createChatSearchTool((params) => this.main.search(params)), ...createMemoryTools(this.memory, (ref) => this.main.quote(ref), () => !this.disposed), ...createRouterReadTools(() => this.workspace.base(), this.processes, () => catalog.skillPaths), createGitInspectTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGitRunner(this.processes)), createGithubReadTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGithubRunner(this.processes)), createFetchPageTool(this.network), ...createMainTaskTools(this.host()), ...createGateTools(this.gates, this.store)],
+				customTools: [...createScheduleTools(() => this.schedules, ref => this.main.quote(ref)), createChatSearchTool((params) => this.main.search(params)), ...createMemoryTools(this.memory, (ref) => this.main.quote(ref), () => !this.disposed), ...createRouterReadTools(() => this.workspace.base(), this.processes, () => catalog.skillPaths), createGitInspectTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGitRunner(this.processes)), createGithubReadTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGithubRunner(this.processes)), createFetchPageTool(this.network), createWebSearchTool(this.toolProviders), ...createMainTaskTools(this.host()), ...createGateTools(this.gates, this.store)],
 				memory: () => this.memory.context(),
 				identity: () => this.identity.context(),
 				workspace: () => this.workspace.state(),
@@ -173,6 +178,7 @@ export class Supervisor {
 			this.workers = new WorkerManager({
 				resources: () => this.resources,
 				network: this.network,
+				toolProviders: this.toolProviders,
 				paths,
 				store: this.store,
 				models: this.models,
@@ -387,7 +393,7 @@ export class Supervisor {
 		question?: string | null,
 		options?: string[],
 	): ReportResult {
-		const attachments = [...new Map(this.store.timeline(task.id).filter(call => call.runId === runId && call.name === "resource_publish" && call.status === "ok").flatMap(call => call.attachments ?? []).map(ref => [ref.id, ref])).values()];
+		const attachments = [...new Map(this.store.timeline(task.id).filter(call => call.runId === runId && (call.name === "resource_publish" || call.name === "image_gen") && call.status === "ok").flatMap(call => call.attachments ?? []).map(ref => [ref.id, ref])).values()];
 		const result = this.store.report(task.id, runId, state, summary, question, options, attachments);
 		this.workers.noteReport(task.id, state);
 		const notifiedMain = result.attentionOpened || (!result.attention && state !== "progress");

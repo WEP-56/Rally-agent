@@ -175,6 +175,10 @@ export function createApi(ipcRenderer: ClientTransport): RallyApi {
 				return () => ipcRenderer.off(IpcEvent.task, handler);
 			},
 		},
+		toolProviders: {
+			getState: () => ipcRenderer.invoke(IpcChannel.toolProvidersState),
+			save: update => ipcRenderer.invoke(IpcChannel.toolProvidersSave, update),
+		},
 		models: {
 			getState: () => ipcRenderer.invoke(IpcChannel.modelsState),
 			save: (providers, revision) => ipcRenderer.invoke(IpcChannel.modelsSave, providers, revision),

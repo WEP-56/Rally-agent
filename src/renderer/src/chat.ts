@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { ChatLine, ChatState } from "../../shared/ipc";
-import type { ThinkingLevelName } from "../../shared/models";
 import { IpcChannel } from "../../shared/ipc";
 import { applyChat } from "../../shared/cloud-state";
 import { cloudRead } from "./cloud-cache";
@@ -30,7 +29,6 @@ export interface ChatController {
 	abort(): void;
 	reset(): Promise<boolean>;
 	newConversation(): Promise<void>;
-	selectModel(provider: string, model: string, level?: ThinkingLevelName): void;
 }
 
 export function useChat(): ChatController {
@@ -62,13 +60,6 @@ export function useChat(): ChatController {
 	const reset = useCallback(() => {
 		return window.rally.chat.reset();
 	}, []);
-	// Model switching is main-owned; the returned snapshot already reflects the new session state.
-	const selectModel = useCallback((provider: string, model: string, level?: ThinkingLevelName) => {
-		void window.rally.models
-			.select({ provider, model, thinkingLevel: level })
-			.then((snapshot) => setState(snapshot))
-			.catch((error: unknown) => console.error("models.select failed", error));
-	}, []);
 
-	return { ...state, send, abort, reset, selectModel, newConversation: window.rally.chat.newConversation };
+	return { ...state, send, abort, reset, newConversation: window.rally.chat.newConversation };
 }

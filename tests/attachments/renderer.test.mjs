@@ -11,13 +11,16 @@ async function until(check) {
   while (!check() && Date.now() < deadline) await setTimeout(10);
   assert.ok(check(), 'expected attachment UI state');
 }
-async function setup() {
+const mentionTask = (id, title, createdAt, archivedAt) => ({ id, title, createdAt, archivedAt, status: 'done', statusText: '完成', mode: 'readonly', cwd: '/work', scope: [], quotes: [], dependsOn: [], approval: { state: 'approved' } });
+
+async function setup(tasks = []) {
   const failures = []; const virtual = new VirtualConsole(); virtual.on('jsdomError', error => failures.push(error.message));
   const dom = new JSDOM(readFileSync('out/renderer/index.html', 'utf8'), { url: 'https://client.test', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: virtual });
   const { window } = dom; const events = new Map(); const calls = []; const uploads = new Map(); let counter = 0; let refuseSend = true; let refuseChunk = true;
   const chat = { messages: [], header: { activity: null, showCompact: false, showNewConversation: false }, busy: false, model: null, thinkingLevel: null, thinkingLevels: [], notice: null };
   const identity = { name: 'Rally', personality: '', workstyle: '', avatar: null };
   const emit = (channel, data) => { for (const callback of events.get(channel) ?? []) callback(null, data); };
+  window.rallyStartup = { ready() {}, fail(error) { failures.push(error?.stack ?? String(error)); } };
   window.localStorage.setItem('rally.onboarded.v1', '1');
   window.HTMLCanvasElement.prototype.getContext = () => null;
   window.HTMLElement.prototype.scrollTo = window.HTMLElement.prototype.scrollIntoView = () => {};
@@ -30,7 +33,7 @@ async function setup() {
     invoke: async (channel, ...args) => {
       calls.push({ channel, args });
       if (channel === 'chat:state') return chat;
-      if (channel === 'tasks:state') return { tasks: [], active: 0, limit: 2, autoApprove: false };
+      if (channel === 'tasks:state') return { tasks, active: 0, limit: 2, autoApprove: false };
       if (channel === 'identity:initialize' || channel === 'identity:state') return identity;
       if (channel === 'models:state') return { providers: [], available: [], active: null, worker: null };
       if (channel === 'memory:state') return { path: '/memory.md' };
@@ -137,6 +140,50 @@ test('resource tabs render escaped text, audio/video controls and a recoverable 
     open('clip.mp4'); await until(() => window.document.querySelector('video[controls]'));
     open('lost.png'); await until(() => [...window.document.querySelectorAll('[role="alert"]')].some(element => element.textContent.includes('原件已缺失')));
     assert.ok(buttons(window, '下载').find(button => button.disabled));
+    assert.deepEqual(failures, []);
+  } finally { window.close(); }
+});
+
+
+test('task references support menu selection, removal and retry without appending titles to the sent text', async () => {
+  const { window, calls, failures } = await setup([
+    mentionTask('T-101', '旧任务', 1), mentionTask('T-102', '邮件附件', 2), mentionTask('T-103', '归档任务', 3, 4),
+  ]);
+  try {
+    const composer = window.document.querySelector('.chat-composer');
+    assert.ok(composer, failures.join("\n"));
+    const textarea = composer.querySelector('textarea');
+    const pick = composer.querySelector('[title="引用任务"]');
+    const key = (target, key) => target.dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    const setText = (value) => {
+      Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set.call(textarea, value);
+      textarea.setSelectionRange(value.length, value.length);
+      textarea.dispatchEvent(new window.Event('input', { bubbles: true }));
+    };
+    pick.click();
+    await until(() => composer.querySelector('[role="listbox"]'));
+    const search = composer.querySelector('input[role="combobox"]');
+    assert.deepEqual([...composer.querySelectorAll('[role="option"]')].map(option => option.textContent.includes('邮件附件')), [true, false]);
+    key(search, 'ArrowDown'); await until(() => composer.querySelector('[aria-selected="true"]').textContent.includes('旧任务'));
+    key(search, 'Enter'); await until(() => composer.querySelector('[aria-label^="移除任务 T-101"]'));
+    composer.querySelector('[aria-label^="移除任务 T-101"]').click();
+    await until(() => !composer.querySelector('[aria-label^="移除任务"]'));
+
+    setText('请继续@邮件');
+    await until(() => composer.querySelectorAll('[role="option"]').length === 1);
+    key(textarea, 'Enter'); await until(() => composer.querySelector('[aria-label^="移除任务 T-102"]'));
+    assert.equal(textarea.value, '请继续');
+    assert.equal(calls.filter(call => call.channel === 'chat:send').length, 0);
+    send(window); await until(() => window.document.querySelector('[role="alert"]')?.textContent.includes('模拟发送失败'));
+    assert.ok(composer.querySelector('[aria-label^="移除任务 T-102"]'));
+    send(window); await until(() => window.document.querySelector('[aria-label^="打开任务 T-102"]'));
+    assert.deepEqual(calls.filter(call => call.channel === 'chat:send').map(call => call.args[0]), ['请继续\n\n@T-102', '请继续\n\n@T-102']);
+    await until(() => !composer.querySelector('[aria-label^="移除任务"]') && textarea.value === '');
+    window.document.querySelector('[aria-label^="打开任务 T-102"]').click();
+    await until(() => buttons(window, '在主对话中提及').length === 1);
+    buttons(window, '在主对话中提及')[0].click();
+    await until(() => composer.querySelector('[aria-label^="移除任务 T-102"]'));
+    assert.equal(textarea.value, '');
     assert.deepEqual(failures, []);
   } finally { window.close(); }
 });

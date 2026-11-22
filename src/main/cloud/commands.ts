@@ -3,6 +3,7 @@ import { IpcChannel as C } from "../../shared/ipc.ts";
 import type { McpConfigurationState } from "../../shared/mcp.ts";
 import type { ModelsState, ProviderEntry } from "../../shared/models.ts";
 import type { businessHandlers } from "../business.ts";
+import { ToolProviderError } from "../tool-provider-store.ts";
 import { PublicError } from "./http.ts";
 
 /** Device-facing views: never serialize stored provider keys or arbitrary stdio arguments/headers. */
@@ -48,6 +49,10 @@ export function cloudCommands(base: ReturnType<typeof businessHandlers>) {
 	let modelSave: Promise<unknown> = Promise.resolve();
 	return {
 		...base,
+		[C.toolProvidersSave]: (input: unknown) => {
+			try { return base[C.toolProvidersSave](input); }
+			catch (error) { if (error instanceof ToolProviderError) throw new PublicError(error.message, error.conflict ? 409 : 400); throw error; }
+		},
 		[C.identityInitialize]: base[C.identityState],
 		[C.modelsState]: async () => maskModels(await base[C.modelsState]()),
 		[C.modelsSave]: (rows: ProviderEntry[], revision?: string) => {

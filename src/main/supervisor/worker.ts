@@ -38,6 +38,8 @@ import { createGithubTool } from "./github-tool.ts";
 import { managedGithubRunner } from "./github-runner.ts";
 import type { NetworkRunner } from "./network-runner.ts";
 import { createFetchPageTool, createHttpRequestTool } from "./network-tools.ts";
+import { createWebSearchTool, createWorkerImageTool } from "./provider-tools.ts";
+import type { ToolProviderStore } from "../tool-provider-store.ts";
 import type { ProcessRegistry } from "./process-registry.ts";
 import type { JobManager } from "./jobs.ts";
 import type { ServiceManager } from "./services.ts";
@@ -66,6 +68,7 @@ export interface WorkerManagerOptions {
 	audit: AuditLog;
 	processes: ProcessRegistry;
 	network: NetworkRunner;
+	toolProviders?: ToolProviderStore;
 	jobs: JobManager;
 	services: ServiceManager;
 	feishu?: FeishuConnection;
@@ -187,6 +190,8 @@ export class WorkerManager {
 			gates: this.options.gates, audit: this.options.audit, processes: this.options.processes,
 			external: tool => store.recordExternalAction(task.id, tool), feishu: this.options.feishu,
 		});
+		const networkHost = { task, run, store, isActive: () => !this.disposed && !task.ended && !run.endedAt };
+		const providers = this.options.toolProviders, resources = this.options.resources;
 		const { session } = await createRoleSession({
 			startupSignal: opening.controller.signal,
 			onSessionCreated: session => { opening.session = session; },
@@ -213,8 +218,11 @@ export class WorkerManager {
 				headless(createFileDeleteTool({ task, run, store, versions, gates: this.options.gates, isActive: () => !this.disposed && !task.ended && !run.endedAt })),
 				createGitTool({ task, run, store, gates: this.options.gates, audit: this.options.audit, isActive: () => !this.disposed && !task.ended && !run.endedAt }, managedGitRunner(this.options.processes, task.id)),
 				createGithubTool({ task, run, store, audit: this.options.audit, isActive: () => !this.disposed && !task.ended && !run.endedAt }, managedGithubRunner(this.options.processes, task.id)),
-				createFetchPageTool(this.options.network, { task, run, store, isActive: () => !this.disposed && !task.ended && !run.endedAt }),
-				createHttpRequestTool(this.options.network, { task, run, store, isActive: () => !this.disposed && !task.ended && !run.endedAt }),
+				createFetchPageTool(this.options.network, networkHost),
+				createHttpRequestTool(this.options.network, networkHost),
+				...(providers ? [createWebSearchTool(providers, networkHost)] : []),
+				...(providers && resources ? [createWorkerImageTool({ providers, store: resources, owner: `task:${task.id}`,
+					active: networkHost.isActive, publish: (id, refs) => this.publish(task, run, id, refs) }, networkHost)] : []),
 			].map((tool) => this.guardTool(task, run, tool)),
 		});
 		if (this.disposed || task.ended || run.endedAt) {

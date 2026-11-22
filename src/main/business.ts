@@ -29,6 +29,8 @@ export function businessHandlers(
 	const trustState = () =>
 		projectTrustState(paths.agentDir, [supervisor.workspace.base(), ...supervisor.workspace.state().recentProjects]);
 	return {
+		[IpcChannel.toolProvidersState]: () => supervisor.toolProviders.state(),
+		[IpcChannel.toolProvidersSave]: (input: unknown) => supervisor.toolProviders.save(input),
 		[IpcChannel.qqMailState]: () => supervisor.qqMail.state(),
 		[IpcChannel.qqMailSave]: (input: QqMailCredentials) => supervisor.qqMail.save(input),
 		[IpcChannel.qqMailVerify]: () => supervisor.qqMail.verify(),

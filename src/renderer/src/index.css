@@ -271,8 +271,6 @@ input, textarea, select { outline: none; font: inherit; }
  .chat-composer > div { border-radius: 24px; }
  .chat-composer textarea { font-size: 16px; max-height: 140px; }
  .chat-composer button { min-height: 40px; }
- .chat-composer .model-picker { position: static; }
- .chat-composer .model-picker-menu { left: 10px; right: 10px; width: auto; }
  .model-picker-menu { max-width: calc(100vw - 32px); }
  .model-picker-list { min-width: 0; flex: 1; }
  .model-picker-levels { width: 96px; }

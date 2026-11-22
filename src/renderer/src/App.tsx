@@ -12,8 +12,8 @@ import { RightPanel } from "./components/RightPanel";
 import { Settings } from "./components/Settings";
 import { type Menu, TitleBar } from "./components/TitleBar";
 import { type AppCtx, type Config, Ctx, loadConfig, loadOnboarded, saveConfig, saveOnboarded, type Tab, type TabKind, uid } from "./store";
-import { useModels } from "./models";
 import { useTasks } from "./tasks";
+import type { Task } from "./data";
 import { cn } from "./utils/cn";
 import { ChatSessionDialog, type ChatSessionOperation, type ChatSessionPhase } from "./components/ChatSessionDialog";
 import { cloudRead } from "./cloud-cache";
@@ -62,9 +62,8 @@ export default function App() {
   const [tabs, setTabs] = useState<Tab[]>([{ id: "w0", kind: "workstation", title: "Rally 的工位" }]);
   const [active, setActive] = useState<string | null>("w0");
   const { tasks, board, setAutoApprove } = useTasks();
-  const models = useModels();
   const [notificationFocus, setNotificationFocus] = useState<{ target: NotificationTarget; n: number }>();
-  const [inject, setInject] = useState({ text: "", n: 0 });
+  const [inject, setInject] = useState<{ task: Task; n: number }>();
 
   /* ---------------- config / theme ---------------- */
   const setConfig = useCallback((patch: Partial<Config>) => {
@@ -414,10 +413,6 @@ export default function App() {
                   rightOpen={rightOpen}
                   onToggleRight={() => setRightOpen((v) => !v)}
                   inject={inject}
-                  models={models.state?.available ?? []}
-                  model={chat.model}
-                  thinkingLevel={chat.thinkingLevel}
-                  onSelectModel={chat.selectModel}
                   autoApprove={board.autoApprove}
                   onAutoApprove={setAutoApprove}
                 />
@@ -444,7 +439,7 @@ export default function App() {
                       newTab={(k) => openTab(k)}
                       tasks={tasks}
                       renameTab={(id, title) => setTabs((ts) => ts.map((t) => (t.id === id ? { ...t, title } : t)))}
-                      onMention={(t) => {setInject((s) => ({ text: `@${t.id.toUpperCase()}「${t.title}」`, n: s.n + 1 })); if(matchMedia("(max-width: 767px)").matches)setRightOpen(false)}}
+                      onMention={(t) => {setInject((s) => ({ task: t, n: (s?.n ?? 0) + 1 })); if(matchMedia("(max-width: 767px)").matches)setRightOpen(false)}}
                     />
                   </div>
                 </div>

@@ -1,7 +1,7 @@
 import { ConnectionForm } from "./ConnectionForm";
 import { IdentityCard } from "./IdentityCard";
 import { useEffect, useState } from "react";
-import { Archive, Bell, ArrowLeft, UserRound, Brain, Server, Plug, Wand2, Palette, Info, FolderInput, Sun, Moon, Monitor, RotateCcw, ExternalLink, Check } from "lucide-react";
+import { Archive, Bell, ArrowLeft, UserRound, Brain, Server, Plug, Blocks, Wand2, Palette, Info, FolderInput, Sun, Moon, Monitor, RotateCcw, ExternalLink, Check } from "lucide-react";
 import type { Task } from "../data";
 import { ArchivedTasksSection } from "./ArchivedTasksSection";
 import type { AppInfo } from "../../../shared/ipc";
@@ -15,6 +15,7 @@ import { WorkspaceForm } from "./WorkspaceForm";
 import { SkillsSection } from "./SkillsSection";
 import { ProjectTrustSection } from "./ProjectTrustSection";
 import { McpSection } from "./McpSection";
+import { ToolProvidersSection } from "./ToolProvidersSection";
 
 function Github({ size = 14 }: { size?: number }) {
   return (
@@ -31,6 +32,7 @@ export const SECTIONS = [
   { id: "archive", label: "归档", icon: Archive, desc: "查看、撤销归档或彻底删除任务" },
   { id: "memory", label: "记忆", icon: Brain, desc: "长期记忆的存储位置与管理" },
   { id: "providers", label: "供应商", icon: Server, desc: "供应商、协议、模型与元数据（明文存于 ~/.rally）" },
+  { id: "tool-providers", label: "其它提供商", icon: Blocks, desc: "图像生成模型与网络搜索服务" },
   { id: "mcp", label: "MCP 服务器", icon: Plug, desc: "通过 Model Context Protocol 扩展工具" },
   { id: "skills", label: "Skills", icon: Wand2, desc: "可复用的能力包，按需加载" },
   { id: "appearance", label: "外观", icon: Palette, desc: "主题、强调色与字号" },
@@ -243,6 +245,7 @@ export function Settings({ section, setSection, onBack, tasks }: { section: stri
           {cur.id === "workspace" && <><div className="glass-strong rounded-[24px] p-5"><WorkspaceForm /></div><section className="mt-7"><h2 className="mb-3 px-1 text-[16px] font-semibold">项目信任</h2><ProjectTrustSection /></section></>}
           {cur.id === "memory" && <div className="glass-strong rounded-[24px] p-5"><MemoryForm /></div>}
           {cur.id === "providers" && <ProvidersForm />}
+          {cur.id === "tool-providers" && <ToolProvidersSection />}
           {cur.id === "mcp" && <McpSection />}
           {cur.id === "skills" && <SkillsSection />}
           {cur.id === "appearance" && <AppearanceSection />}

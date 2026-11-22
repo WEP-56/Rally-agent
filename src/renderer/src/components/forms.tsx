@@ -379,7 +379,7 @@ export function ProvidersForm() {
 			)}
 			<div className="flex min-h-12 flex-wrap items-center justify-between gap-2 rounded-xl bg-sunken px-3.5 py-3">
 				<div className="text-xs font-medium text-fg">主 agent 模型</div>
-				<ModelPicker direction="down" models={state?.available ?? []} model={state?.active ? `${state.active.provider}/${state.active.model}` : null} thinkingLevel={state?.active?.thinkingLevel ?? null}
+				<ModelPicker models={state?.available ?? []} model={state?.active ? `${state.active.provider}/${state.active.model}` : null} thinkingLevel={state?.active?.thinkingLevel ?? null}
 					onSelect={(provider, model, thinkingLevel) => void select({ provider, model, thinkingLevel }).catch((error: unknown) => setMessage(`选择失败：${error instanceof Error ? error.message : String(error)}`))} />
 			</div>
 			<div className="flex min-h-12 flex-wrap items-center justify-between gap-2 rounded-xl bg-sunken px-3.5 py-3">
@@ -387,7 +387,7 @@ export function ProvidersForm() {
 					<div className="font-medium text-fg">任务 agent 模型</div>
 					<div className="mt-1 text-[11px] text-faint">保存供应商后选择；用于之后启动和续接的任务。主 agent 模型在对话框底部选择。</div>
 				</div>
-				<ModelPicker direction="down" models={state?.available ?? []} model={state?.worker ? `${state.worker.provider}/${state.worker.model}` : null} thinkingLevel={state?.worker?.thinkingLevel ?? null}
+				<ModelPicker models={state?.available ?? []} model={state?.worker ? `${state.worker.provider}/${state.worker.model}` : null} thinkingLevel={state?.worker?.thinkingLevel ?? null}
 					onSelect={(provider, model, thinkingLevel) => void selectWorker({ provider, model, thinkingLevel }).catch((error: unknown) => setMessage(`选择失败：${error instanceof Error ? error.message : String(error)}`))} />
 			</div>
 			{draft.map((provider) => (

@@ -1,4 +1,5 @@
 import type { ScheduledTask } from "./schedules.ts";
+import type { ToolProviderState, ToolProviderUpdate } from "./tool-providers.ts";
 import type { ResourceApi, ResourceRef } from "./resources.ts";
 import type { CloseBehavior, DesktopSettings } from "./desktop.ts";
 import type { FeishuConnectionState, FeishuCredentials, ImBotCredentials, ImBotState, ImSource, QqMailCredentials, QqMailState } from "./connections.ts";
@@ -139,6 +140,8 @@ export const IpcChannel = {
 	tasksDelete: "tasks:delete",
 	tasksAnswerOption: "tasks:answer-option",
 	tasksApprovalMode: "tasks:approval-mode",
+	toolProvidersState: "tool-providers:state",
+	toolProvidersSave: "tool-providers:save",
 	modelsState: "models:state",
 	modelsSave: "models:save",
 	modelsFetch: "models:fetch",
@@ -352,6 +355,7 @@ export interface RallyApi {
 	window: WindowApi;
 	chat: ChatApi;
 	tasks: TasksApi;
+	toolProviders: { getState(): Promise<ToolProviderState>; save(update: ToolProviderUpdate): Promise<ToolProviderState> };
 	models: ModelsApi;
 	workspace: {
 		getState(): Promise<WorkspaceState>;

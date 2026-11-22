@@ -75,6 +75,18 @@ test("two devices share the cloud runtime; secrets, conflicts, retries, restart 
 		assert.equal((await post("rpc", b.token, packet(b, "models:save", [[], models.revision])))[0], 409);
 		await rpc(b, "models:save", saved.providers, saved.revision);
 		assert.equal((await post("rpc", a.token, packet(a, "models:save", [[{ ...saved.providers[0], baseUrl: "http://127.0.0.1:2" }], saved.revision])))[0], 400);
+		const tools = await rpc(a, "tool-providers:state");
+		const toolUpdate = {
+			revision: tools.revision,
+			images: [{ id: "fixture", name: "Offline images", baseUrl: "http://127.0.0.1:1/v1", models: ["one", "two"], apiKey: "offline-image-test-key" }],
+			preferredImage: { providerId: "fixture", model: "two" },
+			search: [{ id: "exa", apiKey: "offline-search-test-key" }],
+			preferredSearch: "exa",
+		};
+		const toolSaved = await rpc(a, "tool-providers:save", toolUpdate);
+		assert.doesNotMatch(JSON.stringify(toolSaved), /apiKey|secret|offline-.*-test-key/);
+		assert.deepEqual(await rpc(b, "tool-providers:state"), toolSaved);
+		assert.equal((await post("rpc", b.token, packet(b, "tool-providers:save", [toolUpdate])))[0], 409);
 		const [, delta] = await post("events", b.token, { instance: b.instance, protocol: 1, epoch: snapshot.epoch, seq: snapshot.seq });
 		assert.ok(delta.events.some(e => e.channel === "cloud:configuration"));
 		const requestId = randomUUID(), text = "offline-message-" + requestId;
@@ -89,6 +101,9 @@ test("two devices share the cloud runtime; secrets, conflicts, retries, restart 
 		assert.equal((await rpc(b, "identity:state")).name, "测试工位");
 		const [, restored] = await post("events", b.token, { instance: b.instance, protocol: 1, epoch: snapshot.epoch, seq: snapshot.seq });
 		assert.notEqual(restored.epoch, snapshot.epoch);
+		const toolsRestored = await rpc(b, "tool-providers:state");
+		assert.notEqual(toolsRestored.revision, toolSaved.revision);
+		assert.deepEqual(toolsRestored, { ...toolSaved, revision: toolsRestored.revision });
 		assert.ok(restored.events.some(e => e.channel === "chat:event" && e.data.type === "snapshot"));
 		assert.ok(Array.isArray((await rpc(b, "tasks:state")).tasks));
 		const [, status] = await post("admin", key, { action: "status" });

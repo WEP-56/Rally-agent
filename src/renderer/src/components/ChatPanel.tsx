@@ -3,15 +3,13 @@ import { Critter } from "./brand";
 import { IM_SOURCE_LABELS, type ImSource } from "../../../shared/connections";
 import type { ChatActivity, ChatHeaderState } from "../../../shared/ipc";
 import type { NotificationTarget } from "../../../shared/notifications";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Settings, Search, ArrowUp, PanelRightOpen, Paperclip, ListRestart, LoaderCircle, SquarePen, ShieldCheck, ChevronRight, Square, AtSign } from "lucide-react";
-import type { ModelSummary, ThinkingLevelName } from "../../../shared/models";
 import type { ChatMsg, Task } from "../data";
 import type { TaskQuestionView } from "../../../shared/task";
 import { useApp } from "../store";
 import { cn } from "../utils/cn";
-import { Button, RoundButton, IconButton } from "./ui";
-import { ModelPicker } from "./ModelPicker";
+import { Button, RoundButton, IconButton, useClickOutside } from "./ui";
 import { RichText } from "./RichText";
 import { GateCard } from "./GateCard";
 import { QuestionCard } from "./QuestionCard";
@@ -20,10 +18,13 @@ import { conversationItems } from "../conversation";
 import type { ResourceRef } from "../../../shared/resources";
 import { useAttachments } from "../attachments";
 import { AttachmentCards, PendingThumbnail, fileSize } from "./Attachments";
+import { TaskMentionPicker, TaskMentionTag, type TaskMention, type MentionQuery, mentionAt, splitTaskMentions, withTaskMentions } from "./TaskMentions";
 
-function UserBubble({ text, source, attachments }: { text: string; source?: ImSource; attachments?: ResourceRef[] }) {
+function UserBubble({ text, source, attachments, tasks }: { text: string; source?: ImSource; attachments?: ResourceRef[]; tasks: Task[] }) {
   const [expanded, setExpanded] = useState(false);
-  const long = text.length > 160 || text.split("\n").length > 5;
+  const { openTask } = useApp();
+  const { body, ids } = splitTaskMentions(text);
+  const long = body.length > 160 || body.split("\n").length > 5;
   return (
     <div className="flex justify-end">
       <div className="bubble-user max-w-[82%] rounded-[22px] rounded-br-md px-4 py-2.5 text-[14.5px] leading-[1.65]">
@@ -33,8 +34,12 @@ function UserBubble({ text, source, attachments }: { text: string; source?: ImSo
           className={cn("relative overflow-hidden", long && !expanded && "max-h-[7.6em]")}
           style={long && !expanded ? { maskImage: "linear-gradient(to bottom, black 60%, transparent)", WebkitMaskImage: "linear-gradient(to bottom, black 60%, transparent)" } : undefined}
         >
-          <RichText text={text} />
+          {body && <RichText text={body} />}
         </div>
+        {!!ids.length && <div className="flex flex-wrap gap-1.5 py-1">{ids.map((id, index) => {
+          const task = tasks.find(task => task.id.toUpperCase() === id);
+          return <TaskMentionTag key={`${id}-${index}`} task={task ?? { id, title: id }} onOpen={task ? () => openTask(task.id) : undefined} />;
+        })}</div>}
         {long && (
           <button onClick={() => setExpanded((v) => !v)} className="mt-2 text-[13px] text-muted hover:text-fg">
             {expanded ? "收起" : "展示更多"}
@@ -93,10 +98,6 @@ export function ChatPanel({
 	rightOpen,
 	onToggleRight,
 	inject,
-	models,
-	model,
-	thinkingLevel,
-	onSelectModel,
 	autoApprove,
 	onAutoApprove,
 }: {
@@ -115,11 +116,7 @@ export function ChatPanel({
 	onCompactChat: () => void;
 	rightOpen: boolean;
 	onToggleRight: () => void;
-	inject?: { text: string; n: number };
-	models: ModelSummary[];
-	model: string | null;
-	thinkingLevel: string | null;
-	onSelectModel: (provider: string, model: string, level?: ThinkingLevelName) => void;
+	inject?: { task: TaskMention; n: number };
 	autoApprove: boolean;
 	onAutoApprove: (enabled: boolean) => Promise<void>;
 }) {
@@ -139,18 +136,70 @@ export function ChatPanel({
 	const latestGateId = conversation.findLast(item => item.role === "gate")?.id;
 	const activityLabel = header.activity ? ACTIVITY_LABEL[header.activity] : "待命";
 
+  const [mentions, setMentions] = useState<TaskMention[]>([]);
+  const [picker, setPicker] = useState<MentionQuery | null>(null);
+  const [highlighted, setHighlighted] = useState(0);
+  const pickerId = useId();
+  const pickerButtonId = `${pickerId}-button`;
+  const composer = useClickOutside<HTMLDivElement>(picker !== null, () => setPicker(null));
+  const composing = useRef(false);
+  const consumedMention = useRef(0);
+  const cursor = useRef<number | null>(null);
+  const query = picker?.query.toLowerCase() ?? "";
+  const mentionChoices = picker ? tasks.filter(task => task.archivedAt === undefined &&
+    !mentions.some(mention => mention.id === task.id) &&
+    (task.id.toLowerCase().includes(query) || task.title.toLowerCase().includes(query)))
+    .sort((a, b) => b.createdAt - a.createdAt) : [];
+  const activeChoice = Math.min(highlighted, mentionChoices.length - 1);
+
+  function updateQuery(value: string, caret: number) {
+    setPicker(mentionAt(value, caret));
+    setHighlighted(0);
+  }
+  function addTask({ id, title }: TaskMention) {
+    setMentions(current => current.some(item => item.id === id) ? current : [...current, { id, title }]);
+    setPicker(null);
+    ta.current?.focus();
+  }
+  function addMention(task: TaskMention) {
+    if (picker?.range) {
+      const [start, end] = picker.range;
+      cursor.current = start;
+      setDraft(current => current.slice(0, start) + current.slice(end));
+    }
+    addTask(task);
+  }
+  function pickerKey(event: KeyboardEvent, fromButton: boolean) {
+    if (!picker || composing.current || event.nativeEvent.isComposing || event.keyCode === 229) return false;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (mentionChoices.length) {
+        const step = event.key === "ArrowDown" ? 1 : -1;
+        setHighlighted((activeChoice + step + mentionChoices.length) % mentionChoices.length);
+      }
+    } else if (event.key === "Escape") {
+      setPicker(null);
+      if (fromButton) document.getElementById(pickerButtonId)?.focus();
+    } else if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+      const task = mentionChoices[activeChoice];
+      if (task) addMention(task);
+    } else return false;
+    event.preventDefault();
+    return true;
+  }
+
   useEffect(() => {
     setDraft("");
+    setMentions([]);
+    setPicker(null);
     setActionError(null);
     followTail.current = true;
   }, [conversationId]);
 
   useEffect(() => {
-    if (inject?.n) {
-      setDraft((d) => (d ? d + " " : "") + inject.text);
-      ta.current?.focus();
-    }
-  }, [inject?.n, inject?.text]);
+    if (!inject || consumedMention.current === inject.n) return;
+    consumedMention.current = inject.n;
+    addTask(inject.task);
+  }, [inject]);
 
   useEffect(() => {
     if (!notificationFocus || focusedNotice.current === notificationFocus.n || !notificationFocus.target.cardId) return;
@@ -171,16 +220,28 @@ export function ChatPanel({
     if (ta.current) {
       ta.current.style.height = "auto";
       ta.current.style.height = Math.min(ta.current.scrollHeight, 200) + "px";
+      if (cursor.current !== null) {
+        ta.current.setSelectionRange(cursor.current, cursor.current);
+        cursor.current = null;
+      }
     }
   }, [draft]);
 
   const sending = useRef(false);
   const send = async () => {
-    if ((!draft.trim() && !attachments.items.length) || !attachments.ready || sending.current) return;
+    if ((!draft.trim() && !mentions.length && !attachments.items.length) || !attachments.ready || sending.current) return;
+    setPicker(null);
     followTail.current = true;
     sending.current=true; setSendPending(true);
     const submitted = attachments.items;
-    try {await onSend(draft, submitted.map(item => item.resource!.id));setDraft(current=>current===draft?"":current); for (const item of submitted) attachments.remove(item.id); setActionError(null);}catch(e){setActionError(String(e));}finally{sending.current=false;setSendPending(false);}
+    try {
+      await onSend(withTaskMentions(draft, mentions), submitted.map(item => item.resource!.id));
+      setDraft(current => current === draft ? "" : current);
+      setMentions(current => current.filter(mention => !mentions.includes(mention)));
+      for (const item of submitted) attachments.remove(item.id);
+      setActionError(null);
+    } catch (e) { setActionError(String(e)); }
+    finally { sending.current = false; setSendPending(false); }
   };
 
   return (
@@ -236,7 +297,7 @@ export function ChatPanel({
               </div>
             ) : m.role === "user" ? (
               <div key={m.id} className="animate-rise">
-                <UserBubble text={m.text} source={m.source} attachments={m.attachments} />
+                <UserBubble text={m.text} source={m.source} attachments={m.attachments} tasks={tasks} />
               </div>
             ) : (
               <div key={m.id} className="animate-rise relative ml-8 min-w-0 max-w-[88%] self-start rounded-[22px] rounded-tl-md bg-panel p-4 text-sm leading-relaxed shadow-soft">
@@ -268,16 +329,42 @@ export function ChatPanel({
 
       {/* composer */}
       <div className="chat-composer relative z-10 shrink-0 px-3 pb-3.5">
-        <div className="glass-strong mx-auto max-w-[760px] rounded-[28px] p-2 transition-shadow focus-within:shadow-pop">
+        <div ref={composer} onBlur={event => {
+          if (!event.currentTarget.contains(event.relatedTarget)) setPicker(null);
+        }} className="glass-strong relative mx-auto max-w-[760px] rounded-[28px] p-2 transition-shadow focus-within:shadow-pop">
+          {picker && <TaskMentionPicker id={pickerId} choices={mentionChoices} active={activeChoice} query={picker.query}
+            search={!picker.range} onQuery={value => { setPicker({ query: value }); setHighlighted(0); }}
+            onKeyDown={event => pickerKey(event, true)} onSelect={addMention} />}
           <input ref={fileInput} type="file" multiple hidden onChange={event => { attachments.add(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
           {!!attachments.items.length && <div className="flex max-h-44 flex-wrap gap-2 overflow-auto p-2">{attachments.items.map(item => <div key={item.id} className="max-w-full rounded-xl bg-sunken p-3 text-xs"><PendingThumbnail file={item.file} /><div className="max-w-52 truncate font-medium">{item.file.name}</div><div className="mt-1 text-muted">{item.resource ? `${fileSize(item.file.size)} · 已就绪` : item.error ?? `上传 ${Math.round(item.offset / Math.max(1, item.file.size) * 100)}%`}</div><div className="mt-2 flex gap-2">{item.error && <button disabled={sendPending} onClick={() => attachments.retry(item.id)} className="text-accent">重试</button>}<button disabled={sendPending} onClick={() => attachments.remove(item.id)} className="text-muted">{item.running ? "取消" : "移除"}</button></div></div>)}</div>}
           {attachments.error && <p role="alert" className="p-2 text-xs text-danger">{attachments.error}</p>}
+          {!!mentions.length && <div className="flex max-h-24 flex-wrap gap-1.5 overflow-auto px-3.5 pt-1">
+            {mentions.map(task => <TaskMentionTag key={task.id} task={task} onRemove={() => {
+              setMentions(current => current.filter(item => item.id !== task.id));
+              ta.current?.focus();
+            }} />)}
+          </div>}
           <textarea
             ref={ta}
             value={draft}
             onPaste={event => { const files = Array.from(event.clipboardData.files); if (files.length && !sendPending) { event.preventDefault(); attachments.add(files); } }}
-            onChange={(e) => setDraft(e.target.value)}
+            aria-controls={picker?.range ? pickerId : undefined}
+            aria-activedescendant={picker?.range && activeChoice >= 0 ? `${pickerId}-${activeChoice}` : undefined}
+            onCompositionStart={() => { composing.current = true; }}
+            onCompositionEnd={event => {
+              composing.current = false;
+              updateQuery(event.currentTarget.value, event.currentTarget.selectionStart);
+            }}
+            onChange={event => {
+              setDraft(event.currentTarget.value);
+              if (!composing.current) updateQuery(event.currentTarget.value, event.currentTarget.selectionStart);
+            }}
+            onClick={event => {
+              if (picker?.range && (event.currentTarget.selectionStart !== picker.range[1] || event.currentTarget.selectionEnd !== picker.range[1])) setPicker(null);
+            }}
             onKeyDown={(e) => {
+              if (pickerKey(e, false) || composing.current || e.keyCode === 229) return;
+              if (picker?.range && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) setPicker(null);
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && (window.runtime.platform !== "android" || e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
                 send();
@@ -291,10 +378,13 @@ export function ChatPanel({
             <IconButton className="no-drag" title="添加附件" disabled={sendPending} onClick={() => fileInput.current?.click()}>
               <Paperclip size={15} strokeWidth={1.8} />
             </IconButton>
-            <IconButton className="no-drag" title="引用任务" onClick={() => setDraft((d) => d + "@")}>
+            <IconButton id={pickerButtonId} className="no-drag" title="引用任务" aria-haspopup="listbox" aria-expanded={!!picker}
+              aria-controls={picker ? pickerId : undefined} active={!!picker} onClick={() => {
+                setPicker(picker ? null : { query: "" });
+                setHighlighted(0);
+              }}>
               <AtSign size={15} strokeWidth={1.8} />
             </IconButton>
-            <ModelPicker models={models} model={model} thinkingLevel={thinkingLevel} onSelect={onSelectModel} />
             <button
               onClick={() => action(onAutoApprove(!autoApprove))}
               className={cn("flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[12.5px] transition-colors", autoApprove ? "bg-accent-soft text-accent" : "text-muted hover:bg-hover hover:text-fg")}
@@ -310,7 +400,7 @@ export function ChatPanel({
             ) : (
               <button
                 onClick={send}
-                disabled={sendPending || !attachments.ready || (!draft.trim() && !attachments.items.length)}
+                disabled={sendPending || !attachments.ready || (!draft.trim() && !mentions.length && !attachments.items.length)}
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-accent-fg shadow-soft transition-all active:scale-95 disabled:bg-press disabled:text-faint disabled:shadow-none"
               >
                 <ArrowUp size={16} strokeWidth={2.2} />

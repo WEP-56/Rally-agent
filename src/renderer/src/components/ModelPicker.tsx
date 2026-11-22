@@ -1,4 +1,4 @@
-// Composer model picker: providers as dim group captions, models beneath, and a
+// Settings model picker: providers as dim group captions, models beneath, and a
 // fly-out to the right for thinking strength (only when the model supports it).
 
 import { useState } from "react";
@@ -22,13 +22,11 @@ export function ModelPicker({
 	model,
 	thinkingLevel,
 	onSelect,
-	direction = "up",
 }: {
 	models: ModelSummary[];
 	model: string | null;
 	thinkingLevel: string | null;
 	onSelect: (provider: string, model: string, level?: ThinkingLevelName) => void;
-	direction?: "up" | "down";
 }) {
 	const [open, setOpen] = useState(false);
 	const [hovered, setHovered] = useState<ModelSummary | null>(null);
@@ -69,7 +67,7 @@ export function ModelPicker({
 				<ChevronDown size={13} className={cn("shrink-0 text-faint transition-transform", open && "rotate-180")} />
 			</button>
 			{open && (
-				<div className={cn("model-picker-menu glass-strong animate-pop absolute z-50 flex rounded-2xl p-1.5 shadow-pop", direction === "up" ? "bottom-full left-0 mb-1.5" : "top-full right-0 mt-1.5")}>
+				<div className="model-picker-menu glass-strong animate-pop absolute right-0 top-full z-50 mt-1.5 flex rounded-2xl p-1.5 shadow-pop">
 					<div className="model-picker-list max-h-72 w-60 overflow-auto">
 						{models.length === 0 && (
 							<div className="px-2.5 py-3 text-[11px] leading-relaxed text-faint">

@@ -83,7 +83,7 @@ function shade(hex: string, amt: number) {
 }
 
 export function critterColor(seed: string) {
-  return CRITTER_COLORS[(hash(seed) >> 4) % CRITTER_COLORS.length];
+  return CRITTER_COLORS[(hash(seed) >>> 4) % CRITTER_COLORS.length];
 }
 
 export function Critter({ seed, size = 40, tile = true, className }: { seed: string; size?: number; tile?: boolean; className?: string }) {

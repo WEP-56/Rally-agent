@@ -33,7 +33,7 @@ describe("Rally conversation rendering (no browser)", () => {
 				{ id: "2", role: "assistant", text: "INTERMEDIATE_MESSAGE", blocks: [{ type: "text", text: "INTERMEDIATE_MESSAGE" }] },
 				{ id: "3", role: "assistant", text: "", blocks: [{ type: "tool", toolCallId: "hidden" }], toolCalls: [{ id: "hidden", name: "read", input: "hidden.txt", startedAt: 1, status: "running" }] },
 			], tasks: [], header: { activity: null, showCompact: false, showNewConversation: false }, busy: false, onSend: () => {}, onStop: () => {}, onNewChat: () => {}, onCompactChat: () => {}, rightOpen: true,
-			onToggleRight: () => {}, models: [], model: null, thinkingLevel: null, onSelectModel: () => {}, autoApprove: false, onAutoApprove: async () => {},
+			onToggleRight: () => {}, autoApprove: false, onAutoApprove: async () => {},
 		}));
 		expect(html).not.toContain("THINKING_ONLY_MESSAGE");
 		expect(html).toContain("INTERMEDIATE_MESSAGE");
@@ -55,7 +55,7 @@ describe("Rally conversation rendering (no browser)", () => {
 			tasks: [{ id: "T-1064", title: "邮件任务", summary: "fixture", createdAt: now - 5, duration: "1 秒", progress: 0, status: "needs_gate", tags: [], messages: [], gates: decisions }],
 			header: { activity: "querying", showCompact: true, showNewConversation: false },
 			busy: false, onSend: () => {}, onStop: () => {}, onNewChat: () => {}, onCompactChat: () => {}, rightOpen: true, onToggleRight: () => {},
-			models: [], model: null, thinkingLevel: null, onSelectModel: () => {}, autoApprove: false, onAutoApprove: async () => {},
+			autoApprove: false, onAutoApprove: async () => {},
 		}));
 		const pending = render([gate]);
 		const denied = render([{ ...gate, decision: { value: "deny", actor: "user", at: now, reason: "测试拒绝", basis: [] } }]);
