@@ -36,7 +36,7 @@ jobs:
           CHECKS_SHA: ${{ github.sha }}
         run: |
           git fetch --no-tags --depth=1 origin "$CHECKS_SHA"
-          git restore --source="$CHECKS_SHA" --worktree -- tests
+          git restore --source="$CHECKS_SHA" --worktree -- tests packages/coding-agent/test
       - uses: actions/setup-node@v4
         with: { node-version: '24.11.1', cache: npm }
       - shell: bash

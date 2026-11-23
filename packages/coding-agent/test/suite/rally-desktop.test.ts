@@ -130,7 +130,7 @@ it.each([true, false])("uses Rally's window bitmap and matching taskbar identity
   const window = { setIcon: vi.fn(), setAppDetails: vi.fn() };
   applyWindowBranding(window as unknown as BrowserWindow);
   const root = packaged ? process.resourcesPath : native.appPath;
-  expect(window.setIcon).toHaveBeenCalledWith(join(root, "icon.png"));
+  expect(window.setIcon).toHaveBeenCalledWith(join(root, packaged ? "icon.png" : "docs/icon.png"));
   expect(window.setAppDetails).toHaveBeenCalledWith({
     appId: APP_ID, appIconPath: join(root, packaged ? "icon.ico" : "build/icon.ico"), appIconIndex: 0,
     relaunchCommand: `"${process.execPath}"${packaged ? "" : ` "${native.appPath}"`}`, relaunchDisplayName: "Rally",
