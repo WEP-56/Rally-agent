@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { closeSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { getShellEnv } from "@rally/coding-agent";
 import type { ProcessRegistry } from "./process-registry.ts";
 
 export interface GithubResult { exitCode: number; output: string; fullOutputPath?: string }
@@ -11,7 +12,7 @@ export type GithubRunner = (cwd: string, args: readonly string[], options: Githu
 export function managedGithubRunner(processes: ProcessRegistry, taskId?: string): GithubRunner {
 	return async (cwd, args, options) => {
 		options.signal?.throwIfAborted();
-		const env = { ...process.env };
+		const env = getShellEnv();
 		for (const key of Object.keys(env)) {
 			// cwd / explicit --repo determine the target. Keep gh's existing credentials.
 			if (/^(?:GH_REPO|GH_HOST|GH_DEBUG|GH_FORCE_TTY|GIT_(?:DIR|WORK_TREE|COMMON_DIR|CONFIG(?:_.*)?|TRACE.*))$/i.test(key)) delete env[key];

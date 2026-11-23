@@ -24,9 +24,12 @@ mkdir -p "$bundle/lib/node_modules"
 cp -a "$node_root/lib/node_modules/npm" "$bundle/lib/node_modules/"
 ln -s ../lib/node_modules/npm/bin/npm-cli.js "$bundle/bin/npm"
 ln -s ../lib/node_modules/npm/bin/npx-cli.js "$bundle/bin/npx"
+bash scripts/cloud/install-gh.sh "$bundle"
 printf '%s\n' "$ver" > "$bundle/VERSION"
 chmod +x "$bundle/install.sh"
 chmod -R a+rX "$bundle"
+node --test tests/process-identity.test.mjs
+RALLY_TEST_SERVER="$bundle" node --test tests/cloud/linux-tools.test.mjs
 PLAYWRIGHT_BROWSERS_PATH="$bundle/browser" RALLY_TEST_BROWSER_ROOT="$bundle" node --test tests/agent-browser/linux-package.test.mjs
 RALLY_TEST_SERVER="$bundle" node --test tests/cloud/server.test.mjs
 RALLY_TEST_SERVER="$bundle" node --test tests/cloud/agent.test.mjs

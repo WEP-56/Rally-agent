@@ -31,12 +31,13 @@ export async function processIdentity(pid: number): Promise<ProcessIdentity | un
 		return { pid, created: `win:${created}` };
 	}
 	if (process.platform === "linux") {
+		// /proc can disappear before open (ENOENT) or after open, during read (ESRCH).
 		try {
 			const [stat, boot] = await Promise.all([readFile(`/proc/${pid}/stat`, "utf8"), readFile("/proc/sys/kernel/random/boot_id", "utf8")]);
 			const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
 			if (fields[0] === "Z") return;
 			return { pid, created: `linux:${boot.trim()}:${fields[19]}` };
-		} catch (error) { if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return; throw error; }
+		} catch (error) { if (error && typeof error === "object" && "code" in error && (error.code === "ENOENT" || error.code === "ESRCH")) return; throw error; }
 	}
 	throw new Error("PROCESS_PLATFORM_UNSUPPORTED: 此系统尚不支持精确进程身份核验");
 }
