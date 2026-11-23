@@ -48,7 +48,7 @@ describe("Rally questions (isolated state, no provider calls)", () => {
 		expect(task.inputs).toHaveLength(2);
 	});
 
-	it("replaces changed options, ignores obsolete fallback and rejects stale or forged button answers", async () => {
+	it("rejects stale or un-escalated answers and accepts exact user text outside the options", async () => {
 		const { store, task, ask } = await setup();
 		const first = ask().attention!;
 		store.escalateAttention(task.id, first.id);
@@ -58,11 +58,15 @@ describe("Rally questions (isolated state, no provider calls)", () => {
 		store.fallbackQuestions([first.id]);
 		expect(second.escalatedAt).toBeUndefined();
 		expect(() => store.answerAttention(task.id, first.id, "保留", "user", [])).toThrow("失效");
-		expect(() => store.answerAttention(task.id, second.id, "移除", "user", [])).toThrow("原始选项");
+		expect(() => store.answerAttention(task.id, second.id, "移除", "user", [])).toThrow("转交给用户");
 		store.fallbackQuestions([second.id]);
 		expect(taskView(task).status).toBe("needs_answer");
-		expect(() => store.answerAttention(task.id, second.id, "任意伪造回答", "user", [])).toThrow("原始选项");
-		expect(task.inputs).toHaveLength(0);
+		const answer = "  两个选项都不适用。\n请先解释失败原因。 ";
+		store.answerAttention(task.id, second.id, answer, "user", []);
+		expect(task.inputs).toHaveLength(1);
+		expect(task.inputs[0]).toMatchObject({ kind: "answer", questionId: second.id, body: answer });
+		expect(task.attentionHistory?.at(-1)?.answer).toMatchObject({ by: "user", basis: [], text: answer });
+		expect(() => store.answerAttention(task.id, second.id, answer, "user", [])).toThrow("失效");
 	});
 
 	it("retains omitted questions, withdraws explicit null and closes on terminal reports", async () => {

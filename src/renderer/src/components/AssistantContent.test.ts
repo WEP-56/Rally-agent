@@ -125,8 +125,9 @@ describe("Rally conversation rendering (no browser)", () => {
 		const html = renderToStaticMarkup(createElement(QuestionCard, props));
 		expect(html).toContain("  保留 &lt;script&gt;？\n下一行。 ");
 		expect(html).not.toContain("<script>"); expect(html).toContain("保留 &lt;v1&gt;");
-		expect(html.match(/<button/g)).toHaveLength(2); expect(html).not.toContain("<input");
-		expect(html).toContain("或直接在下方输入你的回答");
+		expect(html.match(/<button/g)).toHaveLength(3);
+		expect(html).toContain('<textarea'); expect(html).toContain('aria-label="你的回答"');
+		expect(html).toContain("提交回答");
 		const answered = renderToStaticMarkup(createElement(QuestionCard, { ...props, question: { ...question, answer: { by: "user", basis: [], text: "保留 <v1>", at: 3 } } }));
 		expect(answered).toContain("你已回答"); expect(answered).not.toContain("<button");
 		const closed = renderToStaticMarkup(createElement(QuestionCard, { ...props, question: { ...question, closed: { reason: "replaced", at: 3 } } }));

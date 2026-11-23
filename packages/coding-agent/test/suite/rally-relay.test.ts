@@ -30,6 +30,30 @@ describe("Rally durable relay (no provider calls)", () => {
 		return { paths, events, store, transport, relay, task, run };
 	}
 
+	it.each(["saved", "cancelled", "expired"] as const)("wakes main with a durable %s credential result and deduplicates replay", async status => {
+		const { paths, relay, transport, store } = await setup();
+		const request = { id: "credential-call", origin: "https://example.test", status, createdAt: 1, accountId: status === "saved" ? "account-ref" : undefined };
+		const source = `credential:${request.id}:${status}`;
+		const id = relay.enqueue({ kind: "credential_result", request }, [source]);
+		relay.dispose();
+		const recovered = new Relay(transport, new EventLog(paths.eventsFile), store); relays.push(recovered); recovered.start();
+		expect(recovered.enqueue({ kind: "credential_result", request }, [source])).toBe(id);
+		await vi.advanceTimersByTimeAsync(2000);
+		expect(transport.sendRelay).toHaveBeenCalledExactlyOnceWith([{ id, text: expect.stringContaining(`"status":"${status}"`) }], "turn");
+		recovered.consumed([id]); recovered.dispose();
+		const again = new Relay(transport, new EventLog(paths.eventsFile), store); relays.push(again); again.start();
+		again.enqueue({ kind: "credential_result", request }, [source]);
+		await vi.advanceTimersByTimeAsync(2000);
+		expect(transport.sendRelay).toHaveBeenCalledTimes(1);
+	});
+
+	it("steers a busy main agent when credentials are saved", async () => {
+		const { relay, transport } = await setup();
+		transport.isBusy.mockReturnValue(true);
+		const id = relay.enqueue({ kind: "credential_result", request: { id: "request", origin: "https://example.test", status: "saved", createdAt: 1, accountId: "account-ref" } });
+		expect(transport.sendRelay).toHaveBeenCalledExactlyOnceWith([{ id, text: expect.stringContaining('kind="credential_result"') }], "steer");
+	});
+
   it("restores hidden coach suggestions once, without a task or system line", async () => {
     const { paths, events, relay, transport, store } = await setup();
     relay.idea(id => `<rally-idea relayId="${id}">suggestion</rally-idea>`);

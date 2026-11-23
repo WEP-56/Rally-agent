@@ -354,10 +354,17 @@ export class AgentBrowserService {
 			const page = window.page;
 			const privateInput = await this.capturePrivateValues(window);
 			if (preview && (privateInput || window.view.owner !== "agent")) throw Error("私密操作中，缩略图已暂停");
-			const image = await page.screenshot({ type: "jpeg", quality: 65, mask: await this.privateMasks(page), animations: "disabled", style: "input,textarea,[contenteditable] { color: transparent !important; text-shadow: none !important; }" });
+			// CDP-attached pages have no configured viewport; use their actual CSS dimensions.
+			const viewport = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+			const mask = window.view.owner !== "user";
+			const image = await page.screenshot({
+				type: "jpeg", quality: 65, scale: "css",
+				mask: mask ? await this.privateMasks(page) : undefined,
+				animations: mask ? "disabled" : "allow",
+				style: mask ? "input,textarea,[contenteditable] { color: transparent !important; text-shadow: none !important; }" : undefined,
+			});
 			canView();
 			if (epoch !== window.view.epoch || documentId !== window.view.document) throw Error("页面已改变，请重新获取画面");
-			const viewport = page.viewportSize()!;
 			const frame: BrowserFrame = { windowId: id, epoch, document: documentId, seq: ++this.frameSeq, ...viewport, data: image.toString("base64") };
 			window.frame = frame;
 			window.frames.set(frame.seq, viewport);

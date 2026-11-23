@@ -13,12 +13,13 @@ async function until(check) {
 }
 const mentionTask = (id, title, createdAt, archivedAt) => ({ id, title, createdAt, archivedAt, status: 'done', statusText: '完成', mode: 'readonly', cwd: '/work', scope: [], quotes: [], dependsOn: [], approval: { state: 'approved' } });
 
-async function setup(tasks = []) {
+async function setup(tasks = [], questions = []) {
   const failures = []; const virtual = new VirtualConsole(); virtual.on('jsdomError', error => failures.push(error.message));
   const dom = new JSDOM(readFileSync('out/renderer/index.html', 'utf8'), { url: 'https://client.test', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: virtual });
   const { window } = dom; const events = new Map(); const calls = []; const uploads = new Map(); let counter = 0; let refuseSend = true; let refuseChunk = true;
   const chat = { messages: [], header: { activity: null, showCompact: false, showNewConversation: false }, busy: false, model: null, thinkingLevel: null, thinkingLevels: [], notice: null };
   const identity = { name: 'Rally', personality: '', workstyle: '', avatar: null };
+  const board = { tasks, questions, active: 0, limit: 2, autoApprove: false }; let refuseAnswer = true;
   const emit = (channel, data) => { for (const callback of events.get(channel) ?? []) callback(null, data); };
   window.rallyStartup = { ready() {}, fail(error) { failures.push(error?.stack ?? String(error)); } };
   window.localStorage.setItem('rally.onboarded.v1', '1');
@@ -35,7 +36,14 @@ async function setup(tasks = []) {
       if (channel === 'chat:state') return chat;
       if (channel === 'agent-browser:state') return [];
       if (channel === 'credentials:state') return { accounts: [], requests: [] };
-      if (channel === 'tasks:state') return { tasks, active: 0, limit: 2, autoApprove: false };
+      if (channel === 'tasks:state') return board;
+      if (channel === 'tasks:answer-option') {
+        await setTimeout(20);
+        if (refuseAnswer) { refuseAnswer = false; throw Error('模拟回答失败'); }
+        const record = questions.find(record => record.taskId === args[0] && record.question.id === args[1]);
+        record.question = { ...record.question, answer: { by: 'user', text: args[2], basis: [], at: Date.now() } };
+        emit('task:event', { type: 'snapshot', board }); return board;
+      }
       if (channel === 'identity:initialize' || channel === 'identity:state') return identity;
       if (channel === 'models:state') return { providers: [], available: [], active: null, worker: null };
       if (channel === 'memory:state') return { path: '/memory.md' };
@@ -81,6 +89,34 @@ async function setup(tasks = []) {
 function file(name) { return { name, size: 6, type: 'image/png', slice: (start, end) => ({ arrayBuffer: async () => new Uint8Array([1, 2, 3, 4, 5, 6].slice(start, end)).buffer }) }; }
 function buttons(window, text) { return [...window.document.querySelectorAll('button')].filter(button => button.textContent.includes(text)); }
 function send(window) { window.document.querySelector('.chat-composer textarea').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); }
+
+test('question cards submit exact typed answers directly, keep failed drafts and collapse on success', async () => {
+  const question = { id: 'Q-freeform', runId: 'R-1', askedAt: 1, escalatedAt: 2, question: '两个选项都不适用时怎么办？', options: ['我已扫码', '我已登录'] };
+  const { window, calls, failures } = await setup([], [{ taskId: 'T-question', title: '网页登录', question }]);
+  try {
+    await until(() => window.document.querySelector('#question-Q-freeform textarea'));
+    const card = window.document.querySelector('#question-Q-freeform');
+    const input = card.querySelector('textarea'); const submit = card.querySelector('button[type="submit"]');
+    assert.equal(submit.disabled, true);
+    const answer = '  两个都不是，我还没登录。\n请解释填写失败的原因。 ';
+    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set.call(input, answer);
+    input.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await until(() => !submit.disabled);
+    submit.click(); await until(() => submit.disabled);
+    assert.ok([...card.querySelectorAll('button')].every(button => button.disabled));
+    await until(() => card.querySelector('[role="alert"]')?.textContent.includes('模拟回答失败'));
+    assert.equal(input.value, answer);
+    submit.click();
+    await until(() => window.document.querySelector('#question-Q-freeform summary')?.textContent.includes('你已回答'));
+    assert.deepEqual(calls.filter(call => call.channel === 'tasks:answer-option').map(call => Array.from(call.args)), [
+      ['T-question', 'Q-freeform', answer], ['T-question', 'Q-freeform', answer],
+    ]);
+    assert.equal(calls.filter(call => call.channel === 'chat:send').length, 0);
+    assert.equal(window.document.querySelector('#question-Q-freeform textarea'), null);
+    assert.ok(window.document.querySelector('#question-Q-freeform').textContent.includes(answer));
+    assert.deepEqual(failures, []);
+  } finally { window.close(); }
+});
 
 test('built attachment UI pastes, retries chunks, preserves a failed send, opens one preview tab and saves', async () => {
   const { window, calls, failures } = await setup();

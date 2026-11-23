@@ -32,12 +32,12 @@ export function businessHandlers(
 		[IpcChannel.credentialsState]: () => supervisor.websiteAccounts.state(),
 		[IpcChannel.credentialsSubmit]: (input: unknown) => {
 			const result = supervisor.websiteAccounts.submit(input);
-			supervisor.relay.notice(`网站账号申请已处理：${JSON.stringify(result)}`, `credential:${result.id}:${result.status}`);
+			supervisor.relay.enqueue({ kind: "credential_result", request: result }, [`credential:${result.id}:${result.status}`]);
 			return supervisor.websiteAccounts.state();
 		},
 		[IpcChannel.credentialsCancel]: (id: string) => {
-			supervisor.websiteAccounts.cancel(id);
-			supervisor.relay.notice(`网站账号申请已取消：${id}`, `credential:${id}:cancelled`);
+			const result = supervisor.websiteAccounts.cancel(id);
+			supervisor.relay.enqueue({ kind: "credential_result", request: result }, [`credential:${result.id}:${result.status}`]);
 			return supervisor.websiteAccounts.state();
 		},
 		[IpcChannel.credentialsUpdate]: (id: string, enabled: boolean) => { supervisor.websiteAccounts.update(id, enabled); return supervisor.websiteAccounts.state(); },
@@ -131,7 +131,7 @@ export function businessHandlers(
 			return supervisor.deleteArchived(taskId);
 		},
 		[IpcChannel.tasksAnswerOption]: (taskId: unknown, questionId: unknown, option: unknown) => {
-			if (typeof taskId !== "string" || typeof questionId !== "string" || typeof option !== "string")
+			if (typeof taskId !== "string" || typeof questionId !== "string" || typeof option !== "string" || !option.trim())
 				throw new Error("ANSWER_INVALID: 回答参数无效");
 			return supervisor.answerOption(taskId, questionId, option);
 		},

@@ -8,6 +8,8 @@ import { QQBot, type MiddlewareContext, type QQBotEventMap, type QQBotInboundMes
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ensureRallyDirs, resolveRallyPaths } from "../../../../src/main/paths.ts";
 import { Supervisor, type SupervisorOptions } from "../../../../src/main/supervisor/index.ts";
+import { businessHandlers } from "../../../../src/main/business.ts";
+import { IpcChannel } from "../../../../src/shared/ipc.ts";
 import { ModelStore } from "../../../../src/main/model-store.ts";
 import { SkillStore } from "../../../../src/main/skill-store.ts";
 import { McpStore } from "../../../../src/main/mcp-store.ts";
@@ -2118,10 +2120,11 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		expect(supervisor.events.ofKind("audit_appended").find((event) => event.data.kind === "answer")?.data).toMatchObject({ questionId: question, actor: "main", basis: ["#fixture"], text: expect.stringContaining("逐字原话") });
 	});
 
-	it.each(["fallback", "explicit"] as const)("escalates questions via %s, deduplicates reports and answers options without waking main", async (mode) => {
+	it.each(["fallback", "explicit", "typed"] as const)("escalates questions via %s and delivers direct user answers without waking main", async (mode) => {
 		const { supervisor, harness, paths } = await setup();
 		const task = createTask(supervisor);
 		const question = "  保留 <legacy> 接口？\n请逐字展示。 ";
+		const answer = mode === "typed" ? "  两项都不选。\n请先解释失败原因。 " : "保留";
 		let workerStep = 0;
 		let mainCalls = 0;
 		const route: FauxResponseStep = (context, _options, _state, model) => {
@@ -2138,7 +2141,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 				return fauxAssistantMessage("等待回答。");
 			}
 			if (workerStep === 4) {
-				expect(lastUser(context)).toContain("保留");
+				expect(lastUser(context)).toContain(answer);
 				return fauxAssistantMessage(fauxToolCall("task_report", { state: "ready", summary: "已保留" }), { stopReason: "toolUse" });
 			}
 			return fauxAssistantMessage("完成。");
@@ -2156,16 +2159,18 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		expect(taskView(task).status).toBe("needs_answer");
 		const before = mainCalls;
 		const notice = vi.spyOn(supervisor.relay, "notice");
-		supervisor.answerOption(task.id, id, "保留");
-		expect(notice).toHaveBeenCalledWith(`用户已回答 ${task.id} 的 ${id}：保留`, expect.stringMatching(/^event:/));
+		const submit = businessHandlers(paths, supervisor, () => {})[IpcChannel.tasksAnswerOption];
+		expect(() => submit(task.id, id, " \n ")).toThrow("ANSWER_INVALID");
+		submit(task.id, id, answer);
+		expect(notice).toHaveBeenCalledWith(`用户已回答 ${task.id} 的 ${id}：${answer}`, expect.stringMatching(/^event:/));
 		expect(() => supervisor.answerOption(task.id, id, "移除")).toThrow("失效");
 		await vi.waitFor(() => expect(task.ended?.outcome).toBe("done"));
 		expect(mainCalls).toBe(before);
 		expect(task.inputs.filter((input) => input.kind === "answer")).toHaveLength(1);
-		expect(task.attentionHistory?.[0]).toMatchObject({ id, question, answer: { by: "user", basis: [], text: "保留" } });
+		expect(task.attentionHistory?.[0]).toMatchObject({ id, question, answer: { by: "user", basis: [], text: answer } });
 		const restored = new TaskStore(new EventLog(paths.eventsFile), paths.workspaceDir, () => {});
 		expect(restored.get(task.id)?.attentionHistory).toEqual(task.attentionHistory);
-		expect(supervisor.events.ofKind("audit_appended").find((event) => event.data.kind === "answer")?.data).toMatchObject({ taskId: task.id, questionId: id, actor: "user", basis: [], text: "保留" });
+		expect(supervisor.events.ofKind("audit_appended").find((event) => event.data.kind === "answer")?.data).toMatchObject({ taskId: task.id, questionId: id, actor: "user", basis: [], text: answer });
 	}, 15000);
 
 	it("forwards a typed user answer through main using the real message ID and original words", async () => {

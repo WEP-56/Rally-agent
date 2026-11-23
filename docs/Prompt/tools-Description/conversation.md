@@ -8,12 +8,26 @@
 - 提示词原文：
 
 ```text
-Ask the user to save a website account through Rally's private credential form. Pass the exact HTTP(S) website origin, optionally purpose and the related taskId. Requests expire after 24 hours or when their associated task/run ends. Never ask for account names or passwords in chat. Returns only request metadata; saving or cancelling sends a later notice. Enabled saved accounts can be reused by Workers on the matching website. Browser control belongs to Workers.
+Ask the user to save a website account through Rally's private credential form. Pass the exact HTTP(S) website origin, optionally purpose and the related taskId. Requests expire after 24 hours or when their associated task/run ends. Never ask for account names or passwords in chat. Returns only request metadata; saving or cancelling automatically resumes you with a credential_result event. Continue from that result without asking the user to confirm saving in chat. Enabled saved accounts can be reused by Workers on the matching website; saving does not mean website login has succeeded. Browser control belongs to Workers.
 ```
 
 - 参数：`{ website: string, purpose?: string, taskId?: string }`，HTTP(S) 地址长度 1–16384；用途长度 1–1000；任务 ID 长度 1–100，绑定其当前 run。工具调用 ID 用于申请幂等。
 - 返回：申请 ID、origin、pending/saved/cancelled/expired、创建时间、可选用途/任务/run 及保存后的账号引用。提交只走宿主接口，账号密码不在工具参数或结果中。
-- 保存和取消通过持久中继发送元数据通知；重启补发缺失通知。账号密文保存在 Agent 配置目录的 `website-accounts.txt`，Windows 使用 safeStorage，Linux 使用部署 vault key。
+- 保存和取消通过持久中继发送 `credential_result`：主 Agent 空闲时唤醒、忙时 steer，重启补发缺失结果，重复提交按申请 ID 和状态去重。账号密文保存在 Agent 配置目录的 `website-accounts.txt`，Windows 使用 safeStorage，Linux 使用部署 vault key。
+
+### credential_result 回告
+
+- 源码路径：`src/main/supervisor/relay.ts` 的 `render()`；由 `src/main/business.ts` 的提交/取消接口及 `src/main/supervisor/index.ts` 的启动恢复调用。
+- 提示词原文（`enqueue()` 添加 `relayId`）：
+
+```text
+<rally-event kind="credential_result">
+${JSON.stringify(input.request)}
+The private credential request has finished. Continue the related work using this status; saved means the account is available to the Worker, not that website login has succeeded. Do not ask the user to confirm saving again.
+</rally-event>
+```
+
+- 参数：`input.request` 为申请元数据，包含 ID、origin、status、createdAt 及可选 purpose/taskId/runId/accountId；不含账号或密码。`saved`、`cancelled`、`expired` 是不同结果，不把保存等同于登录成功。
 
 ## chat_search
 

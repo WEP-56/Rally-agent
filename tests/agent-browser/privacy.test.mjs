@@ -14,7 +14,7 @@ test('untrusted pages cannot inspect redaction secrets; a private frame requires
   const directory = await mkdtemp(join(tmpdir(), 'rally-browser-privacy-'));
   const server = createServer((_request, response) => {
     response.setHeader('Content-Type', 'text/html');
-    response.end(`<p>Public page</p><script>
+    response.end(`<p>Public page</p><input value="Visible to the controlling user"><input type="password"><script>
       window.captured = [];
       const original = Array.prototype.some;
       Array.prototype.some = function(...args) { captured.push([...this]); return original.apply(this, args); };
@@ -29,13 +29,19 @@ test('untrusted pages cannot inspect redaction secrets; a private frame requires
   try {
     const window = await browser.open('task', 'run', `http://127.0.0.1:${server.address().port}`);
     const page = browser.windows.get(window.id).page;
-    await browser.snapshot(window.id); await browser.frame(window.id);
+    await browser.snapshot(window.id);
+    const masked = await browser.frame(window.id);
+    const original = (await page.screenshot({ type: 'jpeg', quality: 65, scale: 'css' })).toString('base64');
+    assert.notEqual(masked.data, original, 'agent frames still mask inputs');
     const captured = await page.evaluate(() => JSON.stringify(window.captured));
     assert.ok(!captured.includes(username), 'page received another origin account');
     assert.ok(!captured.includes(password), 'page received another origin password');
     await browser.take(window.id, 'device-a');
     await assert.rejects(Promise.resolve().then(() => browserCommand(browser, 'device-b', 'agent-browser:frame', [window.id])), /控制|私密/);
     const frame = await browserCommand(browser, 'device-a', 'agent-browser:frame', [window.id]);
-    assert.ok(frame.data.length);
+    assert.equal(frame.data, original, 'the controlling user sees the original page without masks');
+    await assert.rejects(browser.frame(window.id, true, 'device-a'), /缩略图已暂停/);
+    await browser.handBack(window.id, 'device-a');
+    assert.equal((await browser.frame(window.id)).data, masked.data, 'handing back restores masked frames');
   } finally { await browser.dispose(); await new Promise(resolve => server.close(resolve)); await rm(directory, { recursive: true, force: true }); }
 });

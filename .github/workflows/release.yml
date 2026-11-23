@@ -63,6 +63,19 @@ jobs:
         run: node --test tests/agent-browser/packaged.test.mjs
       - if: matrix.target == 'windows'
         run: node --experimental-vm-modules --test tests/attachments/renderer.test.mjs tests/attachments/client-bridge.test.mjs tests/cloud/connection-ui.test.mjs
+      - name: Verify browser takeover
+        if: matrix.target == 'windows'
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/build/agent-browser
+        run: node --experimental-vm-modules --test tests/agent-browser/managed.test.mjs tests/agent-browser/privacy.test.mjs tests/agent-browser/renderer.test.mjs
+      - name: Verify credential callbacks and direct answers
+        if: matrix.target == 'windows'
+        working-directory: packages/coding-agent
+        run: |
+          node ../../node_modules/vitest/dist/cli.js --run test/suite/rally-website-accounts.test.ts
+          node ../../node_modules/vitest/dist/cli.js --run test/suite/rally-relay.test.ts
+          node ../../node_modules/vitest/dist/cli.js --run test/suite/rally-questions.test.ts
+          node ../../node_modules/vitest/dist/cli.js --run test/suite/rally-supervisor.test.ts -t "escalates questions via"
       - if: matrix.target == 'linux'
         run: node node_modules/playwright/cli.js install-deps chromium
       - if: matrix.target == 'linux'

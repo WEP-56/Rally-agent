@@ -74,12 +74,14 @@ export class WebsiteAccounts {
 		return { ...next };
 	}
 
-	cancel(id: string): void {
+	cancel(id: string): CredentialRequest {
 		this.expire();
 		const request = this.saved.requests.find(item => item.id === id);
 		if (!request) throw Error("账号申请不存在");
-		if (request.status !== "pending") return;
-		this.persist({ ...this.saved, requests: this.saved.requests.map(item => item.id === id ? { ...item, status: "cancelled" } : item) });
+		if (request.status !== "pending") return { ...request };
+		const next: CredentialRequest = { ...request, status: "cancelled" };
+		this.persist({ ...this.saved, requests: this.saved.requests.map(item => item.id === id ? next : item) });
+		return { ...next };
 	}
 
 	update(id: string, enabled: boolean): void {

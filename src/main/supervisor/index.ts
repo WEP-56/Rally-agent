@@ -257,9 +257,7 @@ export class Supervisor {
 			this.recoverInterrupted();
 			this.relay.start();
 			for (const request of this.websiteAccounts.state().requests) {
-				if (request.status === "saved") this.relay.notice(`网站账号申请已保存：${JSON.stringify(request)}`, `credential:${request.id}:saved`);
-				if (request.status === "cancelled") this.relay.notice(`网站账号申请已取消：${request.id}`, `credential:${request.id}:cancelled`);
-				if (request.status === "expired") this.relay.notice(`网站账号申请已过期：${request.id}`, `credential:${request.id}:expired`);
+				if (request.status !== "pending") this.relay.enqueue({ kind: "credential_result", request }, [`credential:${request.id}:${request.status}`]);
 			}
 			this.schedules.start();
 			this.coach.start();
@@ -383,7 +381,7 @@ export class Supervisor {
 		return this.board();
 	}
 
-	/** Buttons may return only one of this question's frozen options. */
+	/** Direct user answers, either a selected option or text entered on the question card. */
 	answerOption(taskId: string, questionId: string, option: string): TaskBoard {
 		if (this.disposed) throw new TaskErrorLike("QUESTION_STALE", "Rally 正在关闭");
 		this.store.answerAttention(taskId, questionId, option, "user", []);

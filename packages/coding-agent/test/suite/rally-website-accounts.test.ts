@@ -11,9 +11,9 @@ import { Supervisor } from "../../../../src/main/supervisor/index.ts";
 import { IpcChannel as C } from "../../../../src/shared/ipc.ts";
 import { defaultModel } from "../../../../src/shared/models.ts";
 import { CloudMirror } from "../../../../src/shared/cloud-state.ts";
-import { createHarness } from "./harness.ts";
+import { createHarness, getMessageText } from "./harness.ts";
 
-it("router requests a private form; local/cloud submission returns metadata and persists a secret-free notice", async () => {
+it("router requests a private form; saving wakes the idle main agent once with metadata only", async () => {
 	const harness = await createHarness({ provider: "rally-credentials", models: [{ id: "main" }] });
 	const paths = resolveRallyPaths(join(harness.tempDir, "home")); ensureRallyDirs(paths);
 	const supervisor = new Supervisor(paths, { emitChat: () => {}, emitTask: () => {}, credentialVault: cloudVault(randomBytes(32)) });
@@ -30,6 +30,7 @@ it("router requests a private form; local/cloud submission returns metadata and 
 			const names = getCurrentTools(context.messages).map(tool => tool.name);
 			expect(names).toContain("credential_request"); expect(names.some(name => name.startsWith("browser_"))).toBe(false);
 			if (!requested) { requested = true; return fauxAssistantMessage(fauxToolCall("credential_request", { website: "https://example.test/login" }), { stopReason: "toolUse" }); }
+			if (context.messages.some(message => getMessageText(message).includes('kind="credential_result"'))) return fauxAssistantMessage("ACCOUNT_SAVED_RECEIVED");
 			return fauxAssistantMessage("请使用账号填写卡片。");
 		};
 		harness.setResponses(Array(8).fill(respond));
@@ -40,6 +41,19 @@ it("router requests a private form; local/cloud submission returns metadata and 
 		const state = cloud[C.credentialsSubmit]({ requestId: request.id, website: request.origin, username, password });
 		expect(state.requests[0].status).toBe("saved");
 		expect(local[C.credentialsSubmit]({ requestId: request.id, website: request.origin, username, password })).toEqual(state);
+		await vi.waitFor(() => expect(supervisor.main.state().messages.some(message => message.text === "ACCOUNT_SAVED_RECEIVED")).toBe(true), { timeout: 5000 });
+		await vi.waitFor(() => expect(supervisor.main.isBusy()).toBe(false));
+		expect(supervisor.main.state().messages.filter(message => message.role === "user")).toHaveLength(1);
+		const received = observations.filter(text => text.includes(state.accounts[0].id));
+		expect(received).toHaveLength(1);
+		expect(received[0]).toContain(state.accounts[0].id);
+		expect(received[0]).toContain('saved');
+		expect(local[C.credentialsCancel](request.id).requests[0].status).toBe("saved");
+		expect(supervisor.events.ofKind("relay_enqueued").filter(event => event.data.kind === "credential_result")).toHaveLength(1);
+		supervisor.websiteAccounts.request("cancel-only", "https://cancel.test");
+		expect(cloud[C.credentialsCancel]("cancel-only").requests.at(-1)?.status).toBe("cancelled");
+		await vi.waitFor(() => expect(observations.some(text => text.includes("cancel-only") && text.includes("cancelled"))).toBe(true), { timeout: 5000 });
+		await vi.waitFor(() => expect(supervisor.main.isBusy()).toBe(false));
 		expect(supervisor.websiteAccounts.forHost(state.accounts[0].id, request.origin)).toEqual({ username, password });
 		const cache = new CloudMirror("https://server.test", "instance"); cache.remember(C.credentialsState, state);
 		expect(cache.read(C.credentialsState)).toBeUndefined();

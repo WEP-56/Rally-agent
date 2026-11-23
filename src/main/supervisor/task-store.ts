@@ -398,8 +398,8 @@ export class TaskStore {
 	answerAttention(taskId: string, questionId: string, text: string, by: "main" | "user", basis: string[]): Task {
 		const task = this.require(taskId);
 		const attention = this.pendingAttention(task, questionId);
-		if (by === "user" && (attention.escalatedAt === undefined || !attention.options?.includes(text)))
-			throw new TaskError("ANSWER_INVALID", "只能选择已上升问题中的原始选项；自由回答请使用主对话输入框");
+		if (by === "user" && attention.escalatedAt === undefined)
+			throw new TaskError("ANSWER_INVALID", "只能回答已转交给用户的问题");
 		if (by === "main" && basis.length === 0) throw new TaskError("QUOTES_REQUIRED", "代答必须引用用户原话");
 		this.audit?.append("answer", { taskId, questionId, actor: by, basis, text });
 		attention.answer = { by, basis: [...basis], text, at: Date.now() };

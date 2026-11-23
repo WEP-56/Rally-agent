@@ -267,7 +267,7 @@ export interface ChatApi {
 /** Task board updates pushed from main; `task` upserts one card. */
 export type TaskEvent = { type: "snapshot"; board: TaskBoard } | { type: "task"; task: TaskView } | { type: "deleted"; taskId: string; board: TaskBoard };
 
-/** Task board and explicit user actions; freeform answers go through the main chat. */
+/** Task board and explicit user actions, including selected and typed question answers. */
 export interface TasksApi {
 	getState(): Promise<TaskBoard>;
 	/** The user's explicit click on a dispatch card; no quote needed (docs 01 §4.1). */

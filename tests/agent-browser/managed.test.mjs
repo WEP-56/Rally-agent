@@ -18,7 +18,9 @@ test('production browser process is durably registered, supports snapshots and c
     const window = await browser.open('task', 'run', `http://127.0.0.1:${server.address().port}`);
     assert.match((await browser.snapshot(window.id)).snapshot, /managed/);
     assert.ok(JSON.parse(await readFile(registry.file, 'utf8')).processes.some(entry => entry.kind === 'browser'));
-    assert.ok((await browser.frame(window.id)).data.length > 0);
+    const frame = await browser.frame(window.id);
+    assert.ok(frame.data.length > 0);
+    assert.ok(frame.width > 0 && frame.height > 0, `frame dimensions: ${frame.width} x ${frame.height}`);
     await (await browser.context).browser().close();
     assert.equal(browser.state().find(item => item.id === window.id).owner, 'closed');
     await assert.rejects(browser.snapshot(window.id), /已关闭/);
