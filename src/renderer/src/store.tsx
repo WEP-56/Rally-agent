@@ -88,7 +88,7 @@ const KEY = "rally.config.v1";
 const OB_KEY = "rally.onboarded.v1";
 
 export function loadConfig(): Config {
-  const remote = window.runtime?.mode === "cloud" ? { ...cloudRead<IdentityState>(IpcChannel.identityState), memoryPath: cloudRead<MemoryState>(IpcChannel.memoryState)?.path ?? "正在同步…" } : {};
+  const remote = window.runtime?.mode === "cloud" ? { ...cloudRead<IdentityState>(IpcChannel.identityState), memoryPath: cloudRead<MemoryState>(IpcChannel.memoryState)?.dir ?? "正在同步…" } : {};
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) return { ...DEFAULT_CONFIG, ...JSON.parse(raw), ...remote };

@@ -30,6 +30,21 @@ describe("Rally durable relay (no provider calls)", () => {
 		return { paths, events, store, transport, relay, task, run };
 	}
 
+  it("restores hidden coach suggestions once, without a task or system line", async () => {
+    const { paths, events, relay, transport, store } = await setup();
+    relay.idea(id => `<rally-idea relayId="${id}">suggestion</rally-idea>`);
+    const item = events.ofKind("relay_enqueued").at(-1)!.data.item as RelayMessage;
+    relay.dispose();
+    const recovered = new Relay(transport, new EventLog(paths.eventsFile), store); relays.push(recovered); recovered.start();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(transport.sendRelay).toHaveBeenCalledExactlyOnceWith([{ id: item.id, text: item.text }], "turn");
+    expect(transport.addSystemLine).not.toHaveBeenCalled();
+    recovered.consumed([item.id]); recovered.dispose();
+    const again = new Relay(transport, new EventLog(paths.eventsFile), store); relays.push(again); again.start();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(transport.sendRelay).toHaveBeenCalledTimes(1);
+  });
+
 	it("coalesces in arrival order and acknowledges consumption rather than send acceptance", async () => {
 		const { events, relay, task, transport } = await setup();
 		const first = relay.enqueue({ kind: "worker_report", task, state: "blocked", summary: "先到" }, ["one"]);

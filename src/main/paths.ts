@@ -2,7 +2,7 @@
 
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import type { RallyPaths } from "../shared/ipc.ts";
 
 /** Resolve all Rally paths under the given home directory. */
@@ -24,7 +24,7 @@ export function resolveRallyPaths(home = homedir()): RallyPaths {
 		snapshotFile: join(stateDir, "snapshot.json"),
 		auditFile: join(stateDir, "audit.jsonl"),
 		jobsDir: join(stateDir, "jobs"),
-		memoryFile: join(rallyHome, "memory", "MEMORY.md"),
+		memoryDir: join(rallyHome, "memory"),
 		workspaceDir: join(home, "rally"),
 	};
 }
@@ -39,7 +39,7 @@ export function ensureRallyDirs(paths: RallyPaths): void {
 		paths.sessionsTasksDir,
 		paths.stateDir,
 		paths.jobsDir,
-		dirname(paths.memoryFile),
+		paths.memoryDir,
 	]) {
 		mkdirSync(dir, { recursive: true });
 	}

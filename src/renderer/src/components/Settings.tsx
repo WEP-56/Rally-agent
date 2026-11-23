@@ -1,3 +1,4 @@
+import { CoachForm } from "./CoachForm";
 import { ConnectionForm } from "./ConnectionForm";
 import { IdentityCard } from "./IdentityCard";
 import { useEffect, useState } from "react";
@@ -30,6 +31,7 @@ export const SECTIONS = [
   { id: "general", label: "身份", icon: UserRound, desc: "名称、性格与工作方式" },
   { id: "workspace", label: "项目与工作区", icon: FolderInput, desc: "默认工作区、最近项目与项目信任" },
   { id: "archive", label: "归档", icon: Archive, desc: "查看、撤销归档或彻底删除任务" },
+  { id: "coach", label: "教练", icon: Brain, desc: "静默整理记忆，发现值得聊的点子" },
   { id: "memory", label: "记忆", icon: Brain, desc: "长期记忆的存储位置与管理" },
   { id: "providers", label: "供应商", icon: Server, desc: "供应商、协议、模型与元数据（明文存于 ~/.rally）" },
   { id: "tool-providers", label: "其它提供商", icon: Blocks, desc: "图像生成模型与网络搜索服务" },
@@ -243,6 +245,7 @@ export function Settings({ section, setSection, onBack, tasks }: { section: stri
           {cur.id === "archive" && <ArchivedTasksSection tasks={tasks} />}
           {cur.id === "general" && <><IdentityCard /><IdentityForm /></>}
           {cur.id === "workspace" && <><div className="glass-strong rounded-[24px] p-5"><WorkspaceForm /></div><section className="mt-7"><h2 className="mb-3 px-1 text-[16px] font-semibold">项目信任</h2><ProjectTrustSection /></section></>}
+          {cur.id === "coach" && <div className="glass-strong rounded-[24px] p-5"><CoachForm /></div>}
           {cur.id === "memory" && <div className="glass-strong rounded-[24px] p-5"><MemoryForm /></div>}
           {cur.id === "providers" && <ProvidersForm />}
           {cur.id === "tool-providers" && <ToolProvidersSection />}

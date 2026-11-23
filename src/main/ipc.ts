@@ -112,15 +112,9 @@ export function registerIpc(paths: RallyPaths, supervisor: Supervisor, notificat
 			browser.owner(event);
 			return publishIdentity(supervisor.identity.setAvatar(readAvatar(selected.filePaths[0])));
 		});
-		handle(IpcChannel.memoryOpen, async () => {
-			const error = await shell.openPath(supervisor.memory.prepareOpen());
+		handle(IpcChannel.memoryOpen, async (_event, file?: unknown) => {
+			const error = await shell.openPath(supervisor.memory.prepareOpen(file));
 			if (error) throw new Error(error);
-		});
-		handle(IpcChannel.memoryPick, async (event) => {
-			const options = { title: "选择记忆文件", filters: [{ name: "Markdown", extensions: ["md"] }], properties: ["openFile"] as "openFile"[] };
-			const win = senderWindow(event);
-			const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
-			return result.canceled ? null : result.filePaths[0] ?? null;
 		});
 		handle(
 			IpcChannel.appInfo,

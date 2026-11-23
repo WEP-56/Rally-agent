@@ -48,6 +48,7 @@ export interface MainAgentOptions {
 	capabilities?(): Promise<string>;
 	segmentBytes?: number;
 	segmentCompactions?: number;
+	beforeInput?(): Promise<void>;
 	onSettled?(aborted: boolean): void;
 	onRelayRead?(ids: string[]): void;
 	onAvailable?(): void;
@@ -94,6 +95,7 @@ export class MainAgent {
 	private readonly onSettled?: (aborted: boolean) => void;
 	private readonly onRelayRead?: (ids: string[]) => void;
 	private readonly onAvailable?: () => void;
+	private readonly beforeInput?: () => Promise<void>;
 	private readonly queuedRelays = new Set<string>();
 	private readonly toolLines = new Map<string, ChatLine>();
 
@@ -119,6 +121,7 @@ export class MainAgent {
 		this.onSettled = options.onSettled;
 		this.onRelayRead = options.onRelayRead;
 		this.onAvailable = options.onAvailable;
+		this.beforeInput = options.beforeInput;
 		this.replay();
 	}
 
@@ -150,6 +153,7 @@ export class MainAgent {
 
 	/** Durable relay metadata deduplicates an ambiguous send after restart. */
 	async sendRelay(items: RelayMessage[], mode: RelayMode): Promise<void> {
+		await this.beforeInput?.();
 		const session = this.session;
 		if (!session || !this.canReceiveRelay()) throw new Error("主会话未就绪，中继保留待送");
 		// A compacted-away record is not usable context: reinject that pending payload.
@@ -236,6 +240,7 @@ export class MainAgent {
 
 	/** An IM turn runs on the same Pi session. Do not mix desktop prompts or relays into its reply. */
 	async sendFromIm(text: string, source: ImSource): Promise<string | null> {
+		await this.beforeInput?.();
 		await this.start();
 		const key = imKey(source);
 		if (this.disposed || this.receivedIm.has(key)) return null;
@@ -265,6 +270,7 @@ export class MainAgent {
 	async send(text: string, attachmentIds: string[] = [], actor = "desktop"): Promise<void> {
 		const trimmed = text.trim();
 		if (!trimmed && !attachmentIds.length) return;
+		await this.beforeInput?.();
 		const resources = this.resources?.();
 		if (attachmentIds.length && !resources) throw Error("附件资源库不可用");
 		const attachments = resources ? resolveAttachments(resources, attachmentIds, actor) : [];
@@ -591,8 +597,7 @@ export class MainAgent {
 
 	private startStreaming(): void {
 		this.finishStreaming();
-		const line = this.addLine("assistant", "", true);
-		this.streaming = { line };
+		this.streaming = { line: { id: `#${this.nextLine++}`, role: "assistant", text: "", at: Date.now(), streaming: true } };
 	}
 
 	private updateStreaming(message: unknown): void {
@@ -600,6 +605,8 @@ export class MainAgent {
 		// A late delta after the message was finalized: ignore rather than resurrect it.
 		if (!streaming) return;
 		Object.assign(streaming.line, assistantContent(message));
+		if (!streaming.line.text.trim() && !streaming.line.blocks?.length) return;
+		if (!this.messages.includes(streaming.line)) this.messages.push(streaming.line);
 		this.emit({ type: "message", message: clone(streaming.line) });
 	}
 
@@ -608,6 +615,7 @@ export class MainAgent {
 		if (!streaming) return;
 		this.streaming = null;
 		const line = streaming.line;
+		if (!this.messages.includes(line)) return;
 		line.streaming = false;
 		this.logLine(line);
 		this.emit({ type: "message", message: clone(line) });

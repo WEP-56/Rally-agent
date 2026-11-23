@@ -58,8 +58,10 @@ export function businessHandlers(
 			await supervisor.services.stop(id, "user");
 			return supervisor.services.state();
 		},
+		[IpcChannel.coachState]: () => supervisor.coachSettings.state(),
+		[IpcChannel.coachUpdate]: (patch: unknown) => supervisor.coachSettings.update(patch),
+		[IpcChannel.userSeen]: () => supervisor.userSeen(),
 		[IpcChannel.memoryState]: () => supervisor.memory.state(),
-		[IpcChannel.memoryPath]: (path: unknown) => supervisor.memory.updatePath(path),
 		[IpcChannel.mcpState]: () => mcp.state(),
 		[IpcChannel.mcpSave]: (json: string) => mcp.save(json),
 		[IpcChannel.mcpSaveServer]: (name: string, json: string, originalName?: string) =>

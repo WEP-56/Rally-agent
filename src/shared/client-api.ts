@@ -111,11 +111,11 @@ export function createApi(ipcRenderer: ClientTransport): RallyApi {
 				return () => ipcRenderer.off(IpcEvent.services, handler);
 			},
 		},
+		coach: { getState: () => ipcRenderer.invoke(IpcChannel.coachState), update: patch => ipcRenderer.invoke(IpcChannel.coachUpdate, patch) },
+		userSeen: () => ipcRenderer.invoke(IpcChannel.userSeen),
 		memory: {
 			getState: () => ipcRenderer.invoke(IpcChannel.memoryState),
-			setPath: (path) => ipcRenderer.invoke(IpcChannel.memoryPath, path),
-			open: () => ipcRenderer.invoke(IpcChannel.memoryOpen),
-			pickFile: () => ipcRenderer.invoke(IpcChannel.memoryPick),
+			open: (file) => ipcRenderer.invoke(IpcChannel.memoryOpen, file),
 		},
 		gates: { decide: (id, decision) => ipcRenderer.invoke(IpcChannel.gateDecide, id, decision) },
 		mcp: {

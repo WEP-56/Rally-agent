@@ -8,7 +8,7 @@
 - 提示词原文：
 
 ```text
-Read-only Git status/log/diff/show/branch queries. Relative cwd follows the main conversation's current default workspace. branch always lists; mutation, output-file, pager, external-diff and textconv options are rejected. Use args as literal argv, never a shell string.
+Read-only Git status/log/diff/show/branch queries. Relative cwd follows the main conversation's current default workspace. branch always lists; mutation, output-file, pager, external-diff and textconv options are rejected. Use args as literal argv, never a shell string: full option names, --option=value for values that begin with '-', and -- before literal paths. READONLY_VIOLATION means the request changes something and belongs to a worker.
 ```
 - 参数：
 

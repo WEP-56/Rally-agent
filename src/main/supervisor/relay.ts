@@ -24,7 +24,7 @@ export interface RelayTransport {
 	addSystemLine(text: string, relayId?: string, attachments?: ResourceRef[]): void;
 }
 interface RelayRecord extends RelayMessage {
-	kind: RelayInput["kind"] | "notice";
+	kind: RelayInput["kind"] | "notice" | "idea";
 	sources: string[];
 	taskId?: string;
 	gateId?: string;
@@ -143,6 +143,13 @@ export class Relay {
 		if (source && this.sources.has(source)) return;
 		const id = `R-${this.nextId++}`;
 		this.persist({ id, kind: "notice", sources: source ? [source] : [], text: `<rally-notice relayId="${id}">${text}</rally-notice>` });
+		this.available();
+	}
+
+	/** A coach suggestion wakes the main agent like a report, but shows nothing in the conversation. */
+	idea(render: (relayId: string) => string): void {
+		const id = `R-${this.nextId++}`;
+		this.persist({ id, kind: "idea", sources: [], text: render(id) });
 		this.available();
 	}
 

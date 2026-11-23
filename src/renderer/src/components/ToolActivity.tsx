@@ -3,7 +3,7 @@ import type { StepKind } from "../data";
 import { ToolSteps } from "./ToolSteps";
 
 function kind(name: string): StepKind {
-	if (name === "memory_append" || name === "memory_remove") return "memory";
+	if (name === "memory_add" || name === "memory_edit") return "memory";
 	if (name === "bash" || name === "powershell" || name === "git") return "cmd";
 	if (name === "read" || name === "write" || name === "edit") return name;
 	if (name === "file_delete") return "delete";

@@ -8,7 +8,7 @@
 - 提示词原文：
 
 ```text
-Create and dispatch a task. Quotes are required; write-scope overlap only returns a warning.
+Create a task for a worker. quotes are the user message IDs that state the work; the host copies their text verbatim as the requirements. title is at most 40 characters. cwd is an explicit absolute directory. mode is readonly or write; scope lists the paths a write task will change, and overlap with a running task returns a warning without blocking. dependsOn makes the task wait for other tasks. Repeating the same title and quoted messages within 60 seconds returns the existing task. The result is a creation receipt with the approval and queue state, not proof that work ran.
 ```
 - 参数：
 
@@ -144,7 +144,7 @@ schema = Type.Object({
 - 提示词原文：
 
 ```text
-Read board/card/report/runs/files/timeline. Defaults to board without taskId, otherwise card. offset/limit page lists (20 by default, max 100). Never returns worker transcripts. Files includes observed file-tool access and shell cwd/command; shell effects remain unknown; see coverage for gaps.
+Read board/card/report/runs/files/timeline. Defaults to board without taskId, otherwise card. Use board before dispatching to see open tasks and their write scopes. offset/limit page lists (20 by default, max 100). Never returns worker transcripts. Files includes observed file-tool access and shell cwd/command; shell effects remain unknown; see coverage for gaps.
 ```
 - 参数：
 
@@ -234,7 +234,7 @@ escalateSchema = Type.Object({ kind: Type.Union([Type.Literal("gate"), Type.Lite
 - 提示词原文：
 
 ```text
-Create a persisted plan; the host dispatches an ordinary worker when due, not now. Only for explicitly requested future/recurring work. Quote original work AND timing instructions. Check schedule_list for existing plans first. Resolve dates from fresh rally-schedules time; once.at is epoch MILLISECONDS, interval starts after its first interval, daily uses HH:mm and an IANA timezone. No weekday/monthly/cron support. Do not also task_dispatch unless the user requested an immediate run. Return the saved next time and local-running limitation; manage under 工位 → 定时. Current approval/model/gates apply to every worker occurrence.
+Create a persisted plan; the host dispatches an ordinary worker when due, not now. Only for explicitly requested future/recurring work. Quote original work AND timing instructions. Check schedule_list for existing plans first. Resolve dates from fresh rally-schedules time; once.at is epoch MILLISECONDS, interval starts after its first interval, daily uses HH:mm and an IANA timezone. No weekday/monthly/cron support. Do not also task_dispatch unless the user requested an immediate run. Return the saved next time and local-running limitation; manage under 工位 → 定时. Current approval/model/gates apply to every worker occurrence. Occurrences missed while Rally was closed or asleep coalesce into one, and an unfinished previous worker of the same plan blocks the next occurrence.
 ```
 - 参数：
 

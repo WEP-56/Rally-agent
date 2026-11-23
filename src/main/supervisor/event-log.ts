@@ -59,6 +59,9 @@ export type EventKind =
 	| "access_recorded"
 	| "audit_appended"
 	| "memory_changed"
+	| "coach_run"
+	| "idea_raised"
+	| "user_seen"
 	| "usage_updated"
 	| "tool_activity"
 	| "assistant_message";

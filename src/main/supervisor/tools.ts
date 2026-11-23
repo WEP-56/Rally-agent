@@ -90,7 +90,7 @@ function dispatchTool(host: TaskToolHost): ToolDefinition {
 	return {
 		name: "task_dispatch",
 		label: "派发任务",
-		description: "Create and dispatch a task. Quotes are required; write-scope overlap only returns a warning.",
+		description: "Create a task for a worker. quotes are the user message IDs that state the work; the host copies their text verbatim as the requirements. title is at most 40 characters. cwd is an explicit absolute directory. mode is readonly or write; scope lists the paths a write task will change, and overlap with a running task returns a warning without blocking. dependsOn makes the task wait for other tasks. Repeating the same title and quoted messages within 60 seconds returns the existing task. The result is a creation receipt with the approval and queue state, not proof that work ran.",
 		parameters: schema,
 		async execute(_toolCallId: string, params: Params) {
 			try {
@@ -368,7 +368,7 @@ function readTool(host: TaskToolHost): ToolDefinition {
 	return {
 		name: "task_read",
 		label: "读取任务",
-		description: "Read board/card/report/runs/files/timeline. Defaults to board without taskId, otherwise card. offset/limit page lists (20 by default, max 100). Never returns worker transcripts. Files includes observed file-tool access and shell cwd/command; shell effects remain unknown; see coverage for gaps.",
+		description: "Read board/card/report/runs/files/timeline. Defaults to board without taskId, otherwise card. Use board before dispatching to see open tasks and their write scopes. offset/limit page lists (20 by default, max 100). Never returns worker transcripts. Files includes observed file-tool access and shell cwd/command; shell effects remain unknown; see coverage for gaps.",
 		parameters: TaskReadSchema,
 		async execute(_toolCallId: string, params: TaskReadParams) {
 			try {

@@ -163,8 +163,7 @@ export async function connect() {
 			}
 			if (channel === C.windowIsMaximized) return ((await nativeWindow?.isMaximized()) ?? false) as T;
 			if (channel === C.notificationsTarget) return null as T;
-			if (channel === C.workspacePick || channel === C.memoryPick)
-				return (await serverPath(channel === C.memoryPick)) as T;
+			if (channel === C.workspacePick) return (await serverPath()) as T;
 			if (channel === C.browserLayout) return undefined as T;
 			if (channel !== C.modelsState && channel !== C.memoryState) {
 				const saved = mirror.read<T>(channel);
@@ -228,6 +227,7 @@ export async function connect() {
 		}
 		window.dispatchEvent(new CustomEvent("rally-network", { detail: true }));
 		if (recovered) {
+			void rpc(C.userSeen).catch(error => console.error("用户在线信号失败", error));
 			window.dispatchEvent(new CustomEvent("rally-configuration", { detail: "models" }));
 			window.dispatchEvent(new CustomEvent("rally-configuration", { detail: "memory" }));
 		}

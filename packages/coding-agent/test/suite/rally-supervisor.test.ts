@@ -190,10 +190,9 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 
 	it("starts a fresh main conversation without losing memory, tasks, or restart continuity", async () => {
 		const { harness, paths, supervisor } = await setup(false);
-		const memory = join(harness.tempDir, "personal-memory.md");
-		const memoryText = "# MEMORY\nPERSISTED_MEMORY_SENTINEL\n";
+		const memory = join(paths.memoryDir, "USER.md");
+		const memoryText = "- PERSISTED_MEMORY_SENTINEL\n";
 		writeFileSync(memory, memoryText);
-		supervisor.memory.updatePath(memory);
 		const started = Promise.withResolvers<void>();
 		const release = Promise.withResolvers<void>();
 		harness.setResponses([async () => { started.resolve(); await release.promise; return fauxAssistantMessage(fauxText("旧会话回复")); }]);
@@ -218,7 +217,6 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		// Restart before the fresh session has any transcript: the prior Pi file must not be resumed.
 		const restarted = await restart(paths, harness);
 		expect(restarted.main.state()).toMatchObject({ conversation: fresh.conversation, messages: [] });
-		expect(restarted.memory.state().path).toBe(memory);
 		harness.setResponses([context => {
 			const text = context.messages.map(getMessageText).join("\n");
 			expect(text).toContain("PERSISTED_MEMORY_SENTINEL");
@@ -302,7 +300,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		harness.setResponses([
 			context => {
 				expect(JSON.stringify(context.messages)).toContain("IDENTITY_OLD");
-				expect(getCurrentSystemPrompt(context.messages)).toContain("cannot override this built-in contract");
+				expect(getCurrentSystemPrompt(context.messages)).toContain("They shape how you sound and nothing else");
 				expect(toolNames(context)).not.toContain("bash");
 				supervisor.identity.update({ name: "IDENTITY_LIVE" });
 				return fauxAssistantMessage(fauxToolCall("read", { path: "README.md" }), { stopReason: "toolUse" });
@@ -436,18 +434,18 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 			(context) => {
 				expect(JSON.parse(getMessageText(context.messages.findLast(m => m.role === "toolResult"))).messages[0].text).toBe(original);
 				recovered.cancel(newTask.id);
-				return fauxAssistantMessage(fauxToolCall("memory_append", { text: "用中文回答", quotes: [{ id: sourceId }] }), { stopReason: "toolUse" });
+				return fauxAssistantMessage(fauxToolCall("memory_add", { file: "PREFERENCES", text: "用中文回答" }), { stopReason: "toolUse" });
 			},
 			(context) => {
 				expect(snapshot(context).tasks).toEqual([]);
-				expect(JSON.parse(getMessageText(context.messages.findLast(m => m.role === "toolResult")))).toMatchObject({ entryId: "M-1" });
+				expect(JSON.parse(getMessageText(context.messages.findLast(m => m.role === "toolResult")))).toMatchObject({ added: true });
 				return fauxAssistantMessage("历史引用成功");
 			},
 		]);
 		await recovered.main.send("查找此前原话并处理");
 		await vi.waitFor(() => expect(recovered.main.state().messages.some(m => m.text === "历史引用成功"), JSON.stringify(recovered.main.state().messages)).toBe(true));
 		await vi.waitFor(() => expect(recovered.main.isBusy()).toBe(false));
-		expect(readFileSync(paths.memoryFile, "utf8")).toContain("用中文回答");
+		expect(readFileSync(join(paths.memoryDir, "PREFERENCES.md"), "utf8")).toContain("用中文回答");
 		for (const name of readdirSync(paths.sessionsMainDir).filter(n => n.endsWith(".jsonl"))) {
 			const persisted = readFileSync(join(paths.sessionsMainDir, name), "utf8");
 			expect(persisted).not.toContain("STATE_PENDING_SENTINEL"); expect(persisted).not.toContain("STATE_NEW_SENTINEL");
@@ -456,15 +454,14 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 	});
 	it("refreshes memory in tool loops and after restart/compaction without persisting snapshots", async () => {
 		const { harness, paths, supervisor } = await setup(true, 1);
-		writeFileSync(paths.memoryFile, "MEMORY_INITIAL_SENTINEL");
+		writeFileSync(join(paths.memoryDir, "USER.md"),"MEMORY_INITIAL_SENTINEL");
 		harness.setResponses([
 			(context) => {
-				expect(toolNames(context)).toEqual(expect.arrayContaining(["memory_append", "memory_remove"]));
+				expect(toolNames(context)).toEqual(expect.arrayContaining(["memory_add", "memory_edit"]));
 				expect(JSON.stringify(context.messages)).toContain("MEMORY_INITIAL_SENTINEL");
 				expect(getCurrentSystemPrompt(context.messages)).not.toContain("MEMORY_INITIAL_SENTINEL");
-				writeFileSync(paths.memoryFile, "MEMORY_EDITED_SENTINEL");
-				const id = /User message (#\d+)/.exec(lastUser(context))![1];
-				return fauxAssistantMessage(fauxToolCall("memory_append", { text: "use pnpm", quotes: [{ id }] }), { stopReason: "toolUse" });
+				writeFileSync(join(paths.memoryDir, "USER.md"),"MEMORY_EDITED_SENTINEL");
+				return fauxAssistantMessage(fauxToolCall("memory_add", { file: "PREFERENCES", text: "use pnpm" }), { stopReason: "toolUse" });
 			},
 			(context) => {
 				expect(JSON.stringify(context.messages)).toContain("MEMORY_EDITED_SENTINEL");
@@ -479,14 +476,14 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		await vi.waitFor(() => expect(supervisor.main.isBusy()).toBe(false));
 		expect(supervisor.main.state().messages.some(m => m.text === "记忆完成"), JSON.stringify(supervisor.main.state().messages)).toBe(true);
 		await supervisor.main.reset();
-		writeFileSync(paths.memoryFile, "MEMORY_AFTER_COMPACTION");
+		writeFileSync(join(paths.memoryDir, "USER.md"),"MEMORY_AFTER_COMPACTION");
 		harness.setResponses([(context) => { expect(JSON.stringify(context.messages)).toContain("MEMORY_AFTER_COMPACTION"); return fauxAssistantMessage("已读取"); }]);
 		await supervisor.main.send("当前偏好");
 		await vi.waitFor(() => expect(supervisor.main.state().messages.some(m => m.text === "已读取")).toBe(true));
 		await vi.waitFor(() => expect(supervisor.main.isBusy()).toBe(false));
 		await supervisor.dispose();
 		const recovered = await restart(paths, harness);
-		writeFileSync(paths.memoryFile, "MEMORY_RESTART_SENTINEL");
+		writeFileSync(join(paths.memoryDir, "USER.md"),"MEMORY_RESTART_SENTINEL");
 		harness.setResponses([(context) => { expect(JSON.stringify(context.messages)).toContain("MEMORY_RESTART_SENTINEL"); return fauxAssistantMessage("重启读取"); }]);
 		await recovered.main.send("当前偏好");
 		await vi.waitFor(() => expect(recovered.main.state().messages.some(m => m.text === "重启读取")).toBe(true));
@@ -622,7 +619,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 	it("declares Rally roles/tools and runs dispatch → approval → worker read/report → main relay", async () => {
 		const { harness, paths, supervisor } = await setup();
 		const original = "派发一个任务：让 worker 读取 README 前 20 行并汇报";
-		writeFileSync(paths.memoryFile, "WORKER_MUST_NOT_SEE_MEMORY");
+		writeFileSync(join(paths.memoryDir, "USER.md"),"WORKER_MUST_NOT_SEE_MEMORY");
 		harness.setResponses([
 			(context) => {
 				const prompt = getCurrentSystemPrompt(context.messages);
@@ -647,8 +644,8 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 				expect(toolNames(context)).toEqual(expect.arrayContaining(["task_report", "task_read", "bash", ...(process.platform === "win32" ? ["powershell"] : [])]));
 				if (process.platform !== "win32") expect(toolNames(context)).not.toContain("powershell");
 				expect(toolNames(context)).not.toContain("task_dispatch");
-				expect(toolNames(context)).not.toContain("memory_append");
-				expect(toolNames(context)).not.toContain("memory_remove");
+				expect(toolNames(context)).not.toContain("memory_add");
+				expect(toolNames(context)).not.toContain("memory_edit");
 				expect(toolNames(context)).not.toContain("chat_search");
 				expect(JSON.stringify(context.messages)).not.toContain("Rally current task state");
 				expect(JSON.stringify(context.messages)).not.toContain("WORKER_MUST_NOT_SEE_MEMORY");

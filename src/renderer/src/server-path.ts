@@ -1,5 +1,5 @@
 /** Cloud paths belong to the server, so a client-side file picker is misleading. */
-export function serverPath(file: boolean): Promise<string | null> {
+export function serverPath(): Promise<string | null> {
 	return new Promise((resolve) => {
 		const dialog = document.createElement("dialog");
 		dialog.className = "server-path-dialog glass-strong rounded-[24px] p-6 text-fg";
@@ -7,13 +7,13 @@ export function serverPath(file: boolean): Promise<string | null> {
 		form.method = "dialog";
 		const title = document.createElement("h2");
 		title.className = "mb-2 text-lg font-semibold";
-		title.textContent = file ? "选择云端记忆文件" : "选择云端目录";
+		title.textContent = "选择云端目录";
 		const note = document.createElement("p");
 		note.className = "mb-4 text-sm text-muted";
 		note.textContent = "填写 VPS 上的绝对路径。文件和任务将在服务器上使用这个位置。";
 		const input = document.createElement("input");
 		input.className = "mb-4 h-11 w-full rounded-xl bg-sunken px-3 text-fg";
-		input.placeholder = file ? "/var/lib/rally/.rally/memory/MEMORY.md" : "/var/lib/rally/rally";
+		input.placeholder = "/var/lib/rally/rally";
 		input.setAttribute("aria-label", "服务器绝对路径");
 		const actions = document.createElement("div");
 		actions.className = "flex justify-end gap-2";

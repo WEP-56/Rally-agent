@@ -22,30 +22,24 @@ ChatSearchSchema = Type.Object({
 }, { additionalProperties: false })
 ```
 
-## memory_append
+## memory_add
 
-- 源码路径：`src/main/supervisor/memory-tools.ts`（可用角色：Main Agent）
+- 源码路径：`src/main/supervisor/memory-tools.ts`（Main Agent）
 - 提示词原文：
 
 ```text
-Append a short memory (1–300 characters) when the user explicitly asks to remember it. quotes references that user's message. Returns entryId and an optional size warning.
-```
-- 参数：
-
-```ts
-append = Type.Object({ text: Type.String({ minLength: 1, maxLength: 300 }), quotes: refs })
+Add one entry to your notebook about the user. file is USER (who they are: lasting facts), PREFERENCES (how they like things done) or RECENT (things happening now that will end). Write one line in the user's language, ending with its metadata in parentheses: (fact|inferred, source message or task ID, YYYY-MM-DD), and for RECENT also "; drop: <when this can be deleted>". The entry is appended to the end of the file; a nightly pass files and merges entries, so do not spend effort on placement. Fails if the file would exceed its budget: shorten or remove an older entry with memory_edit first.
 ```
 
-## memory_remove
+- 参数：file 为 USER / PREFERENCES / RECENT；text 为 1–500 字的单行条目。
 
-- 源码路径：`src/main/supervisor/memory-tools.ts`（可用角色：Main Agent）
+## memory_edit
+
+- 源码路径：`src/main/supervisor/memory-tools.ts`（Main Agent）
 - 提示词原文：
 
 ```text
-Remove an entryId shown in the current memory snapshot when the user explicitly asks to forget it. quotes references that user's message. Returns removed:true.
+Change or delete existing notebook text. old must match exactly one passage in the current memory snapshot of that file; new replaces it, and an empty new deletes it. Use this when the user corrects something you have on file, when a newer fact replaces an older one, when a RECENT item is resolved, or when they ask you to forget something. Fails if old is not found or matches more than once, which usually means the file changed: check the snapshot in your next request.
 ```
-- 参数：
 
-```ts
-remove = Type.Object({ entryId: Type.String({ pattern: "^M-[1-9][0-9]*$" }), quotes: refs })
-```
+- 参数：file 为 USER / PREFERENCES / RECENT；old 为非空、唯一匹配的原文，new 为替换内容，空字符串表示删除。

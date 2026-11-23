@@ -18,6 +18,8 @@ import { IdentityStore } from "../identity-store.ts";
 import { ResourceStore } from "../resource-store.ts";
 import { recoverResourceReferences } from "./resource-lifecycle.ts";
 import { MemoryStore } from "../memory-store.ts";
+import { CoachStore } from "../coach-store.ts";
+import { Coach } from "./coach.ts";
 import { createMemoryTools } from "./memory-tools.ts";
 import { createChatSearchTool } from "./chat-search.ts";
 import { rallyState } from "./rally-state.ts";
@@ -62,6 +64,8 @@ export interface SupervisorOptions {
 	serviceReadyMs?: number;
 	serviceStopGraceMs?: number;
 	watchdogNow?: () => number;
+	coachNow?: () => number;
+	coachRandom?: () => number;
 	emitServices?(state: ServicesState): void;
 	emitChat(event: ChatEvent): void;
 	emitTask(event: TaskEvent): void;
@@ -82,6 +86,8 @@ export class Supervisor {
 	readonly toolProviders: ToolProviderStore;
 	readonly workspace: WorkspaceStore;
 	readonly memory: MemoryStore;
+	readonly coachSettings: CoachStore;
+	readonly coach: Coach;
 	readonly main: MainAgent;
 	readonly workers: WorkerManager;
 	readonly relay: Relay;
@@ -120,7 +126,7 @@ export class Supervisor {
 				onStopped: (entry, reason, result) => this.events.append("process_stopped", { ...entry, reason, result }),
 			});
 			this.audit = new AuditLog(paths.auditFile, this.events);
-			this.memory = new MemoryStore(paths.home, paths.memoryFile, this.events, this.audit);
+			this.memory = new MemoryStore(paths.memoryDir, this.events, this.audit);
 			this.workspace = new WorkspaceStore(paths.home, paths.workspaceDir);
 			this.identity = new IdentityStore(paths.home);
 			this.feishu = new FeishuConnection(paths.home, options.credentialVault, (text, source) => this.main.sendFromIm(text, source));
@@ -152,6 +158,7 @@ export class Supervisor {
 				quote: (ref) => this.main.quote(ref), requested: () => this.relay.captureSources(),
 				notice: () => this.relay.captureSources() });
 			this.schedules = new ScheduledTasks(this.events, this.store, () => this.autoApprove, () => this.scheduler.tick());
+			const capabilities = async () => (await catalog.context()) + (this.feishu.toolsEnabled() ? "\nFeishu worker MCP (rally_feishu): read shared documents and wiki nodes, search shared Bitable records. Only workers may call it." : "") + (this.qqMail.available() ? "\nQQ Mail worker tools: search/read the inbox, save attachments, and compose send/reply for explicit desktop approval. Only workers may call them." : "");
 			this.main = new MainAgent(paths, this.events, options.emitChat, {
 				resources: () => this.resources,
 				models: this.models,
@@ -160,13 +167,14 @@ export class Supervisor {
 				segmentCompactions: options.mainSegmentCompactions,
 				taskState: () => rallyState(this.store, this.workers.streamingCount(), this.scheduler.limit, this.autoApprove),
 				scheduleState: () => this.schedules.context(),
-				capabilities: async () => (await catalog.context()) + (this.feishu.toolsEnabled() ? "\nFeishu worker MCP (rally_feishu): read shared documents and wiki nodes, search shared Bitable records. Only workers may call it." : "") + (this.qqMail.available() ? "\nQQ Mail worker tools: search/read the inbox, save attachments, and compose send/reply for explicit desktop approval. Only workers may call them." : ""),
-				customTools: [...createScheduleTools(() => this.schedules, ref => this.main.quote(ref)), createChatSearchTool((params) => this.main.search(params)), ...createMemoryTools(this.memory, (ref) => this.main.quote(ref), () => !this.disposed), ...createRouterReadTools(() => this.workspace.base(), this.processes, () => catalog.skillPaths), createGitInspectTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGitRunner(this.processes)), createGithubReadTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGithubRunner(this.processes)), createFetchPageTool(this.network), createWebSearchTool(this.toolProviders), ...createMainTaskTools(this.host()), ...createGateTools(this.gates, this.store)],
+				capabilities,
+				customTools: [...createScheduleTools(() => this.schedules, ref => this.main.quote(ref)), createChatSearchTool((params) => this.main.search(params)), ...createMemoryTools(this.memory, () => !this.disposed), ...createRouterReadTools(() => this.workspace.base(), this.processes, () => catalog.skillPaths), createGitInspectTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGitRunner(this.processes)), createGithubReadTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGithubRunner(this.processes)), createFetchPageTool(this.network), createWebSearchTool(this.toolProviders), ...createMainTaskTools(this.host()), ...createGateTools(this.gates, this.store)],
 				memory: () => this.memory.context(),
 				identity: () => this.identity.context(),
 				workspace: () => this.workspace.state(),
 				onRelayRead: (ids) => this.relay.consumed(ids),
 				onAvailable: () => this.relay?.available(),
+				beforeInput: async () => { await this.coach?.interrupt(); },
 				onSettled: (aborted) => {
 					if (this.disposed) return;
 					this.gates.fallback(this.relay.takeDeliveredGates());
@@ -175,6 +183,13 @@ export class Supervisor {
 				},
 			});
 			this.relay = new Relay(this.main, this.events, this.store);
+			this.coachSettings = new CoachStore(paths.home);
+			this.coach = new Coach({
+				settings: () => this.coachSettings.state(), models: this.models, memory: this.memory, events: this.events, audit: this.audit, processes: this.processes, agentDir: paths.agentDir,
+				messages: () => this.main.state().messages, mainBusy: () => this.main.isBusy() || !this.main.canReceiveRelay(),
+				tasks: () => this.store.list(), schedules: () => this.schedules.list(), capabilities,
+				deliverIdea: render => this.relay.idea(render), now: options.coachNow, random: options.coachRandom,
+			});
 			this.workers = new WorkerManager({
 				resources: () => this.resources,
 				network: this.network,
@@ -230,6 +245,7 @@ export class Supervisor {
 			this.recoverInterrupted();
 			this.relay.start();
 			this.schedules.start();
+			this.coach.start();
 			this.feishu.start();
 			this.qqBot.start();
 			this.scheduler.tick();
@@ -270,6 +286,7 @@ export class Supervisor {
 			Promise.resolve().then(() => this.processes.dispose()),
 			Promise.resolve().then(() => this.network.dispose()),
 			Promise.resolve().then(() => this.workers.dispose()),
+			Promise.resolve().then(() => this.coach.dispose()),
 			Promise.resolve().then(() => this.main.dispose()),
 		]);
 		errors.push(...results.flatMap(result => result.status === "rejected" ? [result.reason] : []));
@@ -285,6 +302,12 @@ export class Supervisor {
 		return this.resourceMaintenance ??= this.resources.sweep().catch(error => {
 			console.error("Resource maintenance failed", error);
 		}).finally(() => { this.resourceMaintenance = undefined; });
+	}
+
+	/** The user opened or focused a client. Coaches use it to tell presence from absence. */
+	userSeen(): void {
+		if (this.disposed || Date.now() - (this.events.ofKind("user_seen").at(-1)?.at ?? 0) < 60 * 60 * 1000) return;
+		this.events.append("user_seen", {});
 	}
 
 	board(): TaskBoard {

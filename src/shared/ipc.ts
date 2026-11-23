@@ -15,7 +15,8 @@ import type { AssistantBlock } from "./conversation.ts";
 import type { SkillsState } from "./skills.ts";
 import type { ProjectTrustState } from "./trust.ts";
 import type { McpConfigurationState, McpExposure, McpRiskTier } from "./mcp.ts";
-import type { MemoryState } from "./memory.ts";
+import type { CoachSettings } from "./coach.ts";
+import type { MemoryFileKey, MemoryState } from "./memory.ts";
 import type { ServicesState } from "./services.ts";
 import type { BrowserState, BrowserLayout, BrowserAction, BrowserEvent } from "./browser.ts";
 import type { TerminalSize, TerminalState, TerminalEvent } from "./terminal.ts";
@@ -55,8 +56,8 @@ export interface RallyPaths {
 	auditFile: string;
 	/** ~/.rally/state/jobs: background command logs. */
 	jobsDir: string;
-	/** ~/.rally/memory/MEMORY.md */
-	memoryFile: string;
+	/** ~/.rally/memory */
+	memoryDir: string;
 	/** ~/rally: default workspace. */
 	workspaceDir: string;
 }
@@ -116,10 +117,11 @@ export const IpcChannel = {
 	browserClose: "browser:close",
 	servicesState: "services:state",
 	servicesStop: "services:stop",
+	coachState: "coach:state",
+	coachUpdate: "coach:update",
+	userSeen: "user:seen",
 	memoryState: "memory:state",
-	memoryPath: "memory:path",
 	memoryOpen: "memory:open",
-	memoryPick: "memory:pick",
 	appInfo: "app:info",
 	windowMinimize: "window:minimize",
 	windowToggleMaximize: "window:toggle-maximize",
@@ -331,7 +333,9 @@ export interface RallyApi {
 		onEvent(listener: (event: BrowserEvent) => void): () => void;
 	};
 	services: { getState(): Promise<ServicesState>; stop(id: string): Promise<ServicesState>; onChange(listener: (state: ServicesState) => void): () => void };
-	memory: { getState(): Promise<MemoryState>; setPath(path: string): Promise<MemoryState>; open(): Promise<void>; pickFile(): Promise<string | null> };
+	coach: { getState(): Promise<CoachSettings>; update(patch: Partial<CoachSettings>): Promise<CoachSettings> };
+	userSeen(): Promise<void>;
+	memory: { getState(): Promise<MemoryState>; open(file?: MemoryFileKey): Promise<void> };
 	gates: { decide(id: string, decision: "allow" | "deny"): Promise<TaskBoard> };
 	mcp: {
 		saveServer(name: string, json: string, originalName?: string, revision?: string): Promise<McpConfigurationState>;

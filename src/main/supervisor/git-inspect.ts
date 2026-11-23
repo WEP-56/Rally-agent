@@ -15,7 +15,7 @@ export type GitReadCommand = "status" | "log" | "diff" | "show" | "branch";
 export function createGitInspectTool(base: () => string, outputDir: string, runner: GitRunner = runGit): Pick<ToolDefinition<typeof schema, GitResult>, "name" | "label" | "description" | "parameters" | "execute"> {
 	return {
 		name: "git_inspect", label: "查询 Git", parameters: schema,
-		description: "Read-only Git status/log/diff/show/branch queries. Relative cwd follows the main conversation's current default workspace. branch always lists; mutation, output-file, pager, external-diff and textconv options are rejected. Use args as literal argv, never a shell string.",
+		description: "Read-only Git status/log/diff/show/branch queries. Relative cwd follows the main conversation's current default workspace. branch always lists; mutation, output-file, pager, external-diff and textconv options are rejected. Use args as literal argv, never a shell string: full option names, --option=value for values that begin with '-', and -- before literal paths. READONLY_VIOLATION means the request changes something and belongs to a worker.",
 		execute: async (_id, input, signal) => {
 			const args = inspectArgs(input.command, input.args ?? []);
 			const cwd = await gitCwd(base(), input.cwd);

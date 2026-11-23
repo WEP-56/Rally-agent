@@ -1,30 +1,20 @@
 import type { ToolDefinition } from "@rally/coding-agent";
 import { Type, type Static } from "typebox";
-import type { Quote, QuoteRef } from "../../shared/task.ts";
 import type { MemoryStore } from "../memory-store.ts";
 
-export function createMemoryTools(memory: MemoryStore, quote: (ref: QuoteRef) => Quote | null, isActive: () => boolean): ToolDefinition[] {
-	const refs = Type.Array(Type.Object({ id: Type.String({ minLength: 1 }) }, { additionalProperties: false }), { minItems: 1 });
-	const append = Type.Object({ text: Type.String({ minLength: 1, maxLength: 300 }), quotes: refs });
-	const remove = Type.Object({ entryId: Type.String({ pattern: "^M-[1-9][0-9]*$" }), quotes: refs });
-	function basis(input: QuoteRef[]): string[] {
-		if (!isActive()) throw new Error("SESSION_ENDED: 主会话已关闭");
-		if (!Array.isArray(input) || !input.length) throw new Error("QUOTE_REQUIRED: 记忆修改需要用户原话引用");
-		return [...new Set(input.map((ref) => {
-			if (!ref || typeof ref.id !== "string" || ref.withProposal !== undefined) throw new Error("QUOTE_INVALID: 请直接引用明确要求记住或忘掉的用户消息");
-			const source = quote({ id: ref.id });
-			if (!source || source.kind !== "user") throw new Error("QUOTE_INVALID: 引用不存在或不是用户原话");
-			return source.messageId;
-		}))];
-	}
+export function createMemoryTools(memory: MemoryStore, isActive: () => boolean): ToolDefinition[] {
+	const file = Type.Union([Type.Literal("USER"), Type.Literal("PREFERENCES"), Type.Literal("RECENT")]);
+	const add = Type.Object({ file, text: Type.String({ minLength: 1, maxLength: 500 }) }, { additionalProperties: false });
+	const edit = Type.Object({ file, old: Type.String({ minLength: 1 }), new: Type.String() }, { additionalProperties: false });
+	const active = () => { if (!isActive()) throw new Error("SESSION_ENDED: 主会话已关闭"); };
 	return [{
-		name: "memory_append", label: "记住", parameters: append,
-		description: "Append a short memory (1–300 characters) when the user explicitly asks to remember it. quotes references that user's message. Returns entryId and an optional size warning.",
-		execute: async (id, input: Static<typeof append>, signal) => result(memory.append(input.text, basis(input.quotes), id, signal)),
+		name: "memory_add", label: "记下", parameters: add,
+		description: `Add one entry to your notebook about the user. file is USER (who they are: lasting facts), PREFERENCES (how they like things done) or RECENT (things happening now that will end). Write one line in the user's language, ending with its metadata in parentheses: (fact|inferred, source message or task ID, YYYY-MM-DD), and for RECENT also "; drop: <when this can be deleted>". The entry is appended to the end of the file; a nightly pass files and merges entries, so do not spend effort on placement. Fails if the file would exceed its budget: shorten or remove an older entry with memory_edit first.`,
+		execute: async (id, input: Static<typeof add>, signal) => { active(); return result(memory.add(input.file, input.text, id, signal)); },
 	}, {
-		name: "memory_remove", label: "忘掉", parameters: remove,
-		description: "Remove an entryId shown in the current memory snapshot when the user explicitly asks to forget it. quotes references that user's message. Returns removed:true.",
-		execute: async (id, input: Static<typeof remove>, signal) => result(memory.remove(input.entryId, basis(input.quotes), id, signal)),
+		name: "memory_edit", label: "修改记忆", parameters: edit,
+		description: "Change or delete existing notebook text. old must match exactly one passage in the current memory snapshot of that file; new replaces it, and an empty new deletes it. Use this when the user corrects something you have on file, when a newer fact replaces an older one, when a RECENT item is resolved, or when they ask you to forget something. Fails if old is not found or matches more than once, which usually means the file changed: check the snapshot in your next request.",
+		execute: async (id, input: Static<typeof edit>, signal) => { active(); return result(memory.edit(input.file, input.old, input.new, id, signal)); },
 	}];
 }
-function result(details: { entryId: string; warning?: string; reused?: boolean } | { removed: true }) { return { content: [{ type: "text" as const, text: JSON.stringify(details) }], details }; }
+function result(details: object) { return { content: [{ type: "text" as const, text: JSON.stringify(details) }], details }; }

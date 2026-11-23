@@ -24,6 +24,11 @@ import { IpcChannel } from "../../shared/ipc";
 const KIND_TITLE: Record<Exclude<TabKind, "task" | "resource">, string> = { workstation: "Rally 的工位", browser: "新标签页", terminal: "终端", connections: "连接" };
 
 export default function App() {
+  useEffect(() => {
+    const seen = () => { void window.rally.userSeen().catch(error => console.error("用户在线信号失败", error)); };
+    seen(); window.addEventListener("focus", seen);
+    return () => window.removeEventListener("focus", seen);
+  }, []);
   const winApi=window.rally.window, cloud=window.runtime.mode==="cloud";
   const [config, setConfigState] = useState<Config>(loadConfig);
   const [identityReady, setIdentityReady] = useState(() => Boolean(cloudRead(IpcChannel.identityState)));
@@ -43,7 +48,7 @@ export default function App() {
     return () => { alive = false; off(); };
   }, [identityAttempt]);
   useEffect(() => {
-    const reload = () => { void window.rally.memory.getState().then((state) => setConfigState((current) => ({ ...current, memoryPath: state.path }))).catch(() => {}); };
+    const reload = () => { void window.rally.memory.getState().then((state) => setConfigState((current) => ({ ...current, memoryPath: state.dir }))).catch(() => {}); };
     const changed = (event: Event) => { if ((event as CustomEvent<string>).detail === "memory") reload(); };
     reload(); window.addEventListener("rally-configuration", changed);
     return () => window.removeEventListener("rally-configuration", changed);
