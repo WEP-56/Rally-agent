@@ -12,9 +12,12 @@ import { StatusBadge, clock } from "./status";
 import { ArchiveTaskButton } from "./ArchiveTaskButton";
 import { ScheduledWorkerBadge } from "./ScheduledWorkerBadge";
 import { AttachmentCards } from "./Attachments";
+import { AgentBrowserCard } from "./AgentBrowser";
+import { useAgentBrowsers } from "../agent-browser";
 
 export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task) => void }) {
   const { config, openTab } = useApp();
+  const browsers = useAgentBrowsers().filter(browser => browser.taskId === task.id);
   return (
     <div className="relative flex h-full min-w-0 flex-col">
       <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
@@ -42,6 +45,7 @@ export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task)
 
           {/* transcript */}
           <div className="mt-7 flex flex-col gap-4">
+            {browsers.map(browser => <AgentBrowserCard key={browser.id} browser={browser} />)}
             {task.messages.map((m, i) => {
               if (m.role === "assistant") return <div key={m.message.id} className="animate-rise min-w-0">
                 <AssistantContent blocks={m.message.blocks} calls={m.message.toolCalls} streaming={m.message.streaming} avatar={<Critter seed={task.id} size={28} className="mt-0.5 shrink-0" />} />

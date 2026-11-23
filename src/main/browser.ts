@@ -1,6 +1,28 @@
-import { BrowserWindow, WebContentsView, session, shell, type IpcMainInvokeEvent, type WebContents, type Session, type Event as ElectronEvent, type DownloadItem } from "electron";
+import { BrowserWindow, WebContentsView, session, shell, ipcMain, type IpcMainInvokeEvent, type WebContents, type Session, type Event as ElectronEvent, type DownloadItem } from "electron";
 import { BROWSER_START, httpAddress, type BrowserState, type BrowserLayout, type BrowserAction, type BrowserEvent } from "../shared/browser.ts";
-import { IpcEvent } from "../shared/ipc.ts";
+import { IpcEvent, IpcChannel } from "../shared/ipc.ts";
+
+/** Client reading browser for cloud mode, independent of the server Supervisor. */
+export function registerClientBrowser(): () => Promise<void> {
+	const browser = new BrowserManager();
+	const pending = new Set<Promise<unknown>>();
+	const handlers = {
+		[IpcChannel.browserCreate]: (event: IpcMainInvokeEvent, id: string, url?: string) => browser.create(browser.owner(event), id, url),
+		[IpcChannel.browserNavigate]: (event: IpcMainInvokeEvent, id: string, url: string) => browser.navigate(browser.owner(event), id, url),
+		[IpcChannel.browserAction]: (event: IpcMainInvokeEvent, id: string, action: BrowserAction) => browser.action(browser.owner(event), id, action),
+		[IpcChannel.browserLayout]: (event: IpcMainInvokeEvent, layout: BrowserLayout) => browser.layout(browser.owner(event), layout),
+		[IpcChannel.browserClose]: (event: IpcMainInvokeEvent, id: string) => browser.close(browser.owner(event), id),
+	};
+	for (const [channel, handler] of Object.entries(handlers)) ipcMain.handle(channel, (event, ...args) => {
+		const request = Promise.resolve().then(() => Reflect.apply(handler, undefined, [event, ...args]));
+		pending.add(request);
+		return request.finally(() => pending.delete(request));
+	});
+	return async () => {
+		for (const channel of Object.keys(handlers)) ipcMain.removeHandler(channel);
+		await Promise.all([browser.dispose(), Promise.allSettled([...pending])]);
+	};
+}
 
 export const BROWSER_PARTITION = "persist:rally-browser";
 interface Tab { owner: BrowserWindow; view: WebContentsView; state: BrowserState; layout?: BrowserLayout; generation: number; closing?: Promise<void> }

@@ -1,6 +1,7 @@
 // Electron main entry: single-instance lock, Rally paths, main window. `RALLY_SMOKE=1` runs the M0 smoke check and exits.
 
 import { existsSync } from "node:fs";
+import { registerClientBrowser } from "./browser.ts";
 import { connectionHost } from "./connection-host.ts";
 import { desktopHost } from "./desktop-host.ts";
 import { join } from "node:path";
@@ -18,6 +19,7 @@ const paths = resolveRallyPaths();
 
 // Pi resolves ~/.rally/agent from piConfig; the env var pins it even for code paths that read it directly.
 process.env.RALLY_CODING_AGENT_DIR = paths.agentDir;
+if (app.isPackaged) process.env.RALLY_BROWSER_PATH = join(process.resourcesPath, "browser");
 
 if (process.env.RALLY_SMOKE === "1") {
 	void runSmokeAndExit();
@@ -58,6 +60,7 @@ async function startApplication(): Promise<void> {
 	app.on("before-quit", event => { event.preventDefault(); void shutdown.run(); });
 	try {
 		if (connection.mode !== "local") {
+			stopIpc = registerClientBrowser();
 			owner = createMainWindow(connection.partition);
 			stopDesktop = desktopHost(owner, () => shutdown.started, connection.mode);
 			return;

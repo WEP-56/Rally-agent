@@ -2,6 +2,19 @@
 
 [返回工具分类](rally-tools.md)
 
+## credential_request
+
+- 源码路径：`src/main/supervisor/credential-tools.ts`（仅 Main Agent/router）
+- 提示词原文：
+
+```text
+Ask the user to save a website account through Rally's private credential form. Pass the exact HTTP(S) website origin, optionally purpose and the related taskId. Requests expire after 24 hours or when their associated task/run ends. Never ask for account names or passwords in chat. Returns only request metadata; saving or cancelling sends a later notice. Enabled saved accounts can be reused by Workers on the matching website. Browser control belongs to Workers.
+```
+
+- 参数：`{ website: string, purpose?: string, taskId?: string }`，HTTP(S) 地址长度 1–16384；用途长度 1–1000；任务 ID 长度 1–100，绑定其当前 run。工具调用 ID 用于申请幂等。
+- 返回：申请 ID、origin、pending/saved/cancelled/expired、创建时间、可选用途/任务/run 及保存后的账号引用。提交只走宿主接口，账号密码不在工具参数或结果中。
+- 保存和取消通过持久中继发送元数据通知；重启补发缺失通知。账号密文保存在 Agent 配置目录的 `website-accounts.txt`，Windows 使用 safeStorage，Linux 使用部署 vault key。
+
 ## chat_search
 
 - 源码路径：`src/main/supervisor/chat-search.ts`（可用角色：Main Agent）

@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { join } from "node:path";
 import type { BrowserWindow, IpcMainInvokeEvent, WebContents, WebPreferences } from "electron";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BrowserManager, BROWSER_PARTITION } from "../../../../src/main/browser.ts";
+import { BrowserManager, BROWSER_PARTITION, registerClientBrowser } from "../../../../src/main/browser.ts";
 import { browserAddress, BROWSER_START } from "../../../../src/shared/browser.ts";
 import { IpcChannel, IpcEvent } from "../../../../src/shared/ipc.ts";
 import { registerIpc } from "../../../../src/main/ipc.ts";
@@ -170,5 +170,17 @@ describe("Rally native browser boundary (Electron substitutes, no UI/network)", 
 			await invoke(IpcChannel.browserCreate, "b"); const child = lastView().webContents;
 			await stop(); expect(child.destroyed).toBe(true); expect(transport.handlers.size).toBe(0); expect(transport.listeners.size).toBe(0);
 		} finally { await stop(); await supervisor.dispose(); }
+	});
+	it("registers a cloud client's reading browser without a Supervisor", async () => {
+		const stop = registerClientBrowser(); const window = new Window();
+		const invoke = (channel: string, ...args: unknown[]) => transport.handlers.get(channel)!(event(window), ...args);
+		try {
+			expect(await invoke(IpcChannel.browserCreate, "cloud", "https://example.test")).toMatchObject({ id: "cloud" });
+			await invoke(IpcChannel.browserNavigate, "cloud", "https://example.test/next");
+			await invoke(IpcChannel.browserLayout, shown("cloud")); expect(lastView().visible).toBe(true);
+			await invoke(IpcChannel.browserAction, "cloud", "reload");
+			const child = lastView().webContents;
+			await stop(); expect(child.destroyed).toBe(true); expect(transport.handlers.size).toBe(0);
+		} finally { await stop(); }
 	});
 });

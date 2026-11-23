@@ -24,6 +24,7 @@ const assets = new Map(
 	].map(([url, file]) => [url, readFileSync(new URL(`./console/${file}`, import.meta.url))]),
 );
 const failures = new Map<string, { count: number; since: number }>();
+const connections = new Map<string, Set<() => void>>();
 let stopping = false;
 
 const server = createServer(async (req, res) => {
@@ -93,6 +94,15 @@ const server = createServer(async (req, res) => {
 					if (typeof body.id !== "string") throw new PublicError("无效设备");
 					access.revoke(body.id);
 					resources.revoke(body.id);
+					for (const close of connections.get(body.id) ?? []) close();
+					await new Promise<void>((resolve, reject) => {
+						const revoke = request({ socketPath: socket, path: "/v1/device-revoked", method: "POST", timeout: 5000 }, response => {
+							response.resume(); response.on("end", () => response.statusCode === 200 ? resolve() : reject(new PublicError("设备已吊销，浏览器释放待运行时恢复", 503)));
+						});
+						revoke.on("timeout", () => revoke.destroy());
+						revoke.on("error", () => reject(new PublicError("设备已吊销，浏览器释放待运行时恢复", 503)));
+						revoke.end(JSON.stringify({ device: body.id }));
+					});
 					break;
 				case "pairing":
 					if (typeof body.enabled !== "boolean") throw new PublicError("无效配对设置");
@@ -130,8 +140,11 @@ const server = createServer(async (req, res) => {
 			},
 		);
 		upstream.on("timeout", () => upstream.destroy());
+		const close = () => { upstream.destroy(); res.destroy(); };
+		const active = connections.get(device) ?? new Set<() => void>();
+		active.add(close); connections.set(device, active);
 		upstream.on("error", () => failure(res, new PublicError("运行时暂不可用，请检查状态后重试", 503)));
-		res.on("close", () => upstream.destroy());
+		res.on("close", () => { upstream.destroy(); active.delete(close); if (!active.size) connections.delete(device); });
 		upstream.end(JSON.stringify({ ...body, device }));
 	} catch (error) {
 		failure(res, error);

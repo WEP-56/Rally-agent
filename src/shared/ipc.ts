@@ -19,6 +19,8 @@ import type { CoachSettings } from "./coach.ts";
 import type { MemoryFileKey, MemoryState } from "./memory.ts";
 import type { ServicesState } from "./services.ts";
 import type { BrowserState, BrowserLayout, BrowserAction, BrowserEvent } from "./browser.ts";
+import type { CredentialState, CredentialSubmission } from "./credentials.ts";
+import type { AgentBrowserWindow, BrowserFrame, BrowserUserInput } from "./agent-browser.ts";
 import type { TerminalSize, TerminalState, TerminalEvent } from "./terminal.ts";
 
 /** Basic facts about the running app, shown in the shell and used by smoke checks. */
@@ -64,6 +66,20 @@ export interface RallyPaths {
 
 /** Invoke channels (renderer -> main, request/response). */
 export const IpcChannel = {
+	agentBrowserState: "agent-browser:state",
+	agentBrowserFrame: "agent-browser:frame",
+	agentBrowserTake: "agent-browser:take",
+	agentBrowserReturn: "agent-browser:return",
+	agentBrowserInput: "agent-browser:input",
+	agentBrowserDisconnect: "agent-browser:disconnect",
+	agentBrowserHeartbeat: "agent-browser:heartbeat",
+	credentialsState: "credentials:state",
+	credentialsSubmit: "credentials:submit",
+	credentialsCancel: "credentials:cancel",
+	credentialsUpdate: "credentials:update",
+	credentialsRemove: "credentials:remove",
+	credentialsReplace: "credentials:replace",
+	credentialsClearLogin: "credentials:clear-login",
 	resourceBegin: "resources:begin",
 	resourceStatus: "resources:status",
 	resourceAppend: "resources:append",
@@ -278,6 +294,24 @@ export interface ModelsApi {
 
 /** API exposed on `window.rally` by the preload script. */
 export interface RallyApi {
+	agentBrowser: {
+		getState(): Promise<AgentBrowserWindow[]>;
+		frame(id: string, preview?: boolean): Promise<BrowserFrame>;
+		take(id: string): Promise<AgentBrowserWindow>;
+		handBack(id: string): Promise<AgentBrowserWindow>;
+		input(id: string, frame: Pick<BrowserFrame, "epoch" | "document" | "seq">, input: BrowserUserInput): Promise<void>;
+		disconnect(id?: string): Promise<void>;
+		heartbeat(id: string): Promise<void>;
+	};
+	credentials: {
+		getState(): Promise<CredentialState>;
+		submit(input: CredentialSubmission): Promise<CredentialState>;
+		cancel(id: string): Promise<CredentialState>;
+		update(id: string, enabled: boolean): Promise<CredentialState>;
+		remove(id: string): Promise<CredentialState>;
+		replace(id: string, input: { username: string; password: string }): Promise<CredentialState>;
+		clearLogin(): Promise<void>;
+	};
 	resources: ResourceApi;
 	qqMail: {
 		getState(): Promise<QqMailState>;

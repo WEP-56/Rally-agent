@@ -45,7 +45,7 @@ export function resourceTools(options: ResourceToolsOptions): ExtensionFactory {
       },
     });
     pi.on("tool_result", async (event, ctx) => {
-      if (event.isError || !options.active() || event.toolName === "resource_publish") return;
+      if (event.isError || !options.active() || event.toolName === "resource_publish" || event.toolName === "browser_screenshot") return;
       const images = event.content.filter(part => part.type === "image");
       if (!images.length) return;
       const refs: ResourceRef[] = [];

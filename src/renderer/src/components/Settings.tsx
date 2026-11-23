@@ -1,4 +1,5 @@
 import { CoachForm } from "./CoachForm";
+import { WebsiteAccountsSection } from "./WebsiteAccountsSection";
 import { ConnectionForm } from "./ConnectionForm";
 import { IdentityCard } from "./IdentityCard";
 import { useEffect, useState } from "react";
@@ -27,6 +28,7 @@ function Github({ size = 14 }: { size?: number }) {
 }
 
 export const SECTIONS = [
+  { id: "website-accounts", label: "网站账号", icon: UserRound, desc: "管理 Agent 可使用的加密账号" },
   { id:"connection", label:"运行模式", icon:Monitor, desc:"本地运行与云端连接" },
   { id: "general", label: "身份", icon: UserRound, desc: "名称、性格与工作方式" },
   { id: "workspace", label: "项目与工作区", icon: FolderInput, desc: "默认工作区、最近项目与项目信任" },
@@ -249,6 +251,7 @@ export function Settings({ section, setSection, onBack, tasks }: { section: stri
           {cur.id === "memory" && <div className="glass-strong rounded-[24px] p-5"><MemoryForm /></div>}
           {cur.id === "providers" && <ProvidersForm />}
           {cur.id === "tool-providers" && <ToolProvidersSection />}
+          {cur.id === "website-accounts" && <WebsiteAccountsSection />}
           {cur.id === "mcp" && <McpSection />}
           {cur.id === "skills" && <SkillsSection />}
           {cur.id === "appearance" && <AppearanceSection />}

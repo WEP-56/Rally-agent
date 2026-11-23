@@ -47,6 +47,9 @@ import { NetworkRunner } from "./network-runner.ts";
 import { createFetchPageTool } from "./network-tools.ts";
 import { createWebSearchTool } from "./provider-tools.ts";
 import { ToolProviderStore } from "../tool-provider-store.ts";
+import { WebsiteAccounts } from "../website-accounts.ts";
+import { AgentBrowserService } from "../agent-browser/service.ts";
+import { createCredentialRequestTool } from "./credential-tools.ts";
 import { ProcessRegistry } from "./process-registry.ts";
 import { JobManager } from "./jobs.ts";
 import { ServiceManager } from "./services.ts";
@@ -84,6 +87,8 @@ export class Supervisor {
 	readonly snapshot: TaskSnapshot;
 	readonly models: ModelStore;
 	readonly toolProviders: ToolProviderStore;
+	readonly websiteAccounts: WebsiteAccounts;
+	readonly agentBrowser: AgentBrowserService;
 	readonly workspace: WorkspaceStore;
 	readonly memory: MemoryStore;
 	readonly coachSettings: CoachStore;
@@ -153,6 +158,11 @@ export class Supervisor {
 				onError: error => console.error("Rally service lifecycle failed", error),
 			});
 			this.toolProviders = new ToolProviderStore(join(paths.agentDir, "rally-tool-providers.json"), options.credentialVault);
+			this.websiteAccounts = new WebsiteAccounts(join(paths.agentDir, "website-accounts.txt"), options.credentialVault, (taskId, runId) => {
+				const task = this.store.get(taskId), run = task?.runs.at(-1);
+				return !!task && !task.ended && (!runId || (run?.id === runId && !run.endedAt));
+			});
+			this.agentBrowser = new AgentBrowserService(join(paths.agentDir, "browser-profile"), this.websiteAccounts, this.processes);
 			this.models = new ModelStore(paths.modelsFile, managedModelConfigValue(this.processes, paths.agentDir));
 			this.gates = new GateService({ store: this.store, audit: this.audit, events: this.events,
 				quote: (ref) => this.main.quote(ref), requested: () => this.relay.captureSources(),
@@ -168,7 +178,7 @@ export class Supervisor {
 				taskState: () => rallyState(this.store, this.workers.streamingCount(), this.scheduler.limit, this.autoApprove),
 				scheduleState: () => this.schedules.context(),
 				capabilities,
-				customTools: [...createScheduleTools(() => this.schedules, ref => this.main.quote(ref)), createChatSearchTool((params) => this.main.search(params)), ...createMemoryTools(this.memory, () => !this.disposed), ...createRouterReadTools(() => this.workspace.base(), this.processes, () => catalog.skillPaths), createGitInspectTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGitRunner(this.processes)), createGithubReadTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGithubRunner(this.processes)), createFetchPageTool(this.network), createWebSearchTool(this.toolProviders), ...createMainTaskTools(this.host()), ...createGateTools(this.gates, this.store)],
+				customTools: [createCredentialRequestTool(this.websiteAccounts, this.store), ...createScheduleTools(() => this.schedules, ref => this.main.quote(ref)), createChatSearchTool((params) => this.main.search(params)), ...createMemoryTools(this.memory, () => !this.disposed), ...createRouterReadTools(() => this.workspace.base(), this.processes, () => catalog.skillPaths), createGitInspectTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGitRunner(this.processes)), createGithubReadTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGithubRunner(this.processes)), createFetchPageTool(this.network), createWebSearchTool(this.toolProviders), ...createMainTaskTools(this.host()), ...createGateTools(this.gates, this.store)],
 				memory: () => this.memory.context(),
 				identity: () => this.identity.context(),
 				workspace: () => this.workspace.state(),
@@ -191,6 +201,7 @@ export class Supervisor {
 				deliverIdea: render => this.relay.idea(render), now: options.coachNow, random: options.coachRandom,
 			});
 			this.workers = new WorkerManager({
+				agentBrowser: this.agentBrowser,
 				resources: () => this.resources,
 				network: this.network,
 				toolProviders: this.toolProviders,
@@ -235,6 +246,7 @@ export class Supervisor {
 			if (!this.events.warnings.length) await this.maintainResources();
 			if (missingResources) this.main.addSystemLine(`${missingResources} 个附件的资源记录缺失，请从完整备份恢复资源目录。`);
 			await this.processes.recover();
+			await this.agentBrowser.recover();
 			if (this.disposed) return;
 			this.jobs.recover();
 			this.services.recover();
@@ -244,6 +256,11 @@ export class Supervisor {
 			if (this.snapshot.warning) this.main.addSystemLine(this.snapshot.warning);
 			this.recoverInterrupted();
 			this.relay.start();
+			for (const request of this.websiteAccounts.state().requests) {
+				if (request.status === "saved") this.relay.notice(`网站账号申请已保存：${JSON.stringify(request)}`, `credential:${request.id}:saved`);
+				if (request.status === "cancelled") this.relay.notice(`网站账号申请已取消：${request.id}`, `credential:${request.id}:cancelled`);
+				if (request.status === "expired") this.relay.notice(`网站账号申请已过期：${request.id}`, `credential:${request.id}:expired`);
+			}
 			this.schedules.start();
 			this.coach.start();
 			this.feishu.start();
@@ -278,6 +295,7 @@ export class Supervisor {
 		}
 		// allSettled prevents an early rejection from releasing the lock while another session still closes.
 		const results = await Promise.allSettled([
+			Promise.resolve().then(() => this.agentBrowser.dispose()),
 			pendingRequests,
 			this.resourceMaintenance,
 			Promise.resolve().then(() => this.feishu.dispose()),

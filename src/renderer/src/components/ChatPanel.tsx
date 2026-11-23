@@ -1,4 +1,8 @@
 import { AgentAvatar } from "./AgentAvatar";
+import { CredentialCard } from "./CredentialCard";
+import { AgentBrowserCard } from "./AgentBrowser";
+import { useAgentBrowsers } from "../agent-browser";
+import { useCredentials } from "../credentials";
 import { Critter } from "./brand";
 import { IM_SOURCE_LABELS, type ImSource } from "../../../shared/connections";
 import type { ChatActivity, ChatHeaderState } from "../../../shared/ipc";
@@ -132,7 +136,9 @@ export function ChatPanel({
 	const focusedNotice = useRef<number | undefined>(undefined);
 	const ta = useRef<HTMLTextAreaElement>(null);
 	const visibleMessages = messages.filter((message) => message.attachments?.length || message.text.trim() || message.blocks?.some(block => block.type === "text" && block.text.trim()) || message.taskRef);
-	const conversation = conversationItems(visibleMessages, questions, tasks, historyBefore);
+	const credentials = useCredentials();
+	const browsers = useAgentBrowsers();
+	const conversation = conversationItems(visibleMessages, questions, tasks, historyBefore, credentials.state.requests, browsers);
 	const latestGateId = conversation.findLast(item => item.role === "gate")?.id;
 	const activityLabel = header.activity ? ACTIVITY_LABEL[header.activity] : "待命";
 
@@ -289,6 +295,8 @@ export function ChatPanel({
             </div>
           )}
           {conversation.map((m) =>
+            m.role === "browser" ? <AgentBrowserCard key={m.id} browser={m.browser} /> :
+            m.role === "credential" ? <CredentialCard key={m.id} request={m.request} changed={credentials.setState} /> :
             m.role === "gate" ? <GateCard key={m.id} taskId={m.taskId} gate={m.gate} openTask={() => openTask(m.taskId)} decide={(value) => window.rally.gates.decide(m.gate.id, value)} /> :
             m.role === "question" ? <QuestionCard key={m.id} {...m.record} answer={(option) => window.rally.tasks.answerOption(m.record.taskId, m.record.question.id, option)} /> : m.role === "system" ? (
               <div key={m.id} className="animate-rise whitespace-pre-wrap break-words text-center text-[12px] leading-relaxed text-faint">

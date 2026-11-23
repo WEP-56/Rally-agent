@@ -21,7 +21,7 @@ import { IpcChannel } from "../../shared/ipc";
 
 
 
-const KIND_TITLE: Record<Exclude<TabKind, "task" | "resource">, string> = { workstation: "Rally 的工位", browser: "新标签页", terminal: "终端", connections: "连接" };
+const KIND_TITLE: Record<Exclude<TabKind, "task" | "resource" | "agent-browser">, string> = { workstation: "Rally 的工位", browser: "新标签页", terminal: "终端", connections: "连接" };
 
 export default function App() {
   useEffect(() => {
@@ -110,8 +110,12 @@ export default function App() {
   }, []);
 
   const openTab = useCallback(
-    (kind: Exclude<TabKind, "task" | "resource">, opts?: { url?: string; taskId?: string }) => {
-      if(cloud && (kind==="browser" || kind==="terminal"))return;
+    (kind: Exclude<TabKind, "task" | "resource" | "agent-browser">, opts?: { url?: string; taskId?: string }) => {
+      if(cloud && kind==="terminal")return;
+      if(kind === "browser" && window.runtime.platform === "android") {
+        if (opts?.url) void window.rally.terminal.openLink(opts.url).catch(error => console.error("打开链接失败", error));
+        return;
+      }
       setView("main");
       setRightOpen(true);
       if (kind === "workstation" || kind === "connections") {
@@ -128,6 +132,13 @@ export default function App() {
     const existing = tabs.find(tab => tab.kind === "resource" && tab.resource?.id === resource.id);
     if (existing) { setActive(existing.id); return; }
     addTab({ id: uid(), kind: "resource", title: resource.name, resource });
+  }, [tabs, addTab]);
+
+  const openAgentBrowser = useCallback((id: string, taskId: string) => {
+    setView("main"); setRightOpen(true);
+    const existing = tabs.find(tab => tab.kind === "agent-browser" && tab.browserId === id);
+    if (existing) { setActive(existing.id); return; }
+    addTab({ id: uid(), kind: "agent-browser", title: "任务浏览器", taskId, browserId: id });
   }, [tabs, addTab]);
 
   const openTask = useCallback(
@@ -386,13 +397,13 @@ export default function App() {
   );
 
   useEffect(()=>{const back=(e:Event)=>{if(e.defaultPrevented)return;if(palette){setPalette(false);}else if(phase){setPhase(null);}else if(view==="settings"){setView("main");}else if(rightOpen){setRightOpen(false);}else return;e.preventDefault();};window.addEventListener('rally-back',back);return()=>window.removeEventListener('rally-back',back);},[view,palette,phase,rightOpen]);
-  const ctx: AppCtx = { config, setConfig, identityReady, identityError, reloadIdentity, openTab, openResource, openTask, openSettings, rerunOnboarding };
+  const ctx: AppCtx = { config, setConfig, identityReady, identityError, reloadIdentity, openTab, openAgentBrowser, openResource, openTask, openSettings, rerunOnboarding };
 
   return (
     <Ctx.Provider value={ctx}>
       <div className="relative flex h-full w-full flex-col overflow-hidden bg-app">
           <div className="pointer-events-none absolute -left-40 top-[calc(2.5rem-160px)] h-[520px] w-[520px] rounded-full bg-accent/[0.07] blur-3xl" />
-          <div className="desktop-bar"><TitleBar menus={cloud?menus.map(m=>({...m,groups:m.groups?.map(g=>g.filter(i=>i.label!=="浏览器"&&i.label!=="终端"))})):menus} onSearch={() => setPalette(true)} maximized={maximized} onMin={minimize} onMax={toggleMax} onClose={close} onDoubleClick={toggleMax} /></div>
+          <div className="desktop-bar"><TitleBar menus={cloud?menus.map(m=>({...m,groups:m.groups?.map(g=>g.filter(i=>i.label!=="终端"))})):menus} onSearch={() => setPalette(true)} maximized={maximized} onMin={minimize} onMax={toggleMax} onClose={close} onDoubleClick={toggleMax} /></div>
 
           {view === "settings" && (
             <div className="min-h-0 flex-1">
@@ -452,7 +463,7 @@ export default function App() {
             </div>
           {dragging && <div className="fixed inset-0 z-[200] cursor-col-resize" />}
 
-          <CommandPalette open={palette} onClose={() => setPalette(false)} commands={cloud?commands.filter(c=>c.id!=="br"&&c.id!=="tm"):commands} tasks={tasks.filter(task => task.archivedAt === undefined)} onTask={openTask} />
+          <CommandPalette open={palette} onClose={() => setPalette(false)} commands={commands.filter(c => !(cloud && c.id === "tm") && !(window.runtime.platform === "android" && c.id === "br"))} tasks={tasks.filter(task => task.archivedAt === undefined)} onTask={openTask} />
           <ChatSessionDialog operation={operation} phase={phase} error={dialogError} onConfirm={() => void confirmSessionAction()} onClose={() => setPhase(null)} onHide={() => { hideHistory(compactBoundary.current); setPhase(null); }} />
 
           {!onboarded && (

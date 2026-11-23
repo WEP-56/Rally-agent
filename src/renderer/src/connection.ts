@@ -50,6 +50,7 @@ function androidBridge(native: Native): ConnectionBridge {
 		});
 	}
 	return {
+		openExternal: url => call("openExternal", [url]),
 		state: () => call("state", []),
 		select: (...args) => call("select", args),
 		request: (...args) => call("request", args),
@@ -124,6 +125,9 @@ export async function connect() {
 	const stopDownloads = window.rallyLocal?.resources.onSave(progress => {
 		for (const cb of listeners.get(IpcEvent.resourceSave) ?? []) cb(null, progress as never);
 	});
+	const stopBrowser = window.rallyLocal?.browser.onEvent(event => {
+		for (const cb of listeners.get(IpcEvent.browser) ?? []) cb(null, event as never);
+	});
 	const androidProgress = (event: Event) => { for (const cb of listeners.get(IpcEvent.resourceSave) ?? []) cb(null, (event as CustomEvent<ResourceSaveProgress>).detail as never); };
 	window.addEventListener("rally-resource-save", androidProgress);
 	dispose = () => {
@@ -133,6 +137,7 @@ export async function connect() {
 		clearTimeout(timer);
 		stopWindow?.();
 		stopDownloads?.();
+		stopBrowser?.();
 		window.removeEventListener("rally-resource-save", androidProgress);
 		listeners.clear();
 	};
@@ -164,7 +169,13 @@ export async function connect() {
 			if (channel === C.windowIsMaximized) return ((await nativeWindow?.isMaximized()) ?? false) as T;
 			if (channel === C.notificationsTarget) return null as T;
 			if (channel === C.workspacePick) return (await serverPath()) as T;
-			if (channel === C.browserLayout) return undefined as T;
+			const browser = window.rallyLocal?.browser;
+			if (channel === C.terminalOpenLink && bridge?.openExternal) return await bridge.openExternal(args[0] as string) as T;
+			if (channel === C.browserCreate) { if (!browser) throw Error("此设备使用默认浏览器打开链接"); return await browser.create(...args as Parameters<RallyApi["browser"]["create"]>) as T; }
+			if (channel === C.browserNavigate) { if (!browser) throw Error("此设备使用默认浏览器打开链接"); return await browser.navigate(...args as Parameters<RallyApi["browser"]["navigate"]>) as T; }
+			if (channel === C.browserAction) { if (!browser) throw Error("此设备使用默认浏览器打开链接"); return await browser.action(...args as Parameters<RallyApi["browser"]["action"]>) as T; }
+			if (channel === C.browserLayout) return await browser?.layout(args[0] as Parameters<RallyApi["browser"]["layout"]>[0]) as T;
+			if (channel === C.browserClose) return await browser?.close(args[0] as string) as T;
 			if (channel !== C.modelsState && channel !== C.memoryState) {
 				const saved = mirror.read<T>(channel);
 				if (saved !== undefined) return saved;

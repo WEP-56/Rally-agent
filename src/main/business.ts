@@ -29,6 +29,21 @@ export function businessHandlers(
 	const trustState = () =>
 		projectTrustState(paths.agentDir, [supervisor.workspace.base(), ...supervisor.workspace.state().recentProjects]);
 	return {
+		[IpcChannel.credentialsState]: () => supervisor.websiteAccounts.state(),
+		[IpcChannel.credentialsSubmit]: (input: unknown) => {
+			const result = supervisor.websiteAccounts.submit(input);
+			supervisor.relay.notice(`网站账号申请已处理：${JSON.stringify(result)}`, `credential:${result.id}:${result.status}`);
+			return supervisor.websiteAccounts.state();
+		},
+		[IpcChannel.credentialsCancel]: (id: string) => {
+			supervisor.websiteAccounts.cancel(id);
+			supervisor.relay.notice(`网站账号申请已取消：${id}`, `credential:${id}:cancelled`);
+			return supervisor.websiteAccounts.state();
+		},
+		[IpcChannel.credentialsUpdate]: (id: string, enabled: boolean) => { supervisor.websiteAccounts.update(id, enabled); return supervisor.websiteAccounts.state(); },
+		[IpcChannel.credentialsRemove]: (id: string) => { supervisor.websiteAccounts.remove(id); return supervisor.websiteAccounts.state(); },
+		[IpcChannel.credentialsReplace]: (id: string, input: unknown) => { supervisor.websiteAccounts.replace(id, input); return supervisor.websiteAccounts.state(); },
+		[IpcChannel.credentialsClearLogin]: () => supervisor.agentBrowser.clearLogin(),
 		[IpcChannel.toolProvidersState]: () => supervisor.toolProviders.state(),
 		[IpcChannel.toolProvidersSave]: (input: unknown) => supervisor.toolProviders.save(input),
 		[IpcChannel.qqMailState]: () => supervisor.qqMail.state(),

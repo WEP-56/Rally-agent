@@ -12,6 +12,7 @@ import { ConnectionsView } from "./ConnectionsView";
 import { Workstation } from "./Workstation";
 import { TaskView } from "./TaskView";
 import { BrowserView } from "./BrowserView";
+import { AgentBrowserView } from "./AgentBrowser";
 import { TerminalView } from "./TerminalView";
 import { timeAgo } from "./status";
 import { Kbd, RoundButton } from "./ui";
@@ -31,7 +32,7 @@ function Launcher({ onPick, tasks }: { onPick: (k: NewKind) => void; tasks: Task
   return (
     <div>
       <div className="flex flex-col gap-0.5">
-        {(Object.keys(KIND_META) as NewKind[]).filter(k=>window.runtime.mode!=="cloud"||(k!=="terminal"&&k!=="browser")).map((k) => {
+        {(Object.keys(KIND_META) as NewKind[]).filter(k => !(k === "terminal" && window.runtime.mode === "cloud") && !(k === "browser" && window.runtime.platform === "android")).map((k) => {
           const M = KIND_META[k];
           return (
             <button
@@ -172,7 +173,7 @@ export function RightPanel({
         {tabs.map((t) => {
           const isActive = t.id === active;
           const task = t.taskId ? tasks.find((x) => x.id === t.taskId) : undefined;
-          const Icon = t.kind === "task" ? null : t.kind === "resource" ? File : KIND_META[t.kind].icon;
+          const Icon = t.kind === "task" ? null : t.kind === "resource" ? File : t.kind === "agent-browser" ? Globe : KIND_META[t.kind].icon;
           return (
             <div
               key={t.id}
@@ -233,6 +234,7 @@ export function RightPanel({
               {t.kind === "resource" && t.resource && <ResourceView resource={t.resource} visible={visible && t.id === active} />}
               {t.kind === "task" && task && <TaskView task={task} onMention={onMention} />}
               {t.kind === "browser" && <BrowserView id={t.id} visible={visible && t.id === active && !drawer} initialUrl={t.url} onTitle={(s) => renameTab(t.id, s)} />}
+              {t.kind === "agent-browser" && t.browserId && <AgentBrowserView id={t.browserId} visible={visible && t.id === active && !drawer} onClose={() => closeTab(t.id)} />}
               {t.kind === "terminal" && <TerminalView id={t.id} taskId={t.taskId} visible={visible && t.id === active && !drawer} />}
             </div>
           );

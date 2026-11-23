@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { AGENT_BROWSER_COMMANDS, browserCommand } from "../agent-browser/commands.ts";
 import { chmodSync, existsSync, lstatSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -64,9 +65,13 @@ const server = createServer(async (req, res) => {
 			try { await operation; } finally { pending.delete(operation); }
 			return;
 		}
-		if (req.method !== "POST" || !["/v1/rpc", "/v1/events"].includes(req.url ?? ""))
+		if (req.method !== "POST" || !["/v1/rpc", "/v1/events", "/v1/device-revoked"].includes(req.url ?? ""))
 			throw new PublicError("接口不存在", 404);
 		const body = await readBody(req);
+		if (req.url === "/v1/device-revoked") {
+			if (typeof body.device !== "string") throw new PublicError("无效设备");
+			supervisor.agentBrowser.disconnect(body.device); reply(res, 200, null); return;
+		}
 		if (req.url === "/v1/events") {
 			const cursor = seq;
 			let events = updates.filter((e) => e.seq > Number(body.seq)).map(({ bytes: _bytes, ...event }) => event);
@@ -89,7 +94,7 @@ const server = createServer(async (req, res) => {
 		}
 		if (
 			typeof body.channel !== "string" ||
-			(!Object.hasOwn(methods, body.channel) && !RESOURCE_COMMANDS.has(body.channel)) ||
+			(!Object.hasOwn(methods, body.channel) && !RESOURCE_COMMANDS.has(body.channel) && !AGENT_BROWSER_COMMANDS.has(body.channel)) ||
 			!Array.isArray(body.args) ||
 			body.args.length > 5
 		)
@@ -101,6 +106,7 @@ const server = createServer(async (req, res) => {
 				? requests.run(body.device, body.requestId, args, () =>
 							supervisor.main.send(typeof args[0] === "string" ? args[0] : "", args[1] as string[] | undefined, String(body.device)),
 					)
+					: AGENT_BROWSER_COMMANDS.has(channel) ? browserCommand(supervisor.agentBrowser, String(body.device ?? ""), channel, args)
 					: RESOURCE_COMMANDS.has(channel) ? resourceCommand(supervisor.resources, String(body.device ?? ""), channel, args)
 					: Reflect.apply(methods[channel as keyof typeof methods], undefined, args),
 		);

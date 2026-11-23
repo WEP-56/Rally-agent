@@ -84,8 +84,14 @@ for (const platform of ['android', 'desktop']) test(`${platform} warm cloud star
   window.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
   const calls = [];
   const startupWrites = [];
+  const browserCalls = [];
+  let browserEvent;
   const desktop = { closeBehavior: 'quit', trayAvailable: true, openAtLogin: false, loginItemAvailable: true };
   if (platform === 'desktop') window.rallyLocal = {
+    browser: {
+      onEvent: fn => { browserEvent = fn; return () => { browserEvent = undefined; }; },
+      ...Object.fromEntries(['create', 'navigate', 'action', 'layout', 'close'].map(method => [method, async (...args) => { browserCalls.push({ method, args }); return { id: args[0], url: 'https://example.test/' }; }])),
+    },
     resources: { onSave: () => () => {} },
     desktop: {
       getState: async () => ({ ...desktop }),
@@ -113,6 +119,21 @@ for (const platform of ['android', 'desktop']) test(`${platform} warm cloud star
     assert.equal(poll.packet.epoch, 'saved-runtime');
     assert.equal(poll.packet.seq, 42);
     assert.equal(calls.filter(call => call.route === 'rpc').length, 0);
+    if (platform === 'desktop') {
+      const events = [];
+      const off = window.rally.browser.onEvent(event => events.push(event));
+      await window.rally.browser.create('test', 'https://example.test/');
+      await window.rally.browser.navigate('test', 'https://example.test/next');
+      await window.rally.browser.action('test', 'reload');
+      await window.rally.browser.layout({ id: 'test', visible: false, x: 0, y: 0, width: 1, height: 1 });
+      await window.rally.browser.close('test');
+      browserEvent({ type: 'state', state: { id: 'test' } });
+      assert.equal(events.length, 1); off();
+      browserEvent({ type: 'state', state: { id: 'test' } });
+      assert.equal(events.length, 1);
+      assert.deepEqual(browserCalls.map(call => call.method), ['create', 'navigate', 'action', 'layout', 'close']);
+      assert.equal(calls.filter(call => call.route === 'rpc').length, 0);
+    }
     await assert.rejects(window.rally.chat.send('never send offline'), /未连接/);
     const waitFor = async predicate => {
       const end = Date.now() + 3000;

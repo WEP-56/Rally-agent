@@ -14,6 +14,24 @@ export interface ClientTransport {
 }
 export function createApi(ipcRenderer: ClientTransport): RallyApi {
 	return {
+		agentBrowser: {
+			getState: () => ipcRenderer.invoke(IpcChannel.agentBrowserState),
+			frame: (id, preview) => ipcRenderer.invoke(IpcChannel.agentBrowserFrame, id, preview),
+			take: id => ipcRenderer.invoke(IpcChannel.agentBrowserTake, id),
+			handBack: id => ipcRenderer.invoke(IpcChannel.agentBrowserReturn, id),
+			input: (id, { epoch, document, seq }, input) => ipcRenderer.invoke(IpcChannel.agentBrowserInput, id, { epoch, document, seq }, input),
+			disconnect: id => ipcRenderer.invoke(IpcChannel.agentBrowserDisconnect, id),
+			heartbeat: id => ipcRenderer.invoke(IpcChannel.agentBrowserHeartbeat, id),
+		},
+		credentials: {
+			getState: () => ipcRenderer.invoke(IpcChannel.credentialsState),
+			submit: input => ipcRenderer.invoke(IpcChannel.credentialsSubmit, input),
+			cancel: id => ipcRenderer.invoke(IpcChannel.credentialsCancel, id),
+			update: (id, enabled) => ipcRenderer.invoke(IpcChannel.credentialsUpdate, id, enabled),
+			remove: id => ipcRenderer.invoke(IpcChannel.credentialsRemove, id),
+			replace: (id, input) => ipcRenderer.invoke(IpcChannel.credentialsReplace, id, input),
+			clearLogin: () => ipcRenderer.invoke(IpcChannel.credentialsClearLogin),
+		},
 		desktop: { getState: () => ipcRenderer.invoke(IpcChannel.desktopState), update: value => ipcRenderer.invoke(IpcChannel.desktopUpdate, value), setOpenAtLogin: value => ipcRenderer.invoke(IpcChannel.desktopSetOpenAtLogin, value) },
 		resources: {
 			begin: input => ipcRenderer.invoke(IpcChannel.resourceBegin, input),

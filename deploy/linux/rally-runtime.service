@@ -9,6 +9,7 @@ StateDirectoryMode=0700
 RuntimeDirectory=rally-runtime
 RuntimeDirectoryMode=0750
 Environment=HOME=/var/lib/rally
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/rally/current/browser
 Environment=PATH=/opt/rally/current/bin:/usr/local/bin:/usr/bin:/bin
 WorkingDirectory=/var/lib/rally
 ExecStart=/opt/rally/current/bin/node /opt/rally/current/src/main/cloud/runtime.ts

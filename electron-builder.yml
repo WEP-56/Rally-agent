@@ -13,11 +13,15 @@ files:
   - LICENSE
   - THIRD_PARTY_NOTICES/**/*
 extraResources:
+  - from: build/agent-browser
+    to: browser
   - from: build/icon.ico
     to: icon.ico
   - from: docs/icon.png
     to: icon.png
 asarUnpack:
+  - "node_modules/playwright/**/*"
+  - "node_modules/playwright-core/**/*"
   - "node_modules/node-pty/**/*"
   - "**/*.node"
   - "**/*.wasm"

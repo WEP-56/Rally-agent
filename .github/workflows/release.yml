@@ -50,7 +50,13 @@ jobs:
       - if: matrix.target == 'windows'
         run: node scripts/verify-windows.mjs
       - if: matrix.target == 'windows'
+        env:
+          RALLY_TEST_DESKTOP: release/win-unpacked
+        run: node --test tests/agent-browser/packaged.test.mjs
+      - if: matrix.target == 'windows'
         run: node --experimental-vm-modules --test tests/attachments/renderer.test.mjs tests/attachments/client-bridge.test.mjs tests/cloud/connection-ui.test.mjs
+      - if: matrix.target == 'linux'
+        run: node node_modules/playwright/cli.js install-deps chromium
       - if: matrix.target == 'linux'
         run: npm run build:server && bash scripts/cloud/package-linux.sh
       - if: matrix.target != 'android'

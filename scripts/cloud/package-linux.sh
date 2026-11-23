@@ -13,6 +13,7 @@ for pkg in packages/*; do
  if [[ -f $pkg/LICENSE ]]; then cp "$pkg/LICENSE" "$dest/"; fi
 done
 (cd "$bundle" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
+(cd "$bundle" && PLAYWRIGHT_BROWSERS_PATH="$bundle/browser" node node_modules/playwright/cli.js install chromium --only-shell)
 cp -a out/server/src "$bundle/"
 cp -a LICENSE THIRD_PARTY_NOTICES "$bundle/"
 cp -a deploy/linux/* "$bundle/"
@@ -26,6 +27,7 @@ ln -s ../lib/node_modules/npm/bin/npx-cli.js "$bundle/bin/npx"
 printf '%s\n' "$ver" > "$bundle/VERSION"
 chmod +x "$bundle/install.sh"
 chmod -R a+rX "$bundle"
+PLAYWRIGHT_BROWSERS_PATH="$bundle/browser" RALLY_TEST_BROWSER_ROOT="$bundle" node --test tests/agent-browser/linux-package.test.mjs
 RALLY_TEST_SERVER="$bundle" node --test tests/cloud/server.test.mjs
 RALLY_TEST_SERVER="$bundle" node --test tests/cloud/agent.test.mjs
 RALLY_TEST_SERVER="$bundle" node --test tests/attachments/cloud.test.mjs

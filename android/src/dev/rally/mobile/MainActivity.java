@@ -304,6 +304,15 @@ public final class MainActivity extends Activity {
 
         private void call(String id, String method, String args) {
             if (!active || id == null || !id.matches("[0-9a-f-]{36}") || args == null || args.length() > 1024 * 1024) return;
+            if (method.equals("openExternal")) {
+                try {
+                    Uri url = Uri.parse(new JSONArray(args).getString(0));
+                    if (!("https".equals(url.getScheme()) || "http".equals(url.getScheme())) || url.getHost() == null || url.getUserInfo() != null) throw new IOException("仅支持不含账号密码的 HTTP/HTTPS 链接");
+                    startActivity(new Intent(Intent.ACTION_VIEW, url));
+                    reply(id, true, null);
+                } catch (Exception error) { reply(id, false, "无法打开链接，请检查地址和默认浏览器"); }
+                return;
+            }
             // Cancellation must not wait behind network reads in the four-worker pool.
             if (method.equals("cancelSave")) {
                 try { Download download = downloads.get(new JSONArray(args).getString(0)); if (download != null) download.cancel(); reply(id, true, null); }

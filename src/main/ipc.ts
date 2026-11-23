@@ -1,4 +1,5 @@
 import { businessHandlers } from "./business.ts";
+import { AGENT_BROWSER_COMMANDS, browserCommand } from "./agent-browser/commands.ts";
 import { ResourcePreviewHost } from "./resource-preview.ts";
 import { createReadStream } from "node:fs";
 import { ResourceDownloads, saveResource } from "./resource-download.ts";
@@ -29,6 +30,7 @@ export function registerIpc(paths: RallyPaths, supervisor: Supervisor, notificat
 		const task = supervisor.store.get(taskId); if (!task) throw new Error("TERMINAL_TASK_NOT_FOUND"); return task.cwd;
 	});
 	const channels: string[] = [];
+	const browserOwners = new Set<number>();
 	const pending = new Set<Promise<unknown>>();
 	let closing: Promise<void> | undefined;
 	const stop = () => {
@@ -58,6 +60,15 @@ export function registerIpc(paths: RallyPaths, supervisor: Supervisor, notificat
 		channels.push(channel);
 	};
 	try {
+		for (const channel of AGENT_BROWSER_COMMANDS) handle(channel, (event, ...args: unknown[]) => {
+			const owner = browser.owner(event);
+			if (!browserOwners.has(owner.id)) {
+				browserOwners.add(owner.id);
+				owner.webContents.on("render-process-gone", () => supervisor.agentBrowser.disconnect(`desktop:${owner.id}`));
+				owner.once("closed", () => { supervisor.agentBrowser.disconnect(`desktop:${owner.id}`); browserOwners.delete(owner.id); });
+			}
+			return browserCommand(supervisor.agentBrowser, `desktop:${owner.id}`, channel, args);
+		});
 		handle(IpcChannel.resourceBegin, (event, input: UploadRequest) => { browser.owner(event); return supervisor.resources.begin("desktop", input); });
 		handle(IpcChannel.resourceStatus, (event, id: string) => { browser.owner(event); return supervisor.resources.status("desktop", id); });
 		handle(IpcChannel.resourceAppend, (event, id: string, offset: number, bytes: Uint8Array) => { browser.owner(event); return supervisor.resources.append("desktop", id, offset, bytes); });
@@ -96,7 +107,7 @@ export function registerIpc(paths: RallyPaths, supervisor: Supervisor, notificat
 		handle(IpcChannel.browserAction, (event, id: string, action: BrowserAction) => browser.action(browser.owner(event), id, action));
 		handle(IpcChannel.browserLayout, (event, layout: BrowserLayout) => browser.layout(browser.owner(event), layout));
 		handle(IpcChannel.browserClose, (event, id: string) => browser.close(browser.owner(event), id));
-		const needsOwner = new Set<string>([IpcChannel.qqMailState, IpcChannel.qqMailSave, IpcChannel.qqMailVerify, IpcChannel.qqMailDisconnect, IpcChannel.qqBotState, IpcChannel.qqBotSave, IpcChannel.qqBotRetry, IpcChannel.qqBotPair, IpcChannel.qqBotDisconnect, IpcChannel.feishuState, IpcChannel.feishuSave, IpcChannel.feishuRetry, IpcChannel.feishuPair, IpcChannel.feishuTools, IpcChannel.feishuDisconnect, IpcChannel.identityState, IpcChannel.identityInitialize, IpcChannel.identityUpdate, IpcChannel.identityResetAvatar, IpcChannel.schedulesState, IpcChannel.schedulesUpdate, IpcChannel.mcpSaveServer, IpcChannel.mcpExposure, IpcChannel.gateDecide, IpcChannel.chatNewConversation, IpcChannel.tasksArchive, IpcChannel.tasksDelete]);
+		const needsOwner = new Set<string>([IpcChannel.credentialsState, IpcChannel.credentialsSubmit, IpcChannel.credentialsCancel, IpcChannel.credentialsUpdate, IpcChannel.credentialsRemove, IpcChannel.credentialsReplace, IpcChannel.credentialsClearLogin, IpcChannel.qqMailState, IpcChannel.qqMailSave, IpcChannel.qqMailVerify, IpcChannel.qqMailDisconnect, IpcChannel.qqBotState, IpcChannel.qqBotSave, IpcChannel.qqBotRetry, IpcChannel.qqBotPair, IpcChannel.qqBotDisconnect, IpcChannel.feishuState, IpcChannel.feishuSave, IpcChannel.feishuRetry, IpcChannel.feishuPair, IpcChannel.feishuTools, IpcChannel.feishuDisconnect, IpcChannel.identityState, IpcChannel.identityInitialize, IpcChannel.identityUpdate, IpcChannel.identityResetAvatar, IpcChannel.schedulesState, IpcChannel.schedulesUpdate, IpcChannel.mcpSaveServer, IpcChannel.mcpExposure, IpcChannel.gateDecide, IpcChannel.chatNewConversation, IpcChannel.tasksArchive, IpcChannel.tasksDelete]);
 		for (const [channel, handler] of Object.entries(businessHandlers(paths, supervisor, (name, data) => {
 			for (const win of BrowserWindow.getAllWindows()) win.webContents.send(name, data);
 		}))) handle(channel, (event, ...args) => { if(needsOwner.has(channel)) browser.owner(event); return Reflect.apply(handler, undefined, args); });

@@ -20,12 +20,13 @@ for entry in admin:rally-control vault:rally-runtime; do
  chown "root:$group" "$file"; chmod 0640 "$file"
 done
 umask 022
-install -d "$target"; cp -a bin lib src node_modules packages package.json VERSION LICENSE THIRD_PARTY_NOTICES "$target/"; chown -R root:root "$target"; chmod -R go-w "$target"
+./bin/node node_modules/playwright/cli.js install-deps chromium
+install -d "$target"; cp -a bin lib src browser node_modules packages package.json VERSION LICENSE THIRD_PARTY_NOTICES "$target/"; chown -R root:root "$target"; chmod -R go-w "$target"
 previous=$(readlink -f /opt/rally/current || true)
 if [[ -L /opt/rally/current ]]; then
  systemctl stop rally-control rally-runtime
  install -d -m 0700 /var/backups/rally
- tar -czf "/var/backups/rally/pre-$version-$(date +%s).tar.gz" -C / etc/rally var/lib/rally var/lib/rally-control
+ tar --exclude='var/lib/rally/.rally/agent/browser-profile' -czf "/var/backups/rally/pre-$version-$(date +%s).tar.gz" -C / etc/rally var/lib/rally var/lib/rally-control
 fi
 install -m 0644 rally-{runtime,control}.service /etc/systemd/system/
 ln -sfn "$target" /opt/rally/.current-new; mv -Tf /opt/rally/.current-new /opt/rally/current

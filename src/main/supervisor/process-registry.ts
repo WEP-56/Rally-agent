@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { ProcessCommand, ProcessCompletion, ProcessStarted } from "./process-host.ts";
 import { processIdentity, stopProcessTree, type ProcessIdentity, type ProcessStopResult } from "./process-identity.ts";
 
-export interface OwnedProcess extends ProcessIdentity { id: string; kind: "git" | "github" | "job" | "service" | "mcp" | "search" | "config"; taskId?: string; jobId?: string; serviceId?: string }
+export interface OwnedProcess extends ProcessIdentity { id: string; kind: "git" | "github" | "job" | "service" | "mcp" | "search" | "config" | "browser"; taskId?: string; jobId?: string; serviceId?: string }
 export type ProcessOwner = Pick<OwnedProcess, "kind" | "taskId" | "jobId" | "serviceId">;
 export interface ProcessRunOptions {
 	signal?: AbortSignal;
@@ -190,7 +190,7 @@ function validEntry(entry: unknown): entry is OwnedProcess {
 	const item = entry as Partial<OwnedProcess>;
 	return typeof item.id === "string" && /^[a-f0-9-]{36}$/.test(item.id) && Number.isSafeInteger(item.pid) && item.pid! > 0
 		&& typeof item.created === "string" && /^(?:win:\d+|linux:[a-f0-9-]+:\d+)$/.test(item.created)
-		&& ["git", "github", "job", "service", "mcp", "search", "config"].includes(item.kind ?? "") && (item.taskId === undefined || typeof item.taskId === "string")
+		&& ["git", "github", "job", "service", "mcp", "search", "config", "browser"].includes(item.kind ?? "") && (item.taskId === undefined || typeof item.taskId === "string")
 		&& (item.jobId === undefined || (typeof item.jobId === "string" && /^J-\d+$/.test(item.jobId)))
 		&& (item.serviceId === undefined || (typeof item.serviceId === "string" && /^S-\d+$/.test(item.serviceId)));
 }

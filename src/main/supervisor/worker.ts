@@ -2,6 +2,8 @@
 // every tool event is translated into task facts (changed files, usage) on the way through.
 
 import { existsSync } from "node:fs";
+import type { AgentBrowserService } from "../agent-browser/service.ts";
+import { createBrowserTools } from "./browser-tools.ts";
 import { join } from "node:path";
 import {
 	type AgentSession,
@@ -60,6 +62,7 @@ export interface ReportResult {
 }
 
 export interface WorkerManagerOptions {
+	agentBrowser?: AgentBrowserService;
 	resources?(): ResourceStore;
 	paths: RallyPaths;
 	store: TaskStore;
@@ -192,6 +195,10 @@ export class WorkerManager {
 		});
 		const networkHost = { task, run, store, isActive: () => !this.disposed && !task.ended && !run.endedAt };
 		const providers = this.options.toolProviders, resources = this.options.resources;
+		const browserFiles = resources ? { store: resources,
+			allowedIds: () => [...task.quotes, ...task.inputs.flatMap(input => input.quotes ?? [])].flatMap(quote => quote.attachments?.map(ref => ref.id) ?? [])
+				.concat(task.inputs.flatMap(input => input.attachments?.map(ref => ref.id) ?? []), [task.id, ...task.dependsOn].flatMap(id => store.timeline(id).flatMap(call => call.attachments?.map(ref => ref.id) ?? []))),
+			publish: (id: string, refs: ResourceRef[]) => this.publish(task, run, id, refs) } : undefined;
 		const { session } = await createRoleSession({
 			startupSignal: opening.controller.signal,
 			onSessionCreated: session => { opening.session = session; },
@@ -212,6 +219,7 @@ export class WorkerManager {
 			extensionTools: [...mcp.extensionTools, ...(this.options.resources ? ["resource_publish"] : [])],
 			tools: [],
 			customTools: [...this.options.createTools(task), ...buildTools(task, versions, (path) => this.assertWritable(task, run, path), this.options.processes),
+				...(this.options.agentBrowser ? createBrowserTools(this.options.agentBrowser, task, run, this.options.gates, browserFiles) : []),
 				...createQqMailTools(this.options.qqMail, { task, run, gates: this.options.gates, audit: this.options.audit, store }),
 				...createJobTools(this.options.jobs, task, run),
 				...createServiceTools(this.options.services, task, run),
@@ -316,12 +324,12 @@ export class WorkerManager {
 	/** Background jobs suspend the inactivity clock, including the instant the final job ends. */
 	jobsChanged(): void {
 		for (const opening of this.opening.values()) {
-			const running = this.options.jobs.hasBackground(opening.task.id);
+			const running = this.options.jobs.hasBackground(opening.task.id) || Boolean(this.options.agentBrowser?.isWaiting(opening.task.id));
 			if (running || opening.jobExempt) opening.lastActivity = this.now();
 			opening.jobExempt = running;
 		}
 		for (const worker of this.workers.values()) {
-			const running = this.options.jobs.hasBackground(worker.taskId);
+			const running = this.options.jobs.hasBackground(worker.taskId) || Boolean(this.options.agentBrowser?.isWaiting(worker.taskId));
 			if (running || worker.jobExempt) worker.lastActivity = this.now();
 			worker.jobExempt = running;
 		}
@@ -431,7 +439,7 @@ export class WorkerManager {
 		const opening = this.opening.get(taskId);
 		if (opening) { opening.controller.abort(); if (opening.session) opening.stop ??= closeRoleSession(opening.session); }
 		const worker = this.workers.get(taskId);
-		return Promise.all([worker ? this.disposeWorker(worker) : this.closing.get(taskId), opening?.stop]).then(() => {});
+		return Promise.all([worker ? this.disposeWorker(worker) : this.closing.get(taskId), opening?.stop, this.options.agentBrowser?.closeTask(taskId)]).then(() => {});
 	}
 
 	async closeTask(taskId: string): Promise<void> {
@@ -595,7 +603,7 @@ export class WorkerManager {
 		worker.submissions.cancel();
 		worker.unsubscribe();
 		this.interruptTools(worker);
-		const closing = Promise.all([closeRoleSession(worker.session), worker.submissions.idle()])
+		const closing = Promise.all([closeRoleSession(worker.session), worker.submissions.idle(), this.options.agentBrowser?.closeTask(worker.taskId)])
 			.then(() => {})
 			.catch((error: unknown) => { this.closeErrors.push(error); console.error("Worker session shutdown failed", error); })
 			.finally(() => { if (this.closing.get(worker.taskId) === closing) this.closing.delete(worker.taskId); });

@@ -126,13 +126,14 @@ export const modelLabel = (v: string, fallback = "未设置模型") => (v ? v.sp
 
 /* ------------------------------------------------------------------ */
 
-export type TabKind = "workstation" | "browser" | "terminal" | "connections" | "task" | "resource";
+export type TabKind = "workstation" | "browser" | "terminal" | "connections" | "task" | "resource" | "agent-browser";
 export interface Tab {
 	resource?: ResourceRef;
   id: string;
   kind: TabKind;
   title: string;
   taskId?: string;
+  browserId?: string;
   url?: string;
 }
 
@@ -142,7 +143,8 @@ export interface AppCtx {
 	reloadIdentity: () => void;
   config: Config;
   setConfig: (patch: Partial<Config>) => void;
-  openTab: (kind: Exclude<TabKind, "task" | "resource">, opts?: { url?: string; taskId?: string }) => void;
+  openTab: (kind: Exclude<TabKind, "task" | "resource" | "agent-browser">, opts?: { url?: string; taskId?: string }) => void;
+  openAgentBrowser: (id: string, taskId: string) => void;
   openResource: (resource: ResourceRef) => void;
   openTask: (taskId: string) => void;
   openSettings: (section?: string) => void;
