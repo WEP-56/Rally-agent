@@ -17,7 +17,7 @@ assert.deepEqual(ico, readFileSync('build/icon.ico'));
 assert.equal(ico.readUInt16LE(2), 1);
 const sizes = Array.from({ length: ico.readUInt16LE(4) }, (_, index) => ico[6 + 16 * index] || 256);
 for (const size of [16, 32, 48, 256]) assert.ok(sizes.includes(size), `Missing Windows icon size ${size}`);
-assert.deepEqual(readFileSync(join(resources, 'icon.png')), readFileSync('icon.png'));
+assert.deepEqual(readFileSync(join(resources, 'icon.png')), readFileSync('docs/icon.png'));
 const archive = join(resources, 'app.asar'); const files = listPackage(archive).map(path => path.replaceAll('\\', '/'));
 for (const path of ['/out/main/index.js', '/out/preload/index.cjs', '/out/renderer/index.html']) assert.ok(files.includes(path), `Missing ${path}`);
 assert.equal(JSON.parse(extractFile(archive, 'package.json')).version, version);

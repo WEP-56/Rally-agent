@@ -15,7 +15,7 @@ files:
 extraResources:
   - from: build/icon.ico
     to: icon.ico
-  - from: icon.png
+  - from: docs/icon.png
     to: icon.png
 asarUnpack:
   - "node_modules/node-pty/**/*"
