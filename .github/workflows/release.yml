@@ -29,6 +29,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: refs/tags/${{ inputs.release_tag || github.ref_name }}
+      - name: Use validation fixes from the dispatch revision
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          CHECKS_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$CHECKS_SHA"
+          git restore --source="$CHECKS_SHA" --worktree -- tests
       - uses: actions/setup-node@v4
         with: { node-version: '24.11.1', cache: npm }
       - shell: bash

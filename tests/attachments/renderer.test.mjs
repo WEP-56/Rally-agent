@@ -33,6 +33,8 @@ async function setup(tasks = []) {
     invoke: async (channel, ...args) => {
       calls.push({ channel, args });
       if (channel === 'chat:state') return chat;
+      if (channel === 'agent-browser:state') return [];
+      if (channel === 'credentials:state') return { accounts: [], requests: [] };
       if (channel === 'tasks:state') return { tasks, active: 0, limit: 2, autoApprove: false };
       if (channel === 'identity:initialize' || channel === 'identity:state') return identity;
       if (channel === 'models:state') return { providers: [], available: [], active: null, worker: null };
