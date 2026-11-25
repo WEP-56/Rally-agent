@@ -4,9 +4,9 @@
 
 ## 本轮目标与状态
 
-用户已授权修复外部执行器导致的安装包膨胀，并提交、推送、发布修复版。0.4.0 已正式发布；本轮准备 0.4.1，不移动旧 tag，不替换旧产物，不部署 VPS。发布流程必须完成到正式 Release，不能停在草稿。
+用户授权的包体积修复、提交推送、0.4.1 tag 和正式 Release 已完成。0.4.1 已设为 Latest，发布流水线 `45567592147` 全部成功；tag 指向 `9f3fdaf`。旧 tag、旧产物未修改，VPS 未部署。当前没有待继续的发布操作，后续按用户实际使用反馈处理。
 
-0.4.0 的 Windows 521,834,482 字节、Linux 757,100,150 字节；主要原因是两个 ACP adapter 的生产依赖带入 Claude/Codex 原生 CLI，Linux 还同时安装 Claude glibc 与 musl 版本。0.4.1 已从根依赖移除两个 adapter 及其传递运行时，保留轻量 ACP SDK。首个本地 Windows 精简包约 250 MB，仍需核对最终 CI 产物。
+0.4.0 的 Windows 521,834,482 字节、Linux 757,100,150 字节；主要原因是两个 ACP adapter 的生产依赖带入 Claude/Codex 原生 CLI，Linux 还同时安装 Claude glibc 与 musl 版本。0.4.1 从根依赖移除两个 adapter 及其传递运行时，保留轻量 ACP SDK。正式 Windows 包 250,183,601 字节，Linux 包 243,720,230 字节；五件产物与 SHA256SUMS 均已核对 GitHub asset digest。
 
 外部会话从用户目录按需安装的 adapter 启动，CLI 优先复用设备现有程序。可选路径配置为 `$RALLY_CODING_AGENT_DIR/external-agents.json`；默认 adapter 目录为 `external-agents/<claude-code|codex>/node_modules/.../dist/index.js`。设置页不自动安装，错误提示引导自管理。具体字段、优先级和安装命令在 `skills/references/external-agents.md`。Windows 支持 npm shim，实际读取包的 bin 字段，兼容新版 Claude 原生安装。Linux install.sh 同步修复漏复制 skills 的问题。
 
@@ -18,7 +18,7 @@
 - 0.4.1 外部执行器定向测试 11 项通过，覆盖路径发现、npm 安装、按需原生依赖、配置错误、缺失时不安装，以及真实子进程的离线 ACP 会话。角色/Skill 相关筛选通过，Skill 格式校验通过。
 - 主进程和渲染进程类型检查通过。根 `npm run typecheck` 仍只有 `packages/ai/test/fireworks-models.test.ts` 与 `anthropic-empty-thinking-signature-compat.test.ts` 两个文件的 9 个已知模型数据错误。
 - 发布检查新增 lockfile 与 Windows/Linux 实际目录验证，阻止外部 adapter、SDK 运行时与原生 CLI 重新混入基础包。真实付费模型调用和界面视觉没有作为已验收项。
-- 本地 `.artifacts/external-agent-smoke/` 仅用于临时安装无原生依赖的 adapter、以隔离配置验证打包后的 Electron Node 复用本机 CLI；发布后清理这个临时目录。
+- 本地 `.artifacts/external-agent-smoke/` 用于临时安装无原生依赖的 adapter，以隔离配置验证打包后的 Electron Node 启动 adapter、复用本机 CLI；原生 Claude 2.1.332 / Codex 0.167.0 的 --version 通过，没有真实推理或读取用户认证。该临时目录清理被自动审批拒绝，只返回 `blocked by policy`，仍保留且不会进入发布包。下载的 `.artifacts/release-0.4.1/SHA256SUMS` 是核验记录。
 
 ## 生产与未完成验收
 
