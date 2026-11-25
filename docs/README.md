@@ -7,6 +7,7 @@
 | [HANDOFF](HANDOFF.md) | 当前交接状态、下一会话任务与执行约定 |
 | [开发实施 TODO](开发实施TODO.md) | 实施状态与后续工作 |
 | [发布指南](发布指南.md) | 构建、签名与发布 |
+| [0.4.0 发布说明](发布说明-0.4.0.md) | 本版新增、修复、下载与验证边界 |
 | [其它提供商](其它提供商.md) | 图像生成与网络搜索配置 |
 | [Connector](Connector/README.md) | 飞书、QQ 机器人、QQ 邮箱 |
 | [Prompt](Prompt/) | 当前系统提示词、教练提示词与[工具描述分类](Prompt/tools-Description/rally-tools.md) |
@@ -16,7 +17,9 @@
 
 | 文档 | 状态与用途 |
 | --- | --- |
-| [PiBot 浏览器调研与 Rally 落地方案](PiBot浏览器调研与Rally落地方案.md) | 网站账密与 Worker 浏览器已进入实现/验收，实际进度见 HANDOFF；保留方案与验收清单，用户确认后删除。工具契约见 [浏览器工具](Prompt/tools-Description/browser.md)，部署见发布指南与 Linux README |
+| [角色 Workers 实施方案](../roles-docs/role-workers-产品与实施方案.md) | 角色档案、外部执行器接入与现有实现边界 |
+
+浏览器施工方案已清理；当前工具契约见 [浏览器工具](Prompt/tools-Description/browser.md)，部署与维护见发布指南及 [Linux README](../deploy/linux/README.md)。
 
 设计、实施和调研文档直接放在本目录；相关功能完整实现且用户确认后删除，将仍需维护的行为迁入稳定文档并更新此索引。
 

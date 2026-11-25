@@ -29,10 +29,14 @@ export class SkillStore {
 		writeFileSync(`${this.file}.tmp`, JSON.stringify(value, null, 2), "utf8");
 		renameSync(`${this.file}.tmp`, this.file);
 	}
+	private skillPaths(userPaths: string[]): string[] {
+		const builtinPath = process.env.RALLY_BUILTIN_SKILLS_DIR;
+		return builtinPath ? [...userPaths, builtinPath] : userPaths;
+	}
 	loaderOptions() {
 		const preferences = this.read();
 		return {
-			additionalSkillPaths: preferences.paths,
+			additionalSkillPaths: this.skillPaths(preferences.paths),
 			skillsOverride: <T extends { skills: Skill[] }>(base: T): T => ({ ...base,
 				skills: base.skills.filter((skill) => !preferences.disabled.includes(skillKey(skill.filePath))),
 			}),
@@ -47,7 +51,7 @@ export class SkillStore {
 			const loader = new DefaultResourceLoader({ cwd, agentDir: this.agentDir,
 				settingsManager: projectSettings(cwd, this.agentDir, true),
 				noExtensions: true, noContextFiles: true, noPromptTemplates: true, noThemes: true,
-				systemPrompt: "", appendSystemPrompt: [], additionalSkillPaths: preferences.paths });
+				systemPrompt: "", appendSystemPrompt: [], additionalSkillPaths: this.skillPaths(preferences.paths) });
 			await loader.reload();
 			const loaded = loader.getSkills();
 			for (const skill of loaded.skills) {

@@ -204,6 +204,12 @@ export function createApi(ipcRenderer: ClientTransport): RallyApi {
 			select: (input) => ipcRenderer.invoke(IpcChannel.modelsSelect, input),
 			selectWorker: (input) => ipcRenderer.invoke(IpcChannel.modelsSelectWorker, input),
 		},
+		roleWorkers: {
+			getState: () => ipcRenderer.invoke(IpcChannel.roleWorkersState),
+			getAgentModels: executor => ipcRenderer.invoke(IpcChannel.roleWorkersAgentModels, executor),
+			save: role => ipcRenderer.invoke(IpcChannel.roleWorkersSave, role),
+			delete: id => ipcRenderer.invoke(IpcChannel.roleWorkersDelete, id),
+		},
 		workspace: {
 			getState: () => ipcRenderer.invoke(IpcChannel.workspaceState),
 			update: (patch) => ipcRenderer.invoke(IpcChannel.workspaceUpdate, patch),

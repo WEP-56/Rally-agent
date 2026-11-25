@@ -54,6 +54,7 @@ function toTask(view: TaskView): Task {
 	return {
 		id: view.id,
 		schedule: view.schedule,
+		roleId: view.roleId,
 		archivedAt: view.archivedAt,
 		ended: Boolean(view.ended),
 		toolCalls: view.toolCalls,

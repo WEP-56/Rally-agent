@@ -35,6 +35,7 @@ export interface CreateTaskInput {
 	cwd: string;
 	scope: string[];
 	mode: TaskMode;
+	roleId?: string;
 	dependsOn: string[];
 	autoApprove: boolean;
 	dispatchKey?: string;
@@ -237,6 +238,7 @@ export class TaskStore {
 			id,
 			schedule: input.schedule,
 			dispatchKey: input.dispatchKey,
+			roleId: input.roleId,
 			title: input.title,
 			quotes: input.quotes,
 			note: input.note,

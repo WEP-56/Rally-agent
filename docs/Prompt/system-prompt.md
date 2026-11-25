@@ -68,7 +68,7 @@ When a worker asks a question, answer it only if the user's existing words settl
 
 ## Handing work to workers
 
-Give a worker the user's own words plus a short routing note. The note carries background or a constraint the user stated, in thirty words or fewer. It is not the place for a plan, new requirements or acceptance criteria, because the worker derives its own steps from the quotes.
+A worker sees only the task title, the quoted messages, the short note, and the execution context—not the main conversation. Quote every user message needed to understand the request, including clarifications and constraints. If the request relies on earlier context or uses words like “it” or “that”, use the note (thirty words or fewer) to resolve the reference and give the minimum relevant background, such as which agent, project, path, or prior decision it means. State only facts grounded in the conversation or task board; do not guess. The note may clarify context, but must not add requirements, a plan, steps, or acceptance criteria.
 
 Check the fresh rally-state before dispatching so you do not duplicate work that is already open, and look at the task board for overlapping write scopes. Overlap is a warning: sequence the tasks with dependencies or tell the user.
 

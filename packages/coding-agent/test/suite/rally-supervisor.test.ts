@@ -12,6 +12,9 @@ import { businessHandlers } from "../../../../src/main/business.ts";
 import { IpcChannel } from "../../../../src/shared/ipc.ts";
 import { ModelStore } from "../../../../src/main/model-store.ts";
 import { SkillStore } from "../../../../src/main/skill-store.ts";
+import { CapabilityCatalog } from "../../../../src/main/supervisor/capability-catalog.ts";
+import { RoleWorkerStore } from "../../../../src/main/role-worker-store.ts";
+import { ExternalWorkerSession } from "../../../../src/main/supervisor/external-worker-session.ts";
 import { McpStore } from "../../../../src/main/mcp-store.ts";
 import { projectTrustState, setProjectTrust, projectSettings } from "../../../../src/main/project-trust.ts";
 import { defaultModel } from "../../../../src/shared/models.ts";
@@ -608,7 +611,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 	function toolsFor(supervisor: Supervisor) {
 		const tools = createMainTaskTools({ store: supervisor.store, workspaceDir: supervisor.workspace.base(), autoApprove: () => supervisor.board().autoApprove,
 			quote: (ref) => ["#fixture", "#fixture2"].includes(ref.id) ? { messageId: ref.id, kind: "user", text: "逐字原话", at: Date.now() } : null,
-			tick: () => supervisor.scheduler.tick(), board: () => supervisor.board(), abortWorker: (id) => { void supervisor.workers.abort(id); },
+			tick: () => supervisor.scheduler.tick(), board: () => supervisor.board(), roleWorker: id => { const role = supervisor.roleWorkers.get(id); return role && { id: role.id, name: role.name, summary: role.summary }; }, abortWorker: (id) => { void supervisor.workers.abort(id); },
 			deliverSteer: (id, text) => supervisor.workers.deliver(id, text, supervisor.store.get(id)?.inputs.at(-1)?.id) ? "steered" : "queued_for_worker",
 			deliverAnswer: (id, text) => supervisor.workers.deliver(id, text, supervisor.store.get(id)?.inputs.at(-1)?.id) ? "steered" : "queued_for_worker" });
 		return (name: string, params: unknown) => {
@@ -735,6 +738,47 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 			await vi.waitFor(() => expect(supervisor.workers.has(task.id)).toBe(false));
 		}
 		expect(readFileSync(join(directory, "SKILL.md"), "utf8")).toContain("Imported body");
+	});
+
+	it("shows one built-in Rally management Skill and keeps domain guides as supporting references", async () => {
+		const skillsRoot = join(fileURLToPath(new URL("../../../../skills", import.meta.url)));
+		vi.stubEnv("RALLY_BUILTIN_SKILLS_DIR", skillsRoot);
+		const { paths } = await setup();
+		const preferences = new SkillStore(paths.agentDir);
+		const listed = await preferences.state([paths.workspaceDir]);
+		expect(listed.diagnostics).toEqual([]);
+		const skill = listed.skills.find((entry) => entry.name === "rally-self-management");
+		expect(skill?.enabled).toBe(true);
+		expect(skill?.description).toContain("identity/avatar");
+		expect(skill?.path).toBe(join(skillsRoot, "SKILL.md"));
+		const managementSkills = listed.skills.filter((entry) => entry.name === "rally-self-management" || entry.name.startsWith("rally-self-management-"));
+		expect(managementSkills.map((entry) => entry.name)).toEqual(["rally-self-management"]);
+		for (const reference of ["identity.md", "coach.md", "model-provider.md", "media-search.md", "mcp.md", "skills.md", "roles.md", "external-agents.md"]) {
+			expect(readFileSync(join(skillsRoot, "references", reference), "utf8")).not.toContain("name: rally-self-management-");
+		}
+
+		const catalog = await new CapabilityCatalog(paths.agentDir, () => [paths.workspaceDir]).context();
+		expect(catalog).toContain("rally-self-management");
+		expect(catalog).toContain("identity/avatar");
+		expect(catalog).not.toContain("rally-self-management-external-agents");
+		expect(catalog).not.toContain("你是受主 Agent 派遣的配置 Worker");
+
+		const loader = new DefaultResourceLoader({
+			cwd: paths.workspaceDir,
+			agentDir: paths.agentDir,
+			settingsManager: projectSettings(paths.workspaceDir, paths.agentDir, true),
+			noExtensions: true,
+			noContextFiles: true,
+			noPromptTemplates: true,
+			noThemes: true,
+			systemPrompt: "",
+			appendSystemPrompt: [],
+			...preferences.loaderOptions(),
+		});
+		await loader.reload();
+		expect(loader.getSkills().skills.filter((entry) => entry.name === "rally-self-management" || entry.name.startsWith("rally-self-management-")).map((entry) => entry.name)).toEqual(["rally-self-management"]);
+		const loadedIndex = loader.getSkills().skills.find((entry) => entry.name === "rally-self-management");
+		expect(loadedIndex?.filePath).toBe(join(skillsRoot, "SKILL.md"));
 	});
 
 	it("honors revoked and inherited project trust in discovery and future worker requests", async () => {
@@ -2391,6 +2435,93 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		await vi.waitFor(() => expect(calls).toBe(2));
 		expect(supervisor.events.ofKind("relay_delivered")).toHaveLength(1);
 	}, 15000);
+
+	it("dispatches a role worker with its model, persona, and optional Skills recommendations", async () => {
+		const { supervisor, harness, paths } = await setup();
+		const input = { id: "api-specialist", name: "小柏 · API 工程师", avatar: null, summary: "专注 HTTP API 与接口数据建模", personality: "简洁、审慎", workstyle: "先检查现有约定，再改动并验证", model: { provider: "rally-test", model: "worker-2" }, recommendedSkills: ["fixture-skill"] };
+		const role = supervisor.roleWorkers.save(input, (provider, model) => Boolean(supervisor.models.resolve(provider, model)))[0];
+		expect(new RoleWorkerStore(paths.agentDir).get(role.id)).toMatchObject({ name: role.name, model: role.model, recommendedSkills: ["fixture-skill"] });
+		const call = toolsFor(supervisor);
+		const dispatched = JSON.parse(getMessageText(await call("task_dispatch", { title: "实现 API 接口", quotes: [{ id: "#fixture" }], cwd: paths.workspaceDir, mode: "readonly", roleId: role.id })));
+		const task = supervisor.store.get(dispatched.taskId)!;
+		expect(task.roleId).toBe(role.id);
+		const handlers = businessHandlers(paths, supervisor, () => {});
+		expect(() => handlers[IpcChannel.roleWorkersDelete](role.id)).toThrow("仍被未结束任务");
+		harness.setResponses([context => {
+			expect(getCurrentSystemPrompt(context.messages)).toContain("小柏 · API 工程师");
+			expect(getCurrentSystemPrompt(context.messages)).toContain("fixture-skill");
+			expect(getCurrentSystemPrompt(context.messages)).toContain("you may ignore them");
+			return fauxAssistantMessage(fauxToolCall("task_report", { state: "ready", summary: "API 方案完成" }), { stopReason: "toolUse" });
+		}, fauxAssistantMessage("已汇报。")]);
+		supervisor.approve(task.id);
+		await vi.waitFor(() => expect(task.ended?.outcome).toBe("done"));
+		expect(task.runs[0].model).toBe("rally-test/worker-2");
+		expect(supervisor.roleWorkers.delete(role.id)).toHaveLength(0);
+	});
+
+	it.each(["claude-code", "codex"] as const)("dispatches a %s role without a Rally worker model and closes its ACP session", async executor => {
+		const { supervisor, paths } = await setup(false);
+		const role = supervisor.roleWorkers.save({ id: "external", name: "外部助手", avatar: null, summary: "检查代码", personality: "认真", workstyle: "只核对事实", recommendedSkills: [], executor, externalModel: "external-fixture" }, () => false, () => true)[0];
+		const close = vi.fn(async () => {});
+		const start = vi.spyOn(ExternalWorkerSession, "start").mockImplementation(async options => {
+			const prompt = vi.fn<ExternalWorkerSession["prompt"]>(async content => {
+				expect(JSON.stringify(content)).toContain("逐字原话");
+				expect(JSON.stringify(content)).toContain(role.workstyle);
+				options.onTool?.({ id: "read-1", name: "Read", status: "running" });
+				options.onTool?.({ id: "read-1", status: "ok", output: "fixture" });
+				options.onText?.("正在核对。\n");
+				options.onText?.("RALLY_STATUS: ready\n核对完成");
+				return "end_turn";
+			});
+			return Object.assign(Object.create(ExternalWorkerSession.prototype) as ExternalWorkerSession, { prompt, close });
+		});
+		const call = toolsFor(supervisor);
+		const receipt = JSON.parse(getMessageText(await call("task_dispatch", { title: "外部检查", quotes: [{ id: "#fixture" }], cwd: paths.workspaceDir, mode: "readonly", roleId: role.id })));
+		const task = supervisor.store.get(receipt.taskId)!;
+		supervisor.approve(task.id);
+		await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+		expect(start).toHaveBeenCalledWith(expect.objectContaining({ executor, modelId: "external-fixture", cwd: task.cwd, outputDir: task.outputDir, mode: "readonly" }));
+		expect(task.ended?.outcome).toBe("done");
+		expect(task.runs[0]).toMatchObject({ model: `${executor}/external-fixture`, lastReport: { state: "ready", summary: "核对完成" } });
+		expect(supervisor.store.timeline(task.id)).toEqual([expect.objectContaining({ name: "Read", status: "ok", output: "fixture" })]);
+	});
+
+	it("treats a normal external ACP turn with a final answer but no Rally status prefix as completed", async () => {
+		const { supervisor, paths } = await setup(false);
+		const role = supervisor.roleWorkers.save({ id: "external", name: "Claude 阅读助手", avatar: null, summary: "阅读指定工作区文档", personality: "认真", workstyle: "先阅读再总结", recommendedSkills: [], executor: "claude-code", externalModel: "deepseek-v4-pro" }, () => false, () => true)[0];
+		const close = vi.fn(async () => {});
+		vi.spyOn(ExternalWorkerSession, "start").mockImplementation(async options => {
+			const prompt = vi.fn<ExternalWorkerSession["prompt"]>(async () => {
+				options.onText?.("已读取工作区 README。文档介绍了项目结构和开发方式。");
+				return "end_turn";
+			});
+			return Object.assign(Object.create(ExternalWorkerSession.prototype) as ExternalWorkerSession, { prompt, close });
+		});
+		const call = toolsFor(supervisor);
+		const receipt = JSON.parse(getMessageText(await call("task_dispatch", { title: "阅读 README", quotes: [{ id: "#fixture" }], cwd: paths.workspaceDir, mode: "readonly", roleId: role.id })));
+		const task = supervisor.store.get(receipt.taskId)!;
+		supervisor.approve(task.id);
+		await vi.waitFor(() => expect(task.ended?.outcome).toBe("done"));
+		expect(task.runs[0]?.lastReport).toMatchObject({ state: "ready", summary: "已读取工作区 README。文档介绍了项目结构和开发方式。" });
+		expect(close).toHaveBeenCalledOnce();
+	});
+
+	it("closes the external ACP session when a task is cancelled mid-turn", async () => {
+		const { supervisor, paths } = await setup(false);
+		const role = supervisor.roleWorkers.save({ id: "external", name: "外部助手", avatar: null, summary: "检查代码", personality: "", workstyle: "", recommendedSkills: [], executor: "codex", externalModel: "external-fixture" }, () => false, () => true)[0];
+		let finish!: (reason: string) => void;
+		const prompt = vi.fn<ExternalWorkerSession["prompt"]>(() => new Promise(resolve => { finish = resolve; }));
+		const close = vi.fn(async () => { finish("cancelled"); });
+		vi.spyOn(ExternalWorkerSession, "start").mockResolvedValue(Object.assign(Object.create(ExternalWorkerSession.prototype) as ExternalWorkerSession, { prompt, close }));
+		const call = toolsFor(supervisor);
+		const receipt = JSON.parse(getMessageText(await call("task_dispatch", { title: "外部检查", quotes: [{ id: "#fixture" }], cwd: paths.workspaceDir, mode: "readonly", roleId: role.id })));
+		const task = supervisor.store.get(receipt.taskId)!;
+		supervisor.approve(task.id);
+		await vi.waitFor(() => expect(prompt).toHaveBeenCalledOnce());
+		await supervisor.cancel(task.id);
+		await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+		expect(task.ended?.outcome).toBe("cancelled");
+	});
 
 	it("keeps an existing worker on its model when the global worker selection changes", async () => {
 		const { supervisor, harness } = await setup();

@@ -103,6 +103,7 @@ export interface Task {
 	/** Host-owned origin; each due occurrence is an ordinary worker task. */
 	schedule?: { id: string; dueAt: number };
 	id: string;
+	roleId?: string;
 	title: string;
 	quotes: Quote[];
 	note?: string;
@@ -149,6 +150,7 @@ export interface TaskView {
 	status: TaskDisplayStatus;
 	statusText: string;
 	mode: TaskMode;
+	roleId?: string;
 	cwd: string;
 	scope: string[];
 	quotes: Quote[];
@@ -218,6 +220,7 @@ export function taskView(task: Task, now = Date.now()): TaskView {
 		status,
 		statusText,
 		mode: task.mode,
+		roleId: task.roleId,
 		cwd: task.cwd,
 		scope: task.scope,
 		quotes: task.quotes,

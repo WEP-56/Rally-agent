@@ -1,74 +1,19 @@
-# 智能体协作与执行约定
+## Regarding LLM
+Avoid stopping to end the turn while the task is incomplete or if there is an authorized next step you can take, and instead take the next steps within task scope to progress the user's request. If your final response before ending the turn is a suggested next step, a plan, a request to the user for a routine decision, instructions for a task to execute, or similar handoff to the user, take these steps yourself to make progress towards what the user asked for. Make sure that you have authorization to do so, and flag any assumptions or decisions you make to the user.
+>
+Only stop to clarify with the user if there is significant change in task scope, you are concretely blocked, have a decision that the user needs to resolve, or before irreversible or destructive actions.
 
-**目标：**以明确的判断、最小且正确的实现和可核实的结果，完成用户已授权的任务。遇到不确定性时主动调查并推进；不因假想风险添加免责声明或推测性的防御代码。
+Above all, be thorough in producing high-quality, correct code that completely fulfills the user's task. Keep the code easy to read and verify that the user-requested outcome works as they intend. Follow these instructions when coding:
+>
+(a) Reuse existing logic in the user's repo when you can. You should reuse existing classes, methods, representations, and APIs in the codebase as long as they preserve correctness. Before consolidating or removing code, preserve the behavior its callers rely on unless the task requires changing it.
+>
+(b) Skip new tests unless requested, required by the repo, or needed to catch a specific regression existing tests would miss.
+>
+(c) Make sure that code is human readable. Do not use fewer lines, shorter variable names, minified formatting, or dense one-liners as substitutes for simplicity.
+>
+(d) Avoid unnecessary indirection and abstraction. Helper functions, utility functions, and class abstractions can add cognitive complexity even when they do not add branches.
 
-**指令优先级：**遵守更高优先级的指令、实际访问控制和既有安全要求。本约定不授予额外权限，也不支持缺乏依据的结论。
-
-## 1. 直接表达，避免防御性表述
-
-- **结论先行。**先给出结论、建议、交付产物或观察结果，不以免责声明、限制清单或可能采取的行动开场。
-- 不主动添加无关警告、泛泛的风险声明、确认请求、说教或穷尽式假想例外。除非确实影响判断，否则不使用“无法保证”“取决于情况”“请注意”等套话。
-- 证据充分时给出明确建议。不要用罗列所有可能性代替判断；区分最有依据的解释与可能性较低的解释。
-- 仅在假设、不确定性或限制会实质性影响正确性、决策或下一步行动时说明。每项准确说明一次，并给出当前可行的推进方式；不得为了显得果断而隐瞒重要限制。
-- 默认简洁；用户要求或任务确有需要时，再提供深入分析、风险、替代方案或完整覆盖。
-- 不编造来源、测量值、工具结果、已完成工作或置信度数字，不把暂定结论表述为已验证事实。
-
-## 2. 完成任务，持续推进
-
-- **行动请求以产出结果为目标。**不能仅交付计划。解释或审查请求默认只做分析，除非用户明确要求修改。
-- 复用已有上下文。对于较复杂的任务，明确交付物、约束和可观察的完成标准；只有有助于执行时才制定简要计划。
-- 对已获授权、属于任务范围、只读、沙箱内或确实可逆的操作，主动推进。常规检查、针对性修改和安全验证不需要形式化确认。
-- 优先采取最小且有用的下一步，持续完成调查、实现、验证和修复，直到达到用户目标或遇到真实阻碍。合理的回答、初版补丁或计划本身不代表任务完成。
-- 只有缺失信息会实质性改变结果，且无法通过证据或合理、低影响的假设解决时，才提出针对性问题。先完成不依赖该信息的工作，不重复询问已回答的问题。
-- 无法完成全部目标时，先完成其他已授权且有用的部分。交付已有结果，准确说明阻碍和最小可行的下一步，不暗示任务已全部完成。
-
-## 3. 用证据形成判断
-
-- 区分观察到的事实、待验证的解释、采用的假设和未知信息。局部细节的不确定性不应否定其他已有独立证据支持的工作。
-- 判断未知信息是否会改变下一步决策。不会改变时，采用合理、可逆的假设继续推进；会改变时，寻找成本最低且可靠的证据，或能区分不同解释的验证方法。
-- 对原因不明确的技术问题，按可能性列出不超过三个主要原因，选择能区分它们的检查或观察方式。证据与初始判断冲突时，及时更新结论。
-- 优先使用一手资料、相关源码与日志、测量结果和可执行检查，不反复进行缺乏新证据的自我分析。有依据时可以提出暂定或附条件的建议，不追求无法达到的绝对确定性。
-- 同一种方法失败两次且没有获得新信息时，**更换策略**。没有明确的信息增益预期时，不重复工具调用、搜索或推理循环。
-
-## 4. 最小实现与契约约束
-
-- **实施最小且正确的改动。**遵循既有约定，保留必要行为。不增加推测性功能、无关重构、新依赖、配置开关、抽象层或为假想未来需求预留的设计。
-- **信任已建立的内部契约。**调用方、已校验的数据结构、静态类型系统或框架已经保证的字段、类型、`None` 状态和不变量，不重复校验。
-- **在真实边界进行校验。**包括不可信输入、外部服务与 API、文件与网络读写、持久化、并发操作、硬件读写和涉及安全的操作。保留实际业务约束、公开接口契约和必要兼容性。
-- **内部契约被破坏时及时暴露错误。**给出可用于定位和修复的错误信息，解决根因；不使用虚构默认值、空结果或看似成功的输出来掩盖程序错误。
-- 不因“以防万一”添加 `try/except`、宽泛的 `catch`、静默的 `pass`、重复的 `if x is None`、`getattr` / `hasattr` 探测、兜底值、重试、日志或兼容分支。每处分支都应对应具体可触发的失败、必须遵守的契约或已证实的运行需要。
-- 仅在当前层能够有效恢复或补充必要上下文时捕获异常，否则让异常继续传播。不得静默吞掉错误、降低结果正确性，或把必需配置变成可选配置。
-- 不为形式完整而添加只用一次的辅助函数、接口、工厂、注释、文档字符串、测试框架代码或类型注解。仅在它们能明确真实契约、符合仓库约定或减少实际复杂度时添加。
-- 避免大范围防御性重写。修复已证实的原因和直接受影响的路径，不扩展到假想的相邻问题。
-
-**示例：读取必需的内部配置。**
-
-```python
-# 错误：静默掩盖必需配置缺失
-model_path = config.get("model_path", "./default.pt")
-
-# 正确：遵守既有契约，直接暴露缺失配置
-model_path = config["model_path"]
-```
-
-上述规则不意味着删除有实际作用的超时处理、输入校验、授权检查、针对已证实临时故障的重试或必要的安全联锁。
-
-## 5. 按改动范围执行与验证
-
-用大白话说：你不需要做了微小的改动后，就执行一次全仓所有测试。
-
-1. **检查：**只阅读相关上下文、源码、日志、测试和约定，默认不扫描整个仓库或批量加载文档。
-2. **复现或测量：**在安全可行时，用最小且有信息价值的检查确认实际行为。未完成复现时，不宣称问题已复现。
-3. **修改：**实施最小、完整且已授权的修复，或交付当前证据能够支持的最明确结论。
-4. **验证：**检查实际输出，针对受影响行为运行验证。仅在变更涉及相关系统交互，或其影响确有需要时，扩大到集成或端到端验证。
-5. **修复：**解决本次改动引入的问题，必要时更新假设并重跑受影响的检查。无明确理由时，不重复已通过或成本高昂的验证。
-6. **交付：**报告结果、实际完成的验证和实质性未解决问题。未观察到测试、部署、资料查询或外部操作发生时，不得宣称已经完成。
-7. **善后：**工作中产生的临时文件，如审核PR、测试产物、工具使用产物等，需在工作完成后清除。
-
-- 优先使用实际反馈，不进行缺乏依据的反复自我质疑。仅在任务复杂或影响较大、预期收益足以抵偿成本时开展独立审查或评估，不为琐碎改动增加此类工作。
-- 性能工作区分实测改善与预期改善；数据和机器学习工作保留来源记录，区分离线指标与实际使用效果。
-
-## 6. Rally 专属
+## for this project
 
 用中文交流，默认情况下用简单易懂的方式（ELI5）与用户沟通，如果用户要求，再深入讲解。设计决策以 [问答记录](docs/superagent/00-问答记录.md) 为准；旧设计分册与其冲突时以问答记录为准。
 
@@ -111,3 +56,7 @@ model_path = config["model_path"]
 - `docs/Prompt/` 按“源码路径、提示词原文、参数”记录提示词；提示词变化时同步更新。
 - 设计、实施、调研文档直接放在 `docs/`，不另建子目录；相关工作完整实现、用户确认验收后删除。
 - 新会话先读 [HANDOFF](docs/HANDOFF.md)。用户提到上下文太长、要开启新会话或更新 handoff 时，删除过时描述，写明下个会话的任务；任务不明确时询问用户。
+
+### 一个重要的提醒
+不要假定Rally内的agent了解你所知道的。尤其是对修改或新增系统提示词、工具描述、skills时。
+否则这会让Rally非常困惑，因为它确实没有你的上下文！

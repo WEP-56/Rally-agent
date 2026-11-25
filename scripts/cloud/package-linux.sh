@@ -15,6 +15,11 @@ done
 (cd "$bundle" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
 (cd "$bundle" && PLAYWRIGHT_BROWSERS_PATH="$bundle/browser" node node_modules/playwright/cli.js install chromium --only-shell)
 cp -a out/server/src "$bundle/"
+cp -a skills "$bundle/skills"
+test -f "$bundle/skills/SKILL.md"
+for reference in identity.md coach.md model-provider.md media-search.md mcp.md skills.md roles.md external-agents.md; do
+ test -f "$bundle/skills/references/$reference"
+done
 cp -a LICENSE THIRD_PARTY_NOTICES "$bundle/"
 cp -a deploy/linux/* "$bundle/"
 node_root=$(dirname "$(dirname "$(readlink -f "$(command -v node)")")")

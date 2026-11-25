@@ -42,6 +42,7 @@ export type TaskMsg =
 
 export interface Task {
 	schedule?: { id: string; dueAt: number };
+	roleId?: string;
 	archivedAt?: number;
 	ended?: boolean;
 	gates?: TaskGate[];

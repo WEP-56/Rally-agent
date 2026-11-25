@@ -16,7 +16,11 @@ export class CapabilityCatalog {
 		const projects = [...new Set(this.projects())];
 		const skills = await this.skills.state(projects);
 		this.skillPaths = skills.skills.map(skill => skill.path);
-		const skillEntries = skills.skills.filter(skill => skill.enabled).map(skill => ({ name: short(skill.name, 80), description: short(skill.description, 180), projects: skill.projects }));
+		const skillEntries = skills.skills.filter(skill => skill.enabled).map(skill => ({
+			name: short(skill.name, 80),
+			description: short(skill.description, skill.name === "rally-self-management" ? 800 : skill.name.startsWith("rally-self-management-") ? 420 : 180),
+			projects: skill.projects,
+		}));
 		const knownTools = this.mcp.state().tools.map(tool => tool.name);
 		const servers = new Map<string, { name: string; description: string; exposure: string; knownTools: string[]; projects: string[] }>();
 		let mcpErrors = false;

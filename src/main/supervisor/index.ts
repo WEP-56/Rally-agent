@@ -15,6 +15,7 @@ import type { CredentialVault } from "../credential-vault.ts";
 import { QqMailConnection } from "../qqmail-connection.ts";
 import type { QqMailTransport } from "../qqmail-transport.ts";
 import { IdentityStore } from "../identity-store.ts";
+import { RoleWorkerStore } from "../role-worker-store.ts";
 import { ResourceStore } from "../resource-store.ts";
 import { recoverResourceReferences } from "./resource-lifecycle.ts";
 import { MemoryStore } from "../memory-store.ts";
@@ -99,6 +100,7 @@ export class Supervisor {
 	readonly scheduler: Scheduler;
 	readonly schedules: ScheduledTasks;
 	readonly identity: IdentityStore;
+	readonly roleWorkers: RoleWorkerStore;
 	readonly resources: ResourceStore;
 	readonly feishu: FeishuConnection;
 	readonly qqBot: QqBotConnection;
@@ -134,6 +136,7 @@ export class Supervisor {
 			this.memory = new MemoryStore(paths.memoryDir, this.events, this.audit);
 			this.workspace = new WorkspaceStore(paths.home, paths.workspaceDir);
 			this.identity = new IdentityStore(paths.home);
+			this.roleWorkers = new RoleWorkerStore(paths.agentDir);
 			this.feishu = new FeishuConnection(paths.home, options.credentialVault, (text, source) => this.main.sendFromIm(text, source));
 			this.qqBot = new QqBotConnection(paths.home, options.credentialVault, (text, source) => this.main.sendFromIm(text, source), options.qqBotFactory);
 			this.qqMail = new QqMailConnection(paths.home, options.credentialVault, options.qqMailTransport);
@@ -168,7 +171,7 @@ export class Supervisor {
 				quote: (ref) => this.main.quote(ref), requested: () => this.relay.captureSources(),
 				notice: () => this.relay.captureSources() });
 			this.schedules = new ScheduledTasks(this.events, this.store, () => this.autoApprove, () => this.scheduler.tick());
-			const capabilities = async () => (await catalog.context()) + (this.feishu.toolsEnabled() ? "\nFeishu worker MCP (rally_feishu): read shared documents and wiki nodes, search shared Bitable records. Only workers may call it." : "") + (this.qqMail.available() ? "\nQQ Mail worker tools: search/read the inbox, save attachments, and compose send/reply for explicit desktop approval. Only workers may call them." : "");
+			const capabilities = async () => (await catalog.context()) + this.roleWorkers.context() + (this.feishu.toolsEnabled() ? "\nFeishu worker MCP (rally_feishu): read shared documents and wiki nodes, search shared Bitable records. Only workers may call it." : "") + (this.qqMail.available() ? "\nQQ Mail worker tools: search/read the inbox, save attachments, and compose send/reply for explicit desktop approval. Only workers may call them." : "");
 			this.main = new MainAgent(paths, this.events, options.emitChat, {
 				resources: () => this.resources,
 				models: this.models,
@@ -207,6 +210,7 @@ export class Supervisor {
 				toolProviders: this.toolProviders,
 				paths,
 				store: this.store,
+				roleWorkers: this.roleWorkers,
 				models: this.models,
 				gates: this.gates,
 				audit: this.audit,
@@ -471,6 +475,7 @@ export class Supervisor {
 			},
 			killJobs: taskId => this.jobs.killTask(taskId),
 			board: () => this.board(),
+			roleWorker: id => { const role = this.roleWorkers.get(id); return role && { id: role.id, name: role.name, summary: role.summary }; },
 		};
 	}
 

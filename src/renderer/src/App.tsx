@@ -387,6 +387,7 @@ export default function App() {
       { id: "tm", label: "打开终端", group: "操作", icon: <SquareTerminal size={14} />, hint: "Ctrl+3", run: () => openTab("terminal") },
       { id: "theme", label: dark ? "切换到浅色主题" : "切换到深色主题", group: "操作", icon: dark ? <Sun size={14} /> : <Moon size={14} />, run: () => setConfig({ theme: dark ? "light" : "dark" }) },
       { id: "s-gen", label: "设置：身份", group: "设置", icon: <SettingsIcon size={14} />, hint: "Ctrl+,", run: () => openSettings("general") },
+      { id: "s-role-workers", label: "设置：角色 Workers", group: "设置", icon: <IdCard size={14} />, run: () => openSettings("role-workers") },
       { id: "s-mcp", label: "设置：MCP 服务器", group: "设置", icon: <Plug size={14} />, run: () => openSettings("mcp") },
       { id: "s-sk", label: "设置：Skills", group: "设置", icon: <Wand2 size={14} />, run: () => openSettings("skills") },
       { id: "s-ap", label: "设置：外观", group: "设置", icon: <Palette size={14} />, run: () => openSettings("appearance") },

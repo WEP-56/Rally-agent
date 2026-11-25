@@ -90,10 +90,9 @@
   - GitHub 暂不列入上述首批优先项。现有 gh 工具复用用户登录，用户不必创建 GitHub App；后续若做连接器入口，优先降低登录/授权配置负担。其它调研候选不自动纳入实施。
 - [x] 主/任务对话 CommonMark/GFM Markdown 渲染（静态专项 4 项＋对话回归 5 项；视觉/点击待用户验收，详见验证记录）。
 - [x] 云端部署、云端bot、移动客户端
-- [ ] 自我管理、配置能力，内置一个skills，内容是关于Rally的配置项存储路径等，当用户说：添加一个某MCP、添加一个提供商配置、修改你的人物设定、生成并修改你的头像等等情况时，Rally应当可以派发任务，通过skills配置这些。
 - [x] 账密提交与加密存储：router 申请、消息流卡片与私密表单、txt 密文库、本地/云端提交、启停/删除、宿主同源填写和元数据回告已实现。底层与 faux provider 生产链路通过；实际网站和视觉待用户验收。
 - [x] 浏览器控制集成：共用 profile、每任务独立窗口、3 并发/排队；Worker 工具、账密引用、任务标签、上传下载、授权门、消息缩略卡片、展开视图、接管/交还/断线等待、设备吊销、进程恢复清理与 Windows/Linux 运行依赖已实现。Windows/Linux Chromium、生产 Worker、双设备协议、Windows 打包运行及 Android Java 编译验证通过。
-- [ ] 浏览器本期用户验收：实际网站登录/发布/验证码、Windows/Android 点击与中文输入、卡片滚动和视图视觉、正式 Linux 完整包部署。无需重复调研；按 [落地方案](PiBot浏览器调研与Rally落地方案.md) 验收。
+- [ ] 浏览器本期用户验收：实际网站登录/发布/验证码、Windows/Android 点击与中文输入、卡片滚动和视图视觉、正式 Linux 完整包部署。开发侧验证已完成，用户实际验收仍待进行；维护契约见 [浏览器工具](Prompt/tools-Description/browser.md)，部署见发布指南与 Linux README。
 - [x] 教练实现：独立配置与设置页、本地/云端接口、一次性内存会话、记忆备份/预算/UTF-8 回滚与审计、受控文件工具、点子出处校验、隐藏持久中继、用户出现信号及每小时节流。用户/中继输入会先中止教练并等待回滚；不创建教练任务卡，不主动推送 IM。提示词与运行参数见 [记忆教练](Prompt/coach-memory.md)、[点子教练](Prompt/coach-idea.md)。
   - [x] 2026-11-23 用户确认开发完成，已实际验证能力，没有问题；本轮验收收口。
 
@@ -113,6 +112,9 @@
   ```
   5. 模型
   6. 技能与MCP，可以从全局MCP与skills独立筛选此roles可读、可用的部分。
+  7. role workers实验性功能：使用codex、claude、pi、gemini cli等外部agent作为worker。可以参考的项目：1. （优先）https://github.com/spacering-net/codeg ；2. https://github.com/pingdotgg/t3code
+
+  - [x] 自我管理 Skill：仅注册 `skills/SKILL.md` 这一个 Skill；8 个领域说明作为 `skills/references/*.md` 支持文件按需读取，避免设置页出现重复 Skill。入口说明 Rally 配置路径发现方式，参考文件记录字段/schema 与验证边界。随桌面与 Linux 服务包分发。
 
 
 

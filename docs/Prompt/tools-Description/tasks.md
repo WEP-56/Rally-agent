@@ -8,11 +8,13 @@
 - 提示词原文：
 
 ```text
-Create a task for a worker. quotes are the user message IDs that state the work; the host copies their text verbatim as the requirements. title is at most 40 characters. cwd is an explicit absolute directory. mode is readonly or write; scope lists the paths a write task will change, and overlap with a running task returns a warning without blocking. dependsOn makes the task wait for other tasks. Repeating the same title and quoted messages within 60 seconds returns the existing task. The result is a creation receipt with the approval and queue state, not proof that work ran.
+Create a task for a worker. quotes are the user message IDs that state the work; the host copies their text verbatim as the requirements. The worker cannot see the main conversation: quote needed clarifications, and use note (<= 30 words) to resolve references like ‘it’ and add the minimum grounded context (agent, project/path, prior decision). Do not guess or add requirements, plans, steps, or acceptance criteria. title is at most 40 characters. cwd is an explicit absolute directory. mode is readonly or write; scope lists the paths a write task will change, and overlap with a running task returns a warning without blocking. dependsOn makes the task wait for other tasks. When useful, set roleId to one of the profiles in the latest rally-capabilities snapshot; otherwise omit it. Repeating the same title, role, and quoted messages within 60 seconds returns the existing task. The result is a creation receipt with the approval and queue state, not proof that work ran.
 ```
 - 参数：
 
 ```ts
+const NoteSchema = Type.String({ description: "The worker cannot see the main conversation. Use <= 30 words to resolve references (e.g. what ‘it’ means) and add the minimum grounded context needed to understand the quoted request, such as the agent, project/path, or prior decision. No guesses, new requirements, plans, steps, or acceptance criteria." });
+
 schema = Type.Object({
 	title: Type.String({ description: "short task title, <= 40 chars" }),
 	quotes: Type.Array(QuoteRefSchema, { minItems: 1 }),
@@ -23,8 +25,11 @@ schema = Type.Object({
 		Type.Array(Type.String(), { description: "paths this task will write; overlap only warns" }),
 	),
 	dependsOn: Type.Optional(Type.Array(Type.String())),
+	roleId: Type.Optional(Type.String({ description: "Optional role worker ID from the current rally-capabilities role list." })),
 })
 ```
+
+`roleId` 可选。角色目录由 `src/main/role-worker-store.ts` 写入当前能力摘要；省略时使用默认 Worker。派工幂等键包含标题、引用消息和角色 ID；不指定角色时沿用原来的标题与引用消息规则。
 
 ## task_approve
 

@@ -3,7 +3,7 @@ import { WebsiteAccountsSection } from "./WebsiteAccountsSection";
 import { ConnectionForm } from "./ConnectionForm";
 import { IdentityCard } from "./IdentityCard";
 import { useEffect, useState } from "react";
-import { Archive, Bell, ArrowLeft, UserRound, Brain, Server, Plug, Blocks, Wand2, Palette, Info, FolderInput, Sun, Moon, Monitor, RotateCcw, ExternalLink, Check } from "lucide-react";
+import { Archive, Bell, ArrowLeft, UserRound, Brain, Server, Plug, Blocks, Wand2, Palette, Info, FolderInput, Sun, Moon, Monitor, RotateCcw, ExternalLink, Check, Users } from "lucide-react";
 import type { Task } from "../data";
 import { ArchivedTasksSection } from "./ArchivedTasksSection";
 import type { AppInfo } from "../../../shared/ipc";
@@ -18,6 +18,7 @@ import { SkillsSection } from "./SkillsSection";
 import { ProjectTrustSection } from "./ProjectTrustSection";
 import { McpSection } from "./McpSection";
 import { ToolProvidersSection } from "./ToolProvidersSection";
+import { RoleWorkersSection } from "./RoleWorkersSection";
 
 function Github({ size = 14 }: { size?: number }) {
   return (
@@ -31,6 +32,7 @@ export const SECTIONS = [
   { id: "website-accounts", label: "网站账号", icon: UserRound, desc: "管理 Agent 可使用的加密账号" },
   { id:"connection", label:"运行模式", icon:Monitor, desc:"本地运行与云端连接" },
   { id: "general", label: "身份", icon: UserRound, desc: "名称、性格与工作方式" },
+  { id: "role-workers", label: "角色 Workers", icon: Users, desc: "管理可复用的任务 worker 角色" },
   { id: "workspace", label: "项目与工作区", icon: FolderInput, desc: "默认工作区、最近项目与项目信任" },
   { id: "archive", label: "归档", icon: Archive, desc: "查看、撤销归档或彻底删除任务" },
   { id: "coach", label: "教练", icon: Brain, desc: "静默整理记忆，发现值得聊的点子" },
@@ -246,6 +248,7 @@ export function Settings({ section, setSection, onBack, tasks }: { section: stri
           {cur.id === "connection" && <ConnectionForm/>}
           {cur.id === "archive" && <ArchivedTasksSection tasks={tasks} />}
           {cur.id === "general" && <><IdentityCard /><IdentityForm /></>}
+          {cur.id === "role-workers" && <RoleWorkersSection />}
           {cur.id === "workspace" && <><div className="glass-strong rounded-[24px] p-5"><WorkspaceForm /></div><section className="mt-7"><h2 className="mb-3 px-1 text-[16px] font-semibold">项目信任</h2><ProjectTrustSection /></section></>}
           {cur.id === "coach" && <div className="glass-strong rounded-[24px] p-5"><CoachForm /></div>}
           {cur.id === "memory" && <div className="glass-strong rounded-[24px] p-5"><MemoryForm /></div>}

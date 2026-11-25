@@ -3,6 +3,8 @@ import { Critter } from "./brand";
 import { Lock, AtSign, SquareTerminal } from "lucide-react";
 import type { Task } from "../data";
 import { useApp } from "../store";
+import { useEffect, useState } from "react";
+import type { RoleWorkerProfile } from "../../../shared/role-workers";
 import { RichText } from "./RichText";
 import { ToolSteps } from "./ToolSteps";
 import { ToolActivity } from "./ToolActivity";
@@ -17,6 +19,9 @@ import { useAgentBrowsers } from "../agent-browser";
 
 export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task) => void }) {
   const { config, openTab } = useApp();
+  const [role, setRole] = useState<RoleWorkerProfile>();
+  useEffect(() => { let alive = true; if (!task.roleId) { setRole(undefined); return; } void window.rally.roleWorkers.getState().then(roles => { if (alive) setRole(roles.find(item => item.id === task.roleId)); }); return () => { alive = false; }; }, [task.roleId]);
+  const roleAvatar = role?.avatar ? <img src={role.avatar} alt="" width={28} height={28} className="mt-0.5 shrink-0 rounded-xl object-cover" /> : <Critter seed={task.id} size={28} className="mt-0.5 shrink-0" />;
   const browsers = useAgentBrowsers().filter(browser => browser.taskId === task.id);
   return (
     <div className="relative flex h-full min-w-0 flex-col">
@@ -24,7 +29,7 @@ export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task)
         <div className="mx-auto max-w-[640px] px-5 pb-28 pt-2">
           {/* header */}
           <div className="glass rounded-[26px] p-5">
-            <div className="flex items-start gap-4"><Critter seed={task.id} size={60} />
+            <div className="flex items-start gap-4">{role?.avatar ? <img src={role.avatar} alt="" width={60} height={60} className="shrink-0 rounded-2xl object-cover" /> : <Critter seed={task.id} size={60} />}
               <div className="min-w-0 flex-1">
                 {task.schedule && <div className="mb-2"><ScheduledWorkerBadge /></div>}
                 <div className="flex items-start gap-2">
@@ -32,6 +37,7 @@ export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task)
                   <StatusBadge status={task.status} />
                 </div>
                 <p className="mt-1.5 text-[13px] leading-relaxed text-muted">{task.summary}</p>
+                {role && <p className="mt-2 text-xs text-accent">{role.name}</p>}
               </div>
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[11.5px] text-muted">
@@ -48,7 +54,7 @@ export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task)
             {browsers.map(browser => <AgentBrowserCard key={browser.id} browser={browser} />)}
             {task.messages.map((m, i) => {
               if (m.role === "assistant") return <div key={m.message.id} className="animate-rise min-w-0">
-                <AssistantContent blocks={m.message.blocks} calls={m.message.toolCalls} streaming={m.message.streaming} avatar={<Critter seed={task.id} size={28} className="mt-0.5 shrink-0" />} />
+                <AssistantContent blocks={m.message.blocks} calls={m.message.toolCalls} streaming={m.message.streaming} avatar={roleAvatar} />
 				<AttachmentCards items={m.message.attachments} />
                 {m.message.streaming && !m.message.blocks.length && <div className="py-1 pl-[38px] text-sm text-muted">正在思考…</div>}
               </div>;
@@ -68,7 +74,7 @@ export function TaskView({ task, onMention }: { task: Task; onMention: (t: Task)
               if (m.role === "agent")
                 return (
                   <div key={i} className="animate-rise flex gap-2.5">
-                    <Critter seed={task.id} size={28} className="mt-0.5 shrink-0" />
+                    {roleAvatar}
                     <div className="glass min-w-0 max-w-[90%] rounded-[20px] rounded-tl-md px-4 py-2.5 text-sm leading-[1.65]"><RichText text={m.text} /></div>
                   </div>
                 );

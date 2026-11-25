@@ -14,7 +14,7 @@ export function resolveAttachments(store: ResourceStore, ids: unknown, actor?: s
 }
 
 /** Pi handles decoding/resizing; the provider receives actual image blocks, not a path-only prompt. */
-export async function attachmentMessage(store: ResourceStore | undefined, text: string, refs: readonly ResourceRef[], model?: Model<Api>): Promise<string | (TextContent | ImageContent)[]> {
+export async function attachmentMessage(store: ResourceStore | undefined, text: string, refs: readonly ResourceRef[], model?: Pick<Model<Api>, "input" | "inputLimits">): Promise<string | (TextContent | ImageContent)[]> {
   if (!refs.length) return text;
   if (!store) throw Error("附件资源库不可用");
   const content: (TextContent | ImageContent)[] = [{ type: "text", text }];

@@ -1,7 +1,8 @@
 import { createServer } from "node:http";
 import { AGENT_BROWSER_COMMANDS, browserCommand } from "../agent-browser/commands.ts";
 import { chmodSync, existsSync, lstatSync, readFileSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { cloudVault } from "./vault.ts";
 import { cloudCommands } from "./commands.ts";
@@ -16,6 +17,7 @@ import { RESOURCE_COMMANDS, resourceBytes, resourceCommand } from "./resources.t
 process.umask(0o077);
 const paths = resolveRallyPaths();
 process.env.RALLY_CODING_AGENT_DIR = paths.agentDir;
+process.env.RALLY_BUILTIN_SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../../skills");
 const secrets = process.env.RALLY_CREDENTIALS_DIR || "/etc/rally";
 const vault = cloudVault(Buffer.from(readFileSync(join(secrets, "vault.key"), "utf8").trim(), "base64url"));
 const epoch = randomUUID();

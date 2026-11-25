@@ -1,7 +1,7 @@
 {
 	"name": "rally",
 	"productName": "Rally",
-	"version": "0.3.0",
+	"version": "0.4.0",
 	"license": "MIT",
 	"private": true,
 	"type": "module",
@@ -25,6 +25,9 @@
 		"dist:android": "npm run build && node scripts/cloud/build-android.mjs"
 	},
 	"dependencies": {
+		"@agentclientprotocol/claude-agent-acp": "0.110.1",
+		"@agentclientprotocol/codex-acp": "2.10.0",
+		"@agentclientprotocol/sdk": "2.10.0",
 		"@larksuiteoapi/lark-mcp": "0.5.1",
 		"@larksuiteoapi/node-sdk": "1.76.0",
 		"@modelcontextprotocol/sdk": "1.32.2",

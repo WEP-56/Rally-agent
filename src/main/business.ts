@@ -5,6 +5,8 @@ import type { WorkspacePatch } from "../shared/workspace.ts";
 import { SkillStore } from "./skill-store.ts";
 import { projectTrustState, setProjectTrust } from "./project-trust.ts";
 import { McpStore } from "./mcp-store.ts";
+import { RoleAgentCatalog } from "./role-agent-catalog.ts";
+import type { RoleWorkerExecutor } from "../shared/role-workers.ts";
 import type { McpExposure, McpRiskTier } from "../shared/mcp.ts";
 import type { FeishuCredentials, ImBotCredentials, QqMailCredentials } from "../shared/connections.ts";
 import type { IdentityState } from "../shared/identity.ts";
@@ -21,6 +23,7 @@ export function businessHandlers(
 	};
 	const mcp = new McpStore(paths.agentDir);
 	const skills = new SkillStore(paths.agentDir);
+	const roleAgentCatalog = new RoleAgentCatalog();
 	const skillProjects = () => [
 		paths.mainCwd,
 		supervisor.workspace.base(),
@@ -62,6 +65,24 @@ export function businessHandlers(
 		[IpcChannel.feishuTools]: (enabled: boolean) => supervisor.feishu.setTools(enabled),
 		[IpcChannel.feishuDisconnect]: () => supervisor.feishu.disconnect(),
 		[IpcChannel.identityState]: () => supervisor.identity.state(),
+		[IpcChannel.roleWorkersState]: () => supervisor.roleWorkers.state(),
+		[IpcChannel.roleWorkersAgentModels]: (executor: RoleWorkerExecutor) => {
+			if (executor !== "claude-code" && executor !== "codex") throw new Error("外部执行器无效");
+			return roleAgentCatalog.models(executor);
+		},
+		[IpcChannel.roleWorkersSave]: async (input: unknown) => {
+			await supervisor.models.whenReady();
+			const candidate = input && typeof input === "object" ? input as Record<string, unknown> : {};
+			const executor = candidate.executor === "claude-code" || candidate.executor === "codex" ? candidate.executor : undefined;
+			const available = executor ? await roleAgentCatalog.models(executor) : [];
+			return supervisor.roleWorkers.save(input, (provider, model) => Boolean(supervisor.models.resolve(provider, model)), (kind, model) => kind === executor && available.some(item => item.id === model));
+		},
+		[IpcChannel.roleWorkersDelete]: (id: unknown) => {
+			if (typeof id !== "string") throw new Error("角色 ID 无效");
+			const task = supervisor.store.list().find(item => item.roleId === id && !item.ended);
+			if (task) throw new Error(`角色仍被未结束任务 ${task.id} 使用，暂不能删除`);
+			return supervisor.roleWorkers.delete(id);
+		},
 		[IpcChannel.identityInitialize]: (legacy: unknown) => publishIdentity(supervisor.identity.initialize(legacy)),
 		[IpcChannel.identityUpdate]: (patch: unknown) => publishIdentity(supervisor.identity.update(patch)),
 		[IpcChannel.identityResetAvatar]: () => publishIdentity(supervisor.identity.setAvatar(null)),

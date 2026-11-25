@@ -1,6 +1,6 @@
 # Rally 开发交接（2026-11-23）
 
-入口：[实施 TODO](开发实施TODO.md) · [浏览器方案及验收清单](PiBot浏览器调研与Rally落地方案.md) · [产品问答](superagent/00-问答记录.md) · [Prompt](Prompt/system-prompt.md)。
+入口：[实施 TODO](开发实施TODO.md) · [浏览器工具契约](Prompt/tools-Description/browser.md) · [产品问答](superagent/00-问答记录.md) · [Prompt](Prompt/system-prompt.md)。浏览器施工方案已在验收后清理。
 
 ## 本轮结果
 

@@ -22,6 +22,7 @@ import type { BrowserState, BrowserLayout, BrowserAction, BrowserEvent } from ".
 import type { CredentialState, CredentialSubmission } from "./credentials.ts";
 import type { AgentBrowserWindow, BrowserFrame, BrowserUserInput } from "./agent-browser.ts";
 import type { TerminalSize, TerminalState, TerminalEvent } from "./terminal.ts";
+import type { ExternalAgentModel, RoleWorkerDraft, RoleWorkerExecutor, RoleWorkerProfile } from "./role-workers.ts";
 
 /** Basic facts about the running app, shown in the shell and used by smoke checks. */
 export interface AppInfo {
@@ -165,6 +166,10 @@ export const IpcChannel = {
 	modelsFetch: "models:fetch",
 	modelsSelect: "models:select",
 	modelsSelectWorker: "models:select-worker",
+	roleWorkersState: "role-workers:state",
+	roleWorkersSave: "role-workers:save",
+	roleWorkersDelete: "role-workers:delete",
+	roleWorkersAgentModels: "role-workers:agent-models",
 	workspaceState: "workspace:state",
 	workspaceUpdate: "workspace:update",
 	workspacePick: "workspace:pick",
@@ -292,6 +297,13 @@ export interface ModelsApi {
 	selectWorker(input: SelectModelInput): Promise<ModelsState>;
 }
 
+export interface RoleWorkersApi {
+	getState(): Promise<RoleWorkerProfile[]>;
+	getAgentModels(executor: Exclude<RoleWorkerExecutor, "rally">): Promise<ExternalAgentModel[]>;
+	save(role: RoleWorkerDraft): Promise<RoleWorkerProfile[]>;
+	delete(id: string): Promise<RoleWorkerProfile[]>;
+}
+
 /** API exposed on `window.rally` by the preload script. */
 export interface RallyApi {
 	agentBrowser: {
@@ -395,6 +407,7 @@ export interface RallyApi {
 	tasks: TasksApi;
 	toolProviders: { getState(): Promise<ToolProviderState>; save(update: ToolProviderUpdate): Promise<ToolProviderState> };
 	models: ModelsApi;
+	roleWorkers: RoleWorkersApi;
 	workspace: {
 		getState(): Promise<WorkspaceState>;
 		update(patch: WorkspacePatch): Promise<WorkspaceState>;

@@ -15,7 +15,10 @@ import {
 	type ToolDefinition,
 } from "@rally/coding-agent";
 import type { Static, TSchema } from "typebox";
-import type { AssistantMessage } from "@rally/ai";
+import { getSupportedThinkingLevels, type AssistantMessage } from "@rally/ai";
+import { ExternalWorkerSession, type ExternalExecutor, type ExternalToolUpdate } from "./external-worker-session.ts";
+import type { RoleWorkerStore } from "../role-worker-store.ts";
+import type { RoleWorkerProfile } from "../../shared/role-workers.ts";
 import type { RallyPaths } from "../../shared/ipc.ts";
 import type { Quote, ReportState, Task, TaskAccess, TaskInput, TaskRun } from "../../shared/task.ts";
 import { taskSchedule } from "../../shared/task.ts";
@@ -67,6 +70,7 @@ export interface WorkerManagerOptions {
 	paths: RallyPaths;
 	store: TaskStore;
 	models: ModelStore;
+	roleWorkers?: RoleWorkerStore;
 	gates: GateService;
 	audit: AuditLog;
 	processes: ProcessRegistry;
@@ -91,12 +95,9 @@ export interface WorkerManagerOptions {
 	onBusyChange(): void;
 }
 
-interface Worker {
+interface WorkerState {
 	taskId: string;
 	runId: string;
-	session: AgentSession;
-	submissions: AttachmentQueue;
-	unsubscribe: () => void;
 	streaming: boolean;
 	lastText: string;
 	messageSequence: number;
@@ -111,6 +112,11 @@ interface Worker {
 	jobExempt: boolean;
 	recovering: boolean;
 }
+type Worker = WorkerState & (
+	| { kind: "pi"; session: AgentSession; submissions: AttachmentQueue; unsubscribe: () => void }
+	| { kind: "external"; session: ExternalWorkerSession }
+);
+
 interface OpeningWorker {
 	pending?: Promise<void>;
 	task: Task;
@@ -169,7 +175,7 @@ export class WorkerManager {
 			catch (error) {
 				await opening.stop;
 				if (this.disposed || opening.task.ended || opening.run.endedAt) return;
-				if (!opening.recovering) throw error;
+				if (!opening.recovering) { if (opening.controller.signal.aborted) return; throw error; }
 				opening.controller = new AbortController(); opening.session = undefined; opening.stop = undefined; opening.recovering = false; opening.lastActivity = this.now();
 				this.options.store.nudge(opening.task.id, STALL_TEXT);
 			}
@@ -181,11 +187,17 @@ export class WorkerManager {
 		// A terminal report can be resumed before the old turn's final sentence settles.
 		const previous = this.workers.get(task.id);
 		if (previous) await this.disposeWorker(previous); else await this.closing.get(task.id);
+		const role = task.roleId ? this.options.roleWorkers?.get(task.roleId) : undefined;
+		if (task.roleId && !role) throw new WorkerError("ROLE_NOT_FOUND", `找不到角色 ${task.roleId}`);
+		if (role?.executor && role.executor !== "rally") {
+			await this.startExternal(task, run, opening, role, role.executor);
+			return;
+		}
 		const file = join(paths.sessionsTasksDir, `${task.id}.jsonl`);
 		const runtime = await this.options.models.whenReady();
 		if (this.disposed || task.ended || run.endedAt) return;
 		opening.controller.signal.throwIfAborted();
-		const selection = opening.selection ??= this.options.models.selection("worker") ?? undefined;
+		const selection = opening.selection ??= this.roleModel(role);
 		if (!runtime || !selection) throw new WorkerError("NO_MODEL", "尚未配置任务 agent 的模型，请在设置 → 供应商中选择任务 agent 模型与思考强度");
 		const sessionManager = SessionManager.open(file, paths.sessionsTasksDir, task.cwd);
 		const versions = new FileVersions(sessionManager);
@@ -208,7 +220,7 @@ export class WorkerManager {
 			modelRuntime: runtime,
 			model: selection.model,
 			thinkingLevel: selection.thinkingLevel,
-			rolePrompt: WORKER_SYSTEM_PROMPT,
+			rolePrompt: role ? `${WORKER_SYSTEM_PROMPT}\n\n${roleInstructions(role)}` : WORKER_SYSTEM_PROMPT,
 			loadProjectContext: true,
 			loadProjectSkills: true,
 			extensions: [...mcp.extensions, ...(this.options.resources ? [resourceTools({ store: this.options.resources, owner: `task:${task.id}`, cwd: () => task.cwd,
@@ -246,6 +258,7 @@ export class WorkerManager {
 		}
 
 		const worker: Worker = {
+			kind: "pi",
 			taskId: task.id,
 			runId: run.id,
 			session,
@@ -262,13 +275,61 @@ export class WorkerManager {
 			lastActivity: this.now(), jobExempt: this.options.jobs.hasBackground(task.id), recovering: false,
 		};
 		worker.unsubscribe = session.subscribe((event) => this.handle(worker, event));
+		this.activate(worker, task, run);
+	}
+
+	private roleModel(role?: RoleWorkerProfile): OpeningWorker["selection"] {
+		const fallback = this.options.models.selection("worker");
+		if (!role?.model) return fallback ?? undefined;
+		const model = this.options.models.resolve(role.model.provider, role.model.model);
+		if (!model) throw new WorkerError("NO_MODEL", `角色模型 ${role.model.provider}/${role.model.model} 已不可用`);
+		const level = fallback?.thinkingLevel ?? "off";
+		return { model, thinkingLevel: getSupportedThinkingLevels(model).includes(level) ? level : "off" };
+	}
+
+	private async startExternal(task: Task, run: TaskRun, opening: OpeningWorker, role: RoleWorkerProfile, executor: ExternalExecutor): Promise<void> {
+		if (!role.externalModel) throw new WorkerError("NO_MODEL", "尚未为角色选择外部模型");
+		let worker: Worker | undefined;
+		const session = await ExternalWorkerSession.start({
+			executor, modelId: role.externalModel, cwd: task.cwd, mode: task.mode, outputDir: task.outputDir, signal: opening.controller.signal,
+			onText: chunk => { if (worker) this.externalText(worker, chunk); },
+			onTool: update => { if (worker) this.externalTool(worker, update); },
+			onUsage: usage => {
+				if (!worker || worker.disposed || task.ended || run.endedAt) return;
+				this.options.store.recordUsage(task.id, {
+					inputTokens: Math.max(0, usage.inputTokens - (usage.cachedReadTokens ?? 0) - (usage.cachedWriteTokens ?? 0)),
+					cacheReadTokens: Math.max(0, usage.cachedReadTokens ?? 0), cacheWriteTokens: Math.max(0, usage.cachedWriteTokens ?? 0),
+					outputTokens: Math.max(0, usage.outputTokens), toolCalls: 0,
+				});
+			},
+			onCost: costUsd => {
+				if (!worker || worker.disposed || task.ended || run.endedAt) return;
+				this.options.store.recordUsage(task.id, { inputTokens: 0, outputTokens: 0, toolCalls: 0, costUsd });
+			},
+		});
+		if (this.disposed || task.ended || run.endedAt || opening.controller.signal.aborted) {
+			await session.close();
+			return;
+		}
+		worker = {
+			kind: "external", session, taskId: task.id, runId: run.id,
+			streaming: true, lastText: "", messageSequence: 0, toolCalls: 0, priced: false,
+			reportedThisTurn: false, nudged: false, disposed: false, lastActivity: this.now(), jobExempt: false, recovering: false,
+		};
+		this.options.store.setRunModel(task.id, run.id, `${executor}/${role.externalModel}`);
+		const instructions = `You are a Rally task worker. Do not delegate or create child agents. Use only your own available tools. Rally's internal tools are not available in this session. Your last response must start with RALLY_STATUS: ready, RALLY_STATUS: failed, or RALLY_STATUS: blocked on its own line. Follow it with a concise, factual result; if blocked, include what you need from the user. Never report ready for unfinished work.\n\n${roleInstructions(role)}`;
+		this.activate(worker, task, run, instructions);
+	}
+
+	private activate(worker: Worker, task: Task, run: TaskRun, instructions?: string): void {
+		const { store } = this.options;
 		this.workers.set(task.id, worker);
 		this.opening.delete(task.id);
 		this.options.onBusyChange();
 
 		store.inheritResources(task.id, this.upstreams(task).flatMap(upstream => upstream.runs.at(-1)?.lastReport?.attachments ?? []));
 		const pending = task.inputs.filter((input) => !input.deliveredAt);
-		const message = [assignmentMessage(task, run, this.upstreams(task)), ...pending.map(inputBlock)].join("\n\n");
+		const message = [instructions, assignmentMessage(task, run, this.upstreams(task)), ...pending.map(inputBlock)].filter(Boolean).join("\n\n");
 		void this.sendMessage(worker, message, [...task.quotes, ...pending.flatMap(input => input.quotes ?? [])], pending.map(input => input.id)).catch((error: unknown) => this.fail(worker, error));
 	}
 
@@ -287,7 +348,7 @@ export class WorkerManager {
 		if (!worker || worker.disposed || worker.recovering) return false;
 		const task = this.options.store.get(taskId);
 		if (!task || task.ended || task.approval.state !== "approved" || task.runs.find((run) => run.id === worker.runId)?.endedAt) return false;
-		if (!worker.session.isStreaming || !worker.streaming) {
+		if (worker.kind === "external" || !worker.session.isStreaming || !worker.streaming) {
 			this.options.onBusyChange();
 			return false;
 		}
@@ -363,7 +424,7 @@ export class WorkerManager {
 
 	private async retryStalled(worker: Worker): Promise<void> {
 		try {
-			worker.submissions.cancel();
+			if (worker.kind === "pi") worker.submissions.cancel();
 			await worker.session.abort();
 			const task = this.options.store.get(worker.taskId); const run = task?.runs.find(run => run.id === worker.runId);
 			if (this.disposed || worker.disposed || !task || task.ended || !run || run.endedAt) return;
@@ -384,10 +445,97 @@ export class WorkerManager {
 		const task = this.options.store.get(worker.taskId);
 		const refs = [...quotes.flatMap(quote => quote.attachments ?? []), ...(task?.inputs.filter(input => inputIds.includes(input.id)).flatMap(input => input.attachments ?? []) ?? [])];
 		const resources = this.options.resources?.();
+		if (worker.kind === "external") return this.sendExternal(worker, text, refs, inputIds, resources);
 		return worker.submissions.send(() => attachmentMessage(resources, text, refs, worker.session.model), () => {
 			const task = this.options.store.get(worker.taskId);
 			return !this.disposed && !worker.disposed && !task?.ended && !task?.runs.find(run => run.id === worker.runId)?.endedAt;
 		}, () => { for (const id of inputIds) this.options.store.markDelivered(worker.taskId, id); });
+	}
+
+	private async sendExternal(worker: Worker & { kind: "external" }, text: string, refs: ResourceRef[], inputIds: string[], resources?: ResourceStore): Promise<void> {
+		const { store } = this.options;
+		const content = await attachmentMessage(resources, text, refs, { input: worker.session.acceptsImages ? ["text", "image"] : ["text"] });
+		const active = () => {
+			const task = store.get(worker.taskId);
+			return !this.disposed && !worker.disposed && !worker.recovering && !!task && !task.ended && !task.runs.find(run => run.id === worker.runId)?.endedAt;
+		};
+		if (!active()) return;
+		worker.lastText = "";
+		const reason = await worker.session.prompt(typeof content === "string" ? [{ type: "text", text: content }] : content);
+		if (!active()) return;
+		this.finishMessage(worker);
+		this.interruptTools(worker);
+		const task = store.get(worker.taskId)!;
+		if (reason !== "cancelled") for (const id of inputIds) store.markDelivered(task.id, id);
+		const queued = store.get(task.id)?.inputs.some(input => !input.deliveredAt);
+		if (reason === "end_turn" && queued) {
+			worker.streaming = false;
+			this.options.onBusyChange();
+			return;
+		}
+		const match = [...worker.lastText.trim().matchAll(/^RALLY_STATUS:[ \t]*(ready|failed|blocked)[ \t]*(?:\r?\n|$)/gim)].at(-1);
+		const state = match?.[1].toLowerCase();
+		const summary = worker.lastText.trim().slice(match ? match.index + match[0].length : 0).trim();
+		if (reason !== "end_turn") {
+			this.options.report(task, worker.runId, "failed", `外部任务未正常完成（${reason}）${summary ? `：${truncate(summary, 3000)}` : ""}`);
+		} else if (state === "failed") {
+			this.options.report(task, worker.runId, "failed", truncate(summary || "外部 worker 汇报失败", 4000));
+		} else if (state === "blocked") {
+			this.options.report(task, worker.runId, "blocked", truncate(summary || "外部 worker 汇报受阻", 4000), summary ? truncate(summary, 2000) : undefined);
+			worker.streaming = false;
+			this.options.onBusyChange();
+			return;
+		} else if (state === "ready") {
+			this.options.report(task, worker.runId, "ready", truncate(summary || "外部任务已完成", 4000));
+		} else if (worker.lastText.trim()) {
+			// Some external agents, notably Claude Code, can finish normally but omit
+			// Rally's optional status prefix. A completed ACP turn with a final answer
+			// is a successful result; reserve "blocked" for an explicit blocked report
+			// or a turn that ended without any answer.
+			this.options.report(task, worker.runId, "ready", truncate(worker.lastText.trim(), 4000));
+		} else {
+			this.options.report(task, worker.runId, "blocked", "外部任务正常结束，但没有返回结果说明");
+			worker.streaming = false;
+			this.options.onBusyChange();
+			return;
+		}
+		await this.disposeWorker(worker);
+	}
+
+	private externalText(worker: Worker, text: string): void {
+		if (worker.disposed || worker.recovering) return;
+		worker.lastActivity = this.now();
+		worker.lastText += text;
+		worker.message ??= { id: `${worker.runId}:assistant:${++worker.messageSequence}`, runId: worker.runId, at: Date.now(), streaming: true, text: "", blocks: [] };
+		worker.message.text = worker.lastText;
+		const block = worker.message.blocks.at(-1);
+		if (block?.type === "text") block.text += text;
+		else worker.message.blocks.push({ type: "text", text });
+		this.options.store.recordAssistant(worker.taskId, worker.message, false);
+	}
+
+	private externalTool(worker: Worker, update: ExternalToolUpdate): void {
+		if (worker.disposed || worker.recovering) return;
+		worker.lastActivity = this.now();
+		const { store } = this.options;
+		const id = `${worker.runId}:${update.id}`;
+		const previous = store.timeline(worker.taskId).find(call => call.id === id);
+		const status = update.status ?? previous?.status ?? "running";
+		const finished = status === "ok" || status === "error";
+		store.recordTool(worker.taskId, {
+			id, runId: worker.runId, name: update.name ?? previous?.name ?? "external tool",
+			status, input: update.input !== undefined ? truncate(toolInput(update.input), 4000) : previous?.input ?? "",
+			output: update.output !== undefined ? truncate(update.output, 4000) : previous?.output,
+			startedAt: previous?.startedAt ?? Date.now(), endedAt: previous?.endedAt ?? (finished ? Date.now() : undefined),
+		});
+		if (!previous) {
+			worker.message ??= { id: `${worker.runId}:assistant:${++worker.messageSequence}`, runId: worker.runId, at: Date.now(), streaming: true, text: "", blocks: [] };
+			worker.message.blocks.push({ type: "tool", toolCallId: id });
+			store.recordAssistant(worker.taskId, worker.message, false);
+			store.recordExternalAction(worker.taskId, update.name ?? "external tool");
+			this.options.audit.append("external", { taskId: worker.taskId, runId: worker.runId, toolCallId: id, action: update.name ?? "external tool", result: "observed", source: "acp" });
+		}
+		if (finished && !previous?.endedAt) this.finishTool(worker);
 	}
 
 	private publish(task: Task, run: TaskRun, toolCallId: string, refs: ResourceRef[]): void {
@@ -439,7 +587,7 @@ export class WorkerManager {
 		const opening = this.opening.get(taskId);
 		if (opening) { opening.controller.abort(); if (opening.session) opening.stop ??= closeRoleSession(opening.session); }
 		const worker = this.workers.get(taskId);
-		return Promise.all([worker ? this.disposeWorker(worker) : this.closing.get(taskId), opening?.stop, this.options.agentBrowser?.closeTask(taskId)]).then(() => {});
+		return Promise.all([worker ? this.disposeWorker(worker) : this.closing.get(taskId), opening?.stop, opening?.pending, this.options.agentBrowser?.closeTask(taskId)]).then(() => {});
 	}
 
 	async closeTask(taskId: string): Promise<void> {
@@ -600,10 +748,13 @@ export class WorkerManager {
 		if (worker.disposed) return this.closing.get(worker.taskId) ?? Promise.resolve();
 		try { this.finishMessage(worker); } catch (error) { this.closeErrors.push(error); }
 		worker.disposed = true;
-		worker.submissions.cancel();
-		worker.unsubscribe();
+		if (worker.kind === "pi") {
+			worker.submissions.cancel();
+			worker.unsubscribe();
+		}
 		this.interruptTools(worker);
-		const closing = Promise.all([closeRoleSession(worker.session), worker.submissions.idle(), this.options.agentBrowser?.closeTask(worker.taskId)])
+		const sessionClosed = worker.kind === "pi" ? Promise.all([closeRoleSession(worker.session), worker.submissions.idle()]) : worker.session.close();
+		const closing = Promise.all([sessionClosed, this.options.agentBrowser?.closeTask(worker.taskId)])
 			.then(() => {})
 			.catch((error: unknown) => { this.closeErrors.push(error); console.error("Worker session shutdown failed", error); })
 			.finally(() => { if (this.closing.get(worker.taskId) === closing) this.closing.delete(worker.taskId); });
@@ -675,6 +826,10 @@ const STALL_TEXT = "<rally-nudge>\nNo activity for 10 minutes; your last step wa
 function lastText(worker: Worker): string {
 	const text = worker.lastText.trim();
 	return text || "（worker 结束了一轮，但没有汇报）";
+}
+
+function roleInstructions(role: RoleWorkerProfile): string {
+	return `Rally role profile:\nName: ${role.name}\nDescription: ${role.summary}\nPersonality: ${role.personality}\nWork style: ${role.workstyle}\n${role.recommendedSkills.length ? `Recommended skills (you may ignore them; use when relevant and available): ${role.recommendedSkills.join(", ")}` : ""}`;
 }
 
 function assignmentMessage(task: Task, run: TaskRun, upstreams: Task[]): string {

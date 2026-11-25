@@ -1,6 +1,6 @@
 # Rally Linux 服务端
 
-本包包含固定版本 Node、Agent 运行时、部署控制台、Chromium Headless Shell 和运行依赖。下一版 Linux 包另含 GitHub CLI（gh 2.105.0）；已发布的 v0.3.0 尚未包含。无需 Electron、源码构建或全局 npm 安装。当前已验证 Ubuntu 22.04 x64；需要 systemd、curl，以及任务实际使用的 git、Python 等外部工具。安装器会通过固定版本 Playwright 的 `install-deps chromium` 安装系统共享库和字体，因此安装时需要可用的软件源。
+本包包含固定版本 Node、Agent 运行时、部署控制台、Chromium Headless Shell 和运行依赖。自 0.4.0 起还包含 GitHub CLI（gh 2.105.0）及内置自我管理 Skill；v0.3.0 不包含这些新增资源。无需 Electron、源码构建或全局 npm 安装。当前已验证 Ubuntu 22.04 x64；需要 systemd、curl，以及任务实际使用的 git、Python 等外部工具。安装器会通过固定版本 Playwright 的 `install-deps chromium` 安装系统共享库和字体，因此安装时需要可用的软件源。
 
 ## 从 GitHub Release 安装
 
@@ -47,7 +47,7 @@ curl --fail http://127.0.0.1:4711/health
 
 ## GitHub CLI 与用户工具
 
-下一版构建时从 GitHub 官方 Release 下载固定版本 gh，校验代码中固定的 SHA256，将可执行文件及 MIT 许可证放入安装包 `bin/gh`、`bin/GH-LICENSE`。服务通过 `/opt/rally/current/bin` 调用，无需运行账号拥有 sudo 权限。
+0.4.0 及之后版本构建时从 GitHub 官方 Release 下载固定版本 gh，校验代码中固定的 SHA256，将可执行文件及 MIT 许可证放入安装包 `bin/gh`、`bin/GH-LICENSE`。服务通过 `/opt/rally/current/bin` 调用，无需运行账号拥有 sudo 权限。
 
 用户自行安装的工具放在 `/var/lib/rally/.rally/agent/bin`；Shell 与专用 GitHub 工具都搜索此目录。这个数据目录与版本目录分离，安装器升级、重装代码时不会覆盖已有工具。手动安装的同名 gh 优先于随包版本，之后需由用户自行更新或删除该副本。
 

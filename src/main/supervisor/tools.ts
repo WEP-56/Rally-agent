@@ -22,6 +22,7 @@ export interface TaskToolHost {
 	abortWorker(taskId: string): void | Promise<void>;
 	killJobs?(taskId: string): Promise<number>;
 	board(): TaskBoard;
+	roleWorker(id: string): { id: string; name: string; summary: string } | undefined;
 }
 
 export type InputDelivery = "queued_with_first_message" | "steered" | "woke_worker" | "queued_for_worker";
@@ -68,7 +69,7 @@ const QuoteRefSchema = Type.Object({
 	),
 });
 
-const NoteSchema = Type.String({ description: "Routing background or explicit user constraints only, <= 30 words. No requirements, implementation steps, or acceptance criteria." });
+const NoteSchema = Type.String({ description: "The worker cannot see the main conversation. Use <= 30 words to resolve references (e.g. what ‘it’ means) and add the minimum grounded context needed to understand the quoted request, such as the agent, project/path, or prior decision. No guesses, new requirements, plans, steps, or acceptance criteria." });
 
 function checkNote(note?: string): void {
 	if (countWords(note ?? "") > 30) throw new TaskError("NOTE_TOO_LONG", "备注超过 30 个词");
@@ -85,12 +86,13 @@ function dispatchTool(host: TaskToolHost): ToolDefinition {
 			Type.Array(Type.String(), { description: "paths this task will write; overlap only warns" }),
 		),
 		dependsOn: Type.Optional(Type.Array(Type.String())),
+		roleId: Type.Optional(Type.String({ description: "Optional role worker ID from the current rally-capabilities role list." })),
 	});
 	type Params = Static<typeof schema>;
 	return {
 		name: "task_dispatch",
 		label: "派发任务",
-		description: "Create a task for a worker. quotes are the user message IDs that state the work; the host copies their text verbatim as the requirements. title is at most 40 characters. cwd is an explicit absolute directory. mode is readonly or write; scope lists the paths a write task will change, and overlap with a running task returns a warning without blocking. dependsOn makes the task wait for other tasks. Repeating the same title and quoted messages within 60 seconds returns the existing task. The result is a creation receipt with the approval and queue state, not proof that work ran.",
+		description: "Create a task for a worker. quotes are the user message IDs that state the work; the host copies their text verbatim as the requirements. The worker cannot see the main conversation: quote needed clarifications, and use note (<= 30 words) to resolve references like ‘it’ and add the minimum grounded context (agent, project/path, prior decision). Do not guess or add requirements, plans, steps, or acceptance criteria. title is at most 40 characters. cwd is an explicit absolute directory. mode is readonly or write; scope lists the paths a write task will change, and overlap with a running task returns a warning without blocking. dependsOn makes the task wait for other tasks. When useful, set roleId to one of the profiles in the latest rally-capabilities snapshot; otherwise omit it. Repeating the same title, role, and quoted messages within 60 seconds returns the existing task. The result is a creation receipt with the approval and queue state, not proof that work ran.",
 		parameters: schema,
 		async execute(_toolCallId: string, params: Params) {
 			try {
@@ -99,7 +101,9 @@ function dispatchTool(host: TaskToolHost): ToolDefinition {
 				if (!title) return fail("TITLE_REQUIRED: 标题不能为空");
 				if ([...title].length > 40) return fail("TITLE_TOO_LONG: 标题超过 40 字");
 				if (countWords(params.note ?? "") > 30) return fail("NOTE_TOO_LONG: 备注超过 30 个词");
-				const dispatchKey = JSON.stringify([[...new Set(quotes.map((quote) => quote.messageId))].sort(), title]);
+				const roleId = params.roleId?.trim() || undefined;
+				if (roleId && !host.roleWorker(roleId)) return fail(`ROLE_NOT_FOUND: ${roleId}`);
+				const dispatchKey = JSON.stringify(roleId ? [[...new Set(quotes.map((quote) => quote.messageId))].sort(), title, roleId] : [[...new Set(quotes.map((quote) => quote.messageId))].sort(), title]);
 				const duplicate = host.store.list().find((task) => task.dispatchKey === dispatchKey && Date.now() - task.createdAt >= 0 && Date.now() - task.createdAt < 60000);
 				if (duplicate) return result(JSON.stringify({ ...dispatchState(duplicate), reused: true }), { taskId: duplicate.id, reused: true });
 				if (!params.cwd || !isAbsolute(params.cwd)) return fail("CWD_REQUIRED: router 必须明确指定 worker 的绝对工作目录");
@@ -114,6 +118,7 @@ function dispatchTool(host: TaskToolHost): ToolDefinition {
 				const scope = resolveScope(params.scope, cwd);
 				const task = host.store.create({
 					dispatchKey,
+					roleId,
 					title,
 					quotes,
 					note: params.note?.trim(),
