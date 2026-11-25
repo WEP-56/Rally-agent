@@ -13,7 +13,9 @@ import { Supervisor } from "./supervisor/index.ts";
 import { StateDirectoryLock } from "./supervisor/state-lock.ts";
 import { ApplicationShutdown } from "./application-shutdown.ts";
 import { TaskNotifications } from "./notifications.ts";
-import { APP_ID, applicationIcon, applyWindowBranding, showMainWindow } from "./branding.ts";
+import { applicationId, applicationIcon, applyWindowBranding, showMainWindow } from "./branding.ts";
+
+if (process.platform === "win32") app.setAppUserModelId(applicationId());
 
 const paths = resolveRallyPaths();
 
@@ -109,7 +111,6 @@ async function runSmokeAndExit(): Promise<void> {
 }
 
 function createMainWindow(partition?: string): BrowserWindow {
-	if (process.platform === "win32") app.setAppUserModelId(APP_ID);
 	const dark = nativeTheme.shouldUseDarkColors;
 	// Frameless: the renderer draws the prototype's title bar and window controls (IPC in ipc.ts).
 	const workArea = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;

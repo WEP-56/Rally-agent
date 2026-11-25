@@ -4,6 +4,11 @@ import { app, Menu, Tray, type BrowserWindow } from "electron";
 /** Must match electron-builder.yml so installed shortcuts group with the window. */
 export const APP_ID = "dev.rally.app";
 
+/** Development shortcuts must not claim the installed app's taskbar identity. */
+export function applicationId(): string {
+ return app.isPackaged ? APP_ID : `${APP_ID}.development`;
+}
+
 export function applicationIcon(): string {
  const root = app.isPackaged ? process.resourcesPath : app.getAppPath();
  return process.platform === "win32"
@@ -18,7 +23,7 @@ export function applyWindowBranding(window: BrowserWindow): void {
  window.setIcon(join(root, app.isPackaged ? "icon.png" : "docs/icon.png"));
  if (process.platform === "win32") {
   const command = [process.execPath, ...(!app.isPackaged ? [app.getAppPath()] : [])].map(path => `"${path}"`).join(" ");
-  window.setAppDetails({ appId: APP_ID, appIconPath: applicationIcon(), appIconIndex: 0, relaunchCommand: command, relaunchDisplayName: "Rally" });
+  window.setAppDetails({ appId: applicationId(), appIconPath: applicationIcon(), appIconIndex: 0, relaunchCommand: command, relaunchDisplayName: "Rally" });
  }
 }
 

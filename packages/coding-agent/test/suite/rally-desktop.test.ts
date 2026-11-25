@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { BrowserWindow } from "electron";
 import { createHarness, type Harness } from "./harness.ts";
 import { desktopHost } from "../../../../src/main/desktop-host.ts";
-import { APP_ID, applyWindowBranding, showMainWindow } from "../../../../src/main/branding.ts";
+import { APP_ID, applicationId, applyWindowBranding, showMainWindow } from "../../../../src/main/branding.ts";
 import { DesktopPreferences } from "../../../../src/main/desktop-preferences.ts";
 import { IpcChannel as C } from "../../../../src/shared/ipc.ts";
 
@@ -125,14 +125,16 @@ it("rejects invalid or foreign startup writes and never registers the developmen
   expect(native.setLogin).not.toHaveBeenCalled();
   expect(native.getLogin).not.toHaveBeenCalled();
 });
-it.each([true, false])("uses Rally's window bitmap and matching taskbar identity (packaged=%s)", packaged => {
+it.each([true, false])("keeps development and installed taskbar identities separate (packaged=%s)", packaged => {
   native.packaged = packaged; native.appPath = join("Development folder", "Rally");
   const window = { setIcon: vi.fn(), setAppDetails: vi.fn() };
   applyWindowBranding(window as unknown as BrowserWindow);
   const root = packaged ? process.resourcesPath : native.appPath;
+  const expectedId = packaged ? "dev.rally.app" : "dev.rally.app.development";
+  expect(applicationId()).toBe(expectedId);
   expect(window.setIcon).toHaveBeenCalledWith(join(root, packaged ? "icon.png" : "docs/icon.png"));
   expect(window.setAppDetails).toHaveBeenCalledWith({
-    appId: APP_ID, appIconPath: join(root, packaged ? "icon.ico" : "build/icon.ico"), appIconIndex: 0,
+    appId: expectedId, appIconPath: join(root, packaged ? "icon.ico" : "build/icon.ico"), appIconIndex: 0,
     relaunchCommand: `"${process.execPath}"${packaged ? "" : ` "${native.appPath}"`}`, relaunchDisplayName: "Rally",
   });
 });
