@@ -4,6 +4,7 @@ import type { QqMailState } from "../../../shared/connections";
 import { cn } from "../utils/cn";
 import { timeAgo } from "./status";
 import { Button, Input } from "./ui";
+import { ConnectorTools } from "./ConnectorTools";
 
 const label = { disconnected: "未连接", checking: "验证中", connected: "已连接", error: "连接异常" } as const;
 
@@ -62,7 +63,7 @@ export function QqMailCard({ visible }: { visible: boolean }) {
           <Button type="submit" size="sm" variant="primary" disabled={pending || !address.trim() || !authorizationCode.trim()}>验证并连接</Button>
         </div>
       </form> : <div className="space-y-3">
-        <div><div className="font-medium">Worker 邮箱工具</div><p className="mt-1 leading-relaxed text-muted">读取和检索收件箱、保存附件。发送或回复前，需要你在桌面确认。</p></div>
+        <div><div className="font-medium">Worker 邮箱工具</div><p className="mt-1 leading-relaxed text-muted">读取和检索收件箱、保存附件、发送或回复邮件。发送默认需要你确认，可在下方调整权限。新建或重新启动的 Worker 会加载工具。</p></div>
         <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
           <span className="mr-auto text-[11px] text-faint">{state?.checkedAt ? `最近验证 ${timeAgo(state.checkedAt)}` : "已保存配置，使用时连接"}</span>
           <Button size="sm" variant="ghost" disabled={pending} onClick={() => { setAddress(state?.address ?? ""); setEditing(true); setError(""); }}>更换凭据</Button>
@@ -70,6 +71,7 @@ export function QqMailCard({ visible }: { visible: boolean }) {
           <Button size="sm" variant="danger" disabled={pending} onClick={() => { setAddress(""); setCode(""); void action(api.disconnect); }}>断开连接</Button>
         </div>
       </div>}
+      <ConnectorTools connector="qqmail" visible={visible} available={configured} />
       {(error || state?.error) && <p role="alert" className="mt-3 text-danger">{error || state?.error}</p>}
     </div>}
   </div>;

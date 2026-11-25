@@ -33,6 +33,7 @@ function generateFireworksModels(
 			type: "chat",
 			name: id,
 			modalities: { input: ["text"], output: ["text"] },
+			limit: { context: 131072, output: 32768 },
 			capabilities: {
 				tools: { supported: true },
 				reasoning: {
@@ -133,6 +134,25 @@ describe("Fireworks model generation", () => {
 			expect(model.compat?.forceAdaptiveThinking).toBeUndefined();
 			expect(model.thinkingLevelMap).toBeUndefined();
 		}
+	});
+
+	it("keeps toggle-only Messages models without a verified fallback on budget-based thinking", async () => {
+		// Exercise the real catalog mapping with a fixed source, independent of upstream removals.
+		const models = generateFireworksModels({ "toggle-only": [{ type: "toggle" }] });
+		const model = models["accounts/fireworks/models/toggle-only"];
+		if (!hasApi(model, "anthropic-messages")) throw new Error("Expected Messages model");
+		expect(model.compat?.forceAdaptiveThinking).toBeUndefined();
+		let payload: Record<string, unknown> | undefined;
+		await streamSimple(model, normalizeContext({ messages: [{ role: "user", content: "test", timestamp: 0 }] }), {
+			apiKey: "test-fireworks-key",
+			reasoning: "high",
+			onPayload: (value) => {
+				payload = value as Record<string, unknown>;
+				throw new Error("payload captured");
+			},
+		}).result();
+		expect(payload?.thinking).toEqual({ type: "enabled", budget_tokens: 16384, display: "summarized" });
+		expect(payload?.output_config).toBeUndefined();
 	});
 
 	// Regression for #9323: full hardcoded maps must not override updated catalog efforts.

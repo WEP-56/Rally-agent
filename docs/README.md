@@ -6,11 +6,12 @@
 | --- | --- |
 | [HANDOFF](HANDOFF.md) | 当前交接状态、下一会话任务与执行约定 |
 | [开发实施 TODO](开发实施TODO.md) | 实施状态与后续工作 |
+| [定时任务](定时任务.md) | 时间规则、运行时段、修改计划与中断恢复行为 |
 | [发布指南](发布指南.md) | 构建、签名与发布 |
 | [0.4.1 发布说明](发布说明-0.4.1.md) | 安装包体积修复、外部执行器按需安装与升级说明 |
 | [0.4.0 发布说明](发布说明-0.4.0.md) | 角色 Workers、自我管理 Skill 及此前修复 |
 | [其它提供商](其它提供商.md) | 图像生成与网络搜索配置 |
-| [Connector](Connector/README.md) | 飞书、QQ 机器人、QQ 邮箱 |
+| [Connector](Connector/README.md) | 连接器工具与权限统一约定；飞书、QQ 机器人、QQ 邮箱 |
 | [Prompt](Prompt/) | 当前系统提示词、教练提示词与[工具描述分类](Prompt/tools-Description/rally-tools.md) |
 | [产品问答记录](superagent/00-问答记录.md) | 产品决策依据；以最新追加为准 |
 

@@ -1,6 +1,18 @@
-import type { Quote, TaskMode } from "./task.ts";
+import type { Quote, TaskDisplayStatus, TaskMode } from "./task.ts";
 
-export type ScheduleTiming = { kind: "once"; at: number } | { kind: "interval"; minutes: number } | { kind: "daily"; time: string; timezone: string };
+/** Local window, start inclusive / end exclusive; weekdays belong to its opening day. */
+export interface ScheduleWindow {
+	start: string;
+	end: string;
+	timezone: string;
+	/** ISO weekdays: 1 = Monday, 7 = Sunday. Omitted means every day. */
+	weekdays?: number[];
+}
+
+export type ScheduleTiming =
+	| { kind: "once"; at: number }
+	| { kind: "interval"; minutes: number; window?: ScheduleWindow }
+	| { kind: "daily"; time: string; timezone: string; weekdays?: number[] };
 export interface ScheduledTask {
 	id: string;
 	title: string;
@@ -13,6 +25,8 @@ export interface ScheduledTask {
 	lastTaskId?: string;
 	/** Derived from the task store; removing a past worker does not remove its plan. */
 	lastTaskDeleted?: boolean;
+	/** Derived on demand, never injected into the model's scheduling context. */
+	waitingFor?: { taskId: string; status: TaskDisplayStatus; statusText: string };
 	lastAt?: number;
 	error?: string;
 }

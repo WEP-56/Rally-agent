@@ -1,7 +1,4 @@
 import { Client, LoggerLevel } from "@larksuiteoapi/node-sdk";
-import { docxV1DocumentRawContent } from "@larksuiteoapi/lark-mcp/dist/mcp-tool/tools/en/gen-tools/zod/docx_v1.js";
-import { wikiV2SpaceGetNode } from "@larksuiteoapi/lark-mcp/dist/mcp-tool/tools/en/gen-tools/zod/wiki_v2.js";
-import { bitableV1AppTableRecordSearch } from "@larksuiteoapi/lark-mcp/dist/mcp-tool/tools/en/gen-tools/zod/bitable_v1.js";
 import { larkOapiHandler } from "@larksuiteoapi/lark-mcp/dist/mcp-tool/utils/handler.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -9,12 +6,12 @@ import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import type { McpServerEntry } from "@rally/coding-agent";
 import type { JsonRpcMessage, McpTransport } from "@rally/mcp";
 import type { FeishuConnection } from "./feishu-connection.ts";
+import { FEISHU_SERVER_NAME, FEISHU_TOOLS } from "./connector-tools.ts";
 
 // Import the pinned vendor schemas and API handler directly. Its CLI entry parses argv
 // and initializes a separate OAuth/keytar store, while Rally only uses app identity.
-const TOOLS = [docxV1DocumentRawContent, wikiV2SpaceGetNode, bitableV1AppTableRecordSearch];
 export const FEISHU_MCP_ENTRY: McpServerEntry = {
-	name: "rally_feishu", source: "rally:feishu", scope: "extension",
+	name: FEISHU_SERVER_NAME, source: "rally:feishu", scope: "extension",
 	config: { command: "rally:feishu", description: "Feishu: read shared documents and wiki nodes, search records in shared Bitable tables (app identity)." },
 };
 
@@ -38,7 +35,7 @@ export function feishuMcpTransport(connection: FeishuConnection): McpTransport {
 			unsubscribe = release;
 			try {
 				const lark = new Client({ ...credentials, loggerLevel: LoggerLevel.fatal });
-				for (const tool of TOOLS) {
+				for (const { tool } of FEISHU_TOOLS) {
 					const { useUAT: _userToken, ...inputSchema } = tool.schema;
 					server.registerTool(tool.name, { description: tool.description, inputSchema, annotations: { readOnlyHint: true } }, args =>
 						larkOapiHandler(lark, { ...args, useUAT: false }, { tool }));

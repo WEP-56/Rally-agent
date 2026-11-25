@@ -1,12 +1,19 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxText, fauxToolCall, getCurrentTools, type TranscriptContext } from "@rally/ai";
 import { afterEach, expect, it, vi } from "vitest";
+import type { ExtensionToolContext } from "@rally/coding-agent";
 import { ensureRallyDirs, resolveRallyPaths } from "../../../../src/main/paths.ts";
+import { McpStore } from "../../../../src/main/mcp-store.ts";
 import { QqMailConnection } from "../../../../src/main/qqmail-connection.ts";
 import type { QqMailTransport } from "../../../../src/main/qqmail-transport.ts";
 import { Supervisor } from "../../../../src/main/supervisor/index.ts";
+import { AuditLog } from "../../../../src/main/supervisor/audit.ts";
+import { EventLog } from "../../../../src/main/supervisor/event-log.ts";
+import { GateService } from "../../../../src/main/supervisor/gates.ts";
+import { TaskStore } from "../../../../src/main/supervisor/task-store.ts";
+import { createQqMailTools } from "../../../../src/main/supervisor/qqmail-tools.ts";
 import { rallyState } from "../../../../src/main/supervisor/rally-state.ts";
 import { readTask } from "../../../../src/main/supervisor/task-read.ts";
 import { defaultModel } from "../../../../src/shared/models.ts";
@@ -38,7 +45,9 @@ function fixtureTransport() {
 
 const harnesses: Harness[] = [];
 const supervisors: Supervisor[] = [];
+const mailFixtures: { connection: QqMailConnection; gates: GateService }[] = [];
 afterEach(async () => {
+	for (const { connection, gates } of mailFixtures.splice(0)) { connection.dispose(); gates.dispose(); }
 	try { await Promise.all(supervisors.splice(0).map(supervisor => supervisor.dispose())); }
 	finally { for (const harness of harnesses.splice(0)) harness.cleanup(); vi.unstubAllEnvs(); }
 }, 15000);
@@ -122,6 +131,84 @@ it.each(["allow", "deny", "disconnect"] as const)("enforces the desktop mail app
 		to: draft.to, cc: [], subject: draft.subject, text: draft.text, inReplyTo: "<fixture@example.invalid>", attachments: [{ filename: "reply.txt", content }],
 	}, expect.any(AbortSignal));
 	else expect(transport.send).not.toHaveBeenCalled();
+});
+
+async function isolatedTools() {
+	const harness = await createHarness(); harnesses.push(harness);
+	const paths = resolveRallyPaths(harness.tempDir); ensureRallyDirs(paths);
+	const events = new EventLog(paths.eventsFile);
+	const store = new TaskStore(events, paths.workspaceDir, () => {});
+	const audit = new AuditLog(paths.auditFile, events);
+	const gates = new GateService({ store, audit, events, quote: () => null, requested: () => {}, notice: () => {} });
+	const transport = fixtureTransport();
+	const connection = new QqMailConnection(paths.agentDir, vault, transport);
+	mailFixtures.push({ connection, gates });
+	await connection.save(credentials);
+	const task = store.create({ title: "邮箱权限", cwd: paths.workspaceDir, quotes: [], scope: [], dependsOn: [], mode: "readonly", autoApprove: true }).task;
+	const run = store.startRun(task.id, "dispatch", "faux");
+	mkdirSync(task.outputDir, { recursive: true });
+	const permissions = new McpStore(paths.agentDir);
+	const tools = createQqMailTools(connection, { task, run, gates, audit, store, permissions });
+	expect(permissions.connectorTools("qqmail").map(tool => tool.name).sort()).toEqual(tools.map(tool => tool.name).sort());
+	const invoke = (name: string, input: Record<string, unknown>, id: string) => {
+		const tool = tools.find(tool => tool.name === name);
+		if (!tool) throw new Error(`Missing ${name}`);
+		return tool.execute(id, input, undefined, undefined, {} as ExtensionToolContext);
+	};
+	return { paths, events, task, gates, permissions, connection, transport, invoke };
+}
+
+it.each(["qqmail_search", "qqmail_read", "qqmail_save_attachment"])("enforces live permission changes and disconnects for %s", async name => {
+	const { task, gates, permissions, connection, transport, invoke, events } = await isolatedTools();
+	const input = name === "qqmail_search" ? { subject: "fixture" } : name === "qqmail_read" ? { ref } : { ref, index: 1 };
+	permissions.setConnectorTier("qqmail", name, "irreversible");
+	const waiting = invoke(name, input, "denied");
+	await vi.waitFor(() => expect(task.gates?.[0]?.tool).toBe(name));
+	expect(transport.search).not.toHaveBeenCalled(); expect(transport.read).not.toHaveBeenCalled();
+	permissions.setConnectorTier("qqmail", name, "reversible");
+	const gate = task.gates![0];
+	expect(gate.decision).toBeUndefined();
+	gates.escalate(task.id, gate.id); gates.decide(gate.id, "deny", "user", [], "拒绝本次操作");
+	await expect(waiting).rejects.toThrow("GATE_DENIED");
+	expect(transport.search).not.toHaveBeenCalled(); expect(transport.read).not.toHaveBeenCalled();
+	permissions.setConnectorTier("qqmail", name, "external");
+	await invoke(name, input, "external");
+	expect(events.ofKind("audit_appended").some(event => event.data.action === name && event.data.kind === "external")).toBe(true);
+	expect(task.lastExternalAction).toBeDefined();
+	expect(task.gates).toHaveLength(1);
+	permissions.setConnectorTier("qqmail", name, "irreversible");
+	const revoked = invoke(name, input, "revoked");
+	await vi.waitFor(() => expect(task.gates).toHaveLength(2));
+	connection.disconnect();
+	await expect(revoked).rejects.toThrow();
+	expect(transport.search.mock.calls.length + transport.read.mock.calls.length).toBe(1);
+});
+
+it.each(["external", "reversible"] as const)("sends with the saved %s tier and reinstates approval on the next call", async tier => {
+	const { task, gates, permissions, transport, invoke, events } = await isolatedTools();
+	writeFileSync(join(task.outputDir, "reply.txt"), content);
+	permissions.setConnectorTier("qqmail", "qqmail_send", tier);
+	await invoke("qqmail_send", draft, "without-gate");
+	expect(transport.send).toHaveBeenCalledOnce();
+	expect(task.gates ?? []).toHaveLength(0);
+	const audits = events.ofKind("audit_appended").filter(event => event.data.action === "qqmail_send");
+	expect(audits.map(event => event.data.result)).toEqual(["attempt", "submitted"]);
+	for (const event of audits) { expect(event.data.tier).toBe(tier); expect(event.data.gateActor).toBeUndefined(); }
+	permissions.setConnectorTier("qqmail", "qqmail_send", "irreversible");
+	const waiting = invoke("qqmail_send", draft, "with-gate");
+	await vi.waitFor(() => expect(task.gates?.[0]?.userOnly).toBe(true));
+	permissions.setConnectorTier("qqmail", "qqmail_send", tier);
+	expect(transport.send).toHaveBeenCalledOnce();
+	gates.decide(task.gates![0].id, "deny", "user", [], "拒绝本次发送");
+	await expect(waiting).rejects.toThrow("GATE_DENIED");
+	expect(transport.send).toHaveBeenCalledOnce();
+});
+
+it("rejects malformed saved permissions instead of bypassing send approval", async () => {
+	const { paths, transport, invoke } = await isolatedTools();
+	writeFileSync(join(paths.agentDir, "settings.json"), JSON.stringify({ mcpTiers: { qqmail_send: ["irreversible"] } }));
+	await expect(invoke("qqmail_send", { to: [destination], subject: "fixture", text: "fixture" }, "invalid-permission")).rejects.toThrow("MCP_RISK_CONFIG_INVALID");
+	expect(transport.send).not.toHaveBeenCalled();
 });
 
 it("persists only verified credentials and revokes a Worker lease upon account change", async () => {

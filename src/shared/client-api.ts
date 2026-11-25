@@ -48,6 +48,10 @@ export function createApi(ipcRenderer: ClientTransport): RallyApi {
 				ipcRenderer.on(IpcEvent.resourceSave, handler); return () => ipcRenderer.off(IpcEvent.resourceSave, handler);
 			},
 		},
+		connectorTools: {
+			getState: connector => ipcRenderer.invoke(IpcChannel.connectorToolsState, connector),
+			setTier: (connector, name, tier) => ipcRenderer.invoke(IpcChannel.connectorToolsTier, connector, name, tier),
+		},
 		qqMail: {
 			getState: () => ipcRenderer.invoke(IpcChannel.qqMailState),
 			save: (credentials) => ipcRenderer.invoke(IpcChannel.qqMailSave, credentials),

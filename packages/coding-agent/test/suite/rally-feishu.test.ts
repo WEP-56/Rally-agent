@@ -1,10 +1,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { LarkChannel, NormalizedMessage } from "@larksuiteoapi/node-sdk";
-import { McpClient } from "@rally/mcp";
+import { createMcpToolName, McpClient } from "@rally/mcp";
 import { afterEach, expect, it, vi } from "vitest";
 import { FeishuConnection } from "../../../../src/main/feishu-connection.ts";
 import { feishuMcpTransport } from "../../../../src/main/feishu-mcp.ts";
+import { McpStore } from "../../../../src/main/mcp-store.ts";
 import { createHarness, type Harness } from "./harness.ts";
 
 const credentials = { appId: "cli_fixture1", appSecret: "secret_fixture1" };
@@ -76,7 +77,7 @@ it("pairs only a private text sender, routes and replies in the original Feishu 
 });
 
 it("uses the actual vendor MCP server with a read-only allowlist, then closes it on revocation", async () => {
-	const { connection, emit } = await fixture();
+	const { connection, emit, home } = await fixture();
 	const client = new McpClient({ name: "rally-test", version: "1.0.0" });
 	await expect(client.connect(feishuMcpTransport(connection))).rejects.toThrow("飞书工具未授权");
 	const { pairing } = connection.pair();
@@ -85,6 +86,9 @@ it("uses the actual vendor MCP server with a read-only allowlist, then closes it
 	const worker = new McpClient({ name: "rally-worker-test", version: "1.0.0" });
 	try {
 		await worker.connect(feishuMcpTransport(connection));
+		expect(new McpStore(home).connectorTools("feishu").map(tool => tool.name).sort()).toEqual(
+			(await worker.listTools()).map(tool => createMcpToolName("rally_feishu", tool.name)).sort(),
+		);
 		expect((await worker.listTools()).map(tool => tool.name).sort()).toEqual([
 			"bitable.v1.appTableRecord.search", "docx.v1.document.rawContent", "wiki.v2.space.getNode",
 		]);

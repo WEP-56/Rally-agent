@@ -356,6 +356,38 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		await vi.waitFor(() => expect(supervisor.store.get(task.id)?.ended?.outcome).toBe("done"), { timeout: 10000 });
 		expect(due.list()[0]).toMatchObject({ enabled: false, lastTaskId: task.id }); due.dispose();
 	});
+	it("creates and edits a windowed recurring plan through the production router tools", async () => {
+		const { harness, paths, supervisor } = await setup();
+		harness.setResponses([
+			context => {
+				const id = /User message (#\d+)/.exec(lastUser(context))![1];
+				return fauxAssistantMessage(fauxToolCall("schedule_create", {
+					title: "定时检查笔记", cwd: paths.workspaceDir, mode: "readonly", quotes: [{ id }],
+					timing: { kind: "interval", minutes: 120, window: { start: "09:00", end: "21:00", timezone: "Asia/Shanghai", weekdays: [1, 2, 3, 4, 5] } },
+				}), { stopReason: "toolUse" });
+			}, fauxAssistantMessage("时段计划已创建"),
+		]);
+		await supervisor.main.send("每周一到周五，上海时间 9 点到 21 点每两小时检查一次笔记");
+		await vi.waitFor(() => expect(supervisor.main.state().messages.some(m => m.text === "时段计划已创建") && !supervisor.main.isBusy()).toBe(true));
+		const plan = supervisor.schedules.list()[0];
+		expect(plan.timing).toMatchObject({ kind: "interval", minutes: 120, window: { start: "09:00", end: "21:00", weekdays: [1, 2, 3, 4, 5] } });
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("schedule_list", {}), { stopReason: "toolUse" }),
+			context => {
+				const id = /User message (#\d+)/.exec(lastUser(context))![1];
+				return fauxAssistantMessage(fauxToolCall("schedule_update", {
+					id: plan.id, timing: { kind: "daily", time: "09:00", timezone: "Asia/Shanghai", weekdays: [1, 3, 5] }, quotes: [{ id }],
+				}), { stopReason: "toolUse" });
+			}, fauxAssistantMessage("原计划时间已修改"),
+		]);
+		const change = "改成每周一三五上海时间上午九点一次，还是检查笔记";
+		await supervisor.main.send(change);
+		await vi.waitFor(() => expect(supervisor.main.state().messages.some(m => m.text === "原计划时间已修改") && !supervisor.main.isBusy()).toBe(true));
+		expect(supervisor.schedules.list()).toHaveLength(1);
+		expect(supervisor.schedules.list()[0]).toMatchObject({ id: plan.id, enabled: true, timing: { kind: "daily", time: "09:00", weekdays: [1, 3, 5] } });
+		expect(supervisor.schedules.list()[0].quotes.map(quote => quote.text)).toEqual([plan.quotes[0].text, change]);
+		expect(supervisor.store.list()).toHaveLength(0);
+	});
 	it("owns the state directory before recovery and until sessions and snapshot finish closing", async () => {
 		const { paths, supervisor } = await setup();
 		const open = () => new Supervisor(paths, { emitChat: () => {}, emitTask: () => {} });

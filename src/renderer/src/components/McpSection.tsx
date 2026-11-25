@@ -64,6 +64,7 @@ export function McpSection() {
 			{state?.servers.length === 0 && <p className="p-4 text-xs text-faint">尚未配置 MCP 服务器</p>}
 		</fieldset>}
 		<div className="mt-6 text-sm font-medium">工具风险档</div>
+		<p className="mt-1 text-xs text-muted">飞书、QQ 邮箱等连接器提供的工具，请在「连接」页对应应用的「管理」中调整权限。</p>
 		<p className="mb-3 mt-1 text-xs leading-relaxed text-muted">列表来自任务曾发现的工具及已保存的设置，不表示当前在线。默认可逆；有对外代价的调用会执行并提示、留审计；不可逆调用会等待确认。保存后从下一次调用起生效，已经发出的确认仍需处理。</p>
 		<fieldset disabled={busy || dirty || editor !== null} className="space-y-2">
 			{state?.tools.map((tool) => <div key={tool.name} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-sunken px-3 py-2">

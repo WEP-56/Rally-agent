@@ -171,7 +171,7 @@ export class Supervisor {
 				quote: (ref) => this.main.quote(ref), requested: () => this.relay.captureSources(),
 				notice: () => this.relay.captureSources() });
 			this.schedules = new ScheduledTasks(this.events, this.store, () => this.autoApprove, () => this.scheduler.tick());
-			const capabilities = async () => (await catalog.context()) + this.roleWorkers.context() + (this.feishu.toolsEnabled() ? "\nFeishu worker MCP (rally_feishu): read shared documents and wiki nodes, search shared Bitable records. Only workers may call it." : "") + (this.qqMail.available() ? "\nQQ Mail worker tools: search/read the inbox, save attachments, and compose send/reply for explicit desktop approval. Only workers may call them." : "");
+			const capabilities = async () => (await catalog.context()) + this.roleWorkers.context() + (this.feishu.toolsEnabled() ? "\nFeishu worker MCP (rally_feishu): read shared documents and wiki nodes, search shared Bitable records. Only workers may call it." : "") + (this.qqMail.available() ? "\nQQ Mail worker tools: search/read the inbox, save attachments, and send/reply. Rally enforces per-tool permissions configured in Connections; sending requires user confirmation by default. Only workers may call them." : "");
 			this.main = new MainAgent(paths, this.events, options.emitChat, {
 				resources: () => this.resources,
 				models: this.models,

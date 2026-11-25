@@ -28,6 +28,7 @@ import { WORKER_SYSTEM_PROMPT } from "../prompts.ts";
 import type { ModelStore } from "../model-store.ts";
 import { closeRoleSession, createRoleSession } from "./session.ts";
 import { createQqMailTools } from "./qqmail-tools.ts";
+import { McpStore } from "../mcp-store.ts";
 import type { QqMailConnection } from "../qqmail-connection.ts";
 import type { FeishuConnection } from "../feishu-connection.ts";
 import { workerMcpExtensions } from "./mcp.ts";
@@ -232,7 +233,7 @@ export class WorkerManager {
 			tools: [],
 			customTools: [...this.options.createTools(task), ...buildTools(task, versions, (path) => this.assertWritable(task, run, path), this.options.processes),
 				...(this.options.agentBrowser ? createBrowserTools(this.options.agentBrowser, task, run, this.options.gates, browserFiles) : []),
-				...createQqMailTools(this.options.qqMail, { task, run, gates: this.options.gates, audit: this.options.audit, store }),
+				...createQqMailTools(this.options.qqMail, { task, run, gates: this.options.gates, audit: this.options.audit, store, permissions: new McpStore(paths.agentDir) }),
 				...createJobTools(this.options.jobs, task, run),
 				...createServiceTools(this.options.services, task, run),
 				headless(createFileDeleteTool({ task, run, store, versions, gates: this.options.gates, isActive: () => !this.disposed && !task.ended && !run.endedAt })),

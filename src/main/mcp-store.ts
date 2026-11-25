@@ -2,6 +2,8 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadMcpConfig, validateMcpServerConfig, type LoadedMcpConfig } from "@rally/coding-agent";
 import type { McpConfigurationState, McpExposure, McpRiskTier } from "../shared/mcp.ts";
+import type { ConnectorId, ConnectorToolSettings } from "../shared/connections.ts";
+import { CONNECTOR_TOOLS, connectorTool } from "./connector-tools.ts";
 import { projectSettings } from "./project-trust.ts";
 
 /** Global configuration editor. Reading or saving never starts a transport. */
@@ -17,7 +19,9 @@ export class McpStore {
 		try { tiers = this.tiers(); } catch (error) { errors.push(String(error)); }
 		let names: string[] = [];
 		try { names = this.discoveredTools(); } catch (error) { errors.push(String(error)); }
-		return { json, errors, tools: [...new Set([...names, ...Object.keys(tiers)])].sort().map((name) => ({ name, tier: tiers[name] ?? "reversible" })), servers: loaded.servers.map(({ name, config }) => ({ name,
+		const tools = [...new Set([...names, ...Object.keys(tiers)])].filter(name => !connectorTool(name)).sort()
+			.map(name => ({ name, tier: tiers[name] ?? "reversible" }));
+		return { json, errors, tools, servers: loaded.servers.map(({ name, config }) => ({ name,
 			enabled: config.enabled !== false, transport: "url" in config ? "http" : "stdio",
 			address: "url" in config ? config.url : [config.command, ...(config.args ?? [])].join(" "),
 			exposure: config.exposure ?? "direct", toolExposure: { ...config.toolExposure },
@@ -63,16 +67,30 @@ export class McpStore {
 		}
 		return this.save(JSON.stringify(parsed));
 	}
-	tier(name: string): McpRiskTier { return this.tiers()[name] ?? "reversible"; }
+	connectorTools(connector: ConnectorId): ConnectorToolSettings[] {
+		if (typeof connector !== "string" || !Object.hasOwn(CONNECTOR_TOOLS, connector)) throw new Error("无效的连接器");
+		const tiers = this.tiers();
+		return CONNECTOR_TOOLS[connector].map(({ name, label, defaultTier }) => ({ name, label, tier: tiers[name] ?? defaultTier }));
+	}
+	setConnectorTier(connector: ConnectorId, name: string, tier: McpRiskTier): ConnectorToolSettings[] {
+		if (!this.connectorTools(connector).some(tool => tool.name === name)) throw new Error("工具不属于此连接器");
+		this.writeTier(name, tier);
+		return this.connectorTools(connector);
+	}
+	tier(name: string): McpRiskTier { return this.tiers()[name] ?? connectorTool(name)?.defaultTier ?? "reversible"; }
 	setTier(name: string, tier: McpRiskTier): McpConfigurationState {
 		if (!toolName(name) || !["reversible", "external", "irreversible"].includes(tier)) throw new Error("无效的 MCP 工具或风险档");
+		this.writeTier(name, tier);
+		return this.state();
+	}
+	private writeTier(name: string, tier: McpRiskTier): void {
+		if (!permissionToolName(name) || !["reversible", "external", "irreversible"].includes(tier)) throw new Error("无效的工具或风险档");
 		const settings = this.settings();
 		const tiers = this.tiers();
 		tiers[name] = tier;
 		const file = join(this.agentDir, "settings.json");
 		writeFileSync(`${file}.tmp`, `${JSON.stringify({ ...settings, mcpTiers: tiers }, null, 2)}\n`, "utf8");
 		renameSync(`${file}.tmp`, file);
-		return this.state();
 	}
 	/** Cache names actually declared by MCP, never fabricate connected state or tool counts. */
 	recordTool(name: string): void {
@@ -99,7 +117,7 @@ export class McpStore {
 	private tiers(): Record<string, McpRiskTier> {
 		const tiers = this.settings().mcpTiers;
 		if (tiers === undefined) return {};
-		if (!record(tiers) || !Object.entries(tiers).every(([key, value]) => toolName(key) && ["reversible", "external", "irreversible"].includes(String(value)))) throw new Error("MCP_RISK_CONFIG_INVALID: mcpTiers 必须按工具名配置 reversible、external 或 irreversible");
+		if (!record(tiers) || !Object.entries(tiers).every(([key, value]) => permissionToolName(key) && typeof value === "string" && ["reversible", "external", "irreversible"].includes(value))) throw new Error("MCP_RISK_CONFIG_INVALID: mcpTiers 必须按工具名配置 reversible、external 或 irreversible");
 		return tiers as Record<string, McpRiskTier>;
 	}
 	save(json: string): McpConfigurationState {
@@ -141,4 +159,8 @@ function record(value: unknown): value is Record<string, unknown> {
 
 function toolName(value: unknown): value is string {
 	return typeof value === "string" && /^mcp__[a-zA-Z0-9_]+__[a-zA-Z0-9_]+$/.test(value);
+}
+
+function permissionToolName(value: unknown): value is string {
+	return typeof value === "string" && (toolName(value) || connectorTool(value) !== undefined);
 }

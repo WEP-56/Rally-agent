@@ -16,7 +16,7 @@
 
 - 当前发布 tag `v0.4.0` 指向 `3a07bc9`；CI `45559067156` 完成三平台构建。`4d957ec` 修正了 shutdown 测试的 Electron app.getAppPath 替身。旧 tag 没有移动。
 - 0.4.1 外部执行器定向测试 11 项通过，覆盖路径发现、npm 安装、按需原生依赖、配置错误、缺失时不安装，以及真实子进程的离线 ACP 会话。角色/Skill 相关筛选通过，Skill 格式校验通过。
-- 主进程和渲染进程类型检查通过。根 `npm run typecheck` 仍只有 `packages/ai/test/fireworks-models.test.ts` 与 `anthropic-empty-thinking-signature-compat.test.ts` 两个文件的 9 个已知模型数据错误。
+- 2026-11-25：两个模型测试文件的 9 处错误已修复，根 `npm run typecheck` 全部通过。原因是测试引用了当前目录中已不存在的 Fireworks 模型；通用兼容性改为遍历当前 Messages 模型，toggle-only 分支使用已有生成器的固定上游样本。相关 79 项离线测试通过，未改模型生成物。
 - 发布检查新增 lockfile 与 Windows/Linux 实际目录验证，阻止外部 adapter、SDK 运行时与原生 CLI 重新混入基础包。真实付费模型调用和界面视觉没有作为已验收项。
 - 本地 `.artifacts/external-agent-smoke/` 用于临时安装无原生依赖的 adapter，以隔离配置验证打包后的 Electron Node 启动 adapter、复用本机 CLI；原生 Claude 2.1.332 / Codex 0.167.0 的 --version 通过，没有真实推理或读取用户认证。该临时目录清理被自动审批拒绝，只返回 `blocked by policy`，仍保留且不会进入发布包。下载的 `.artifacts/release-0.4.1/SHA256SUMS` 是核验记录。
 

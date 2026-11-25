@@ -21,6 +21,7 @@ Above all, be thorough in producing high-quality, correct code that completely f
 
 - 界面的样子来自 `example/rally-ai-agent-ui-design`，已搬到 `src/renderer/src`。功能和字段按问答记录定，不从原型反推。
 - 用户在意这套设计：改界面时保持原型的视觉风格和 token，不要另起一套。
+- 连接器提供的所有工具（无论是否通过 MCP 实现）统一在「连接」页对应连接器内展示和设置权限；MCP 页管理用户配置的 MCP 服务。新增连接器工具时同步登记工具清单、默认风险档并接入执行时校验，不能只有界面配置。具体约定见 [Connector](docs/Connector/README.md)。
 
 ### 代码
 
@@ -39,7 +40,7 @@ Above all, be thorough in producing high-quality, correct code that completely f
 ### 检查
 
 - 视觉验证默认由用户负责，以提高开发效率；除非用户明确要求，不主动启动截图、浏览器或 Electron 视觉验收。开发侧仍执行类型检查、构建和必要的功能测试，交付时如实标明视觉待用户验收，不以此阻塞开发。
-- 改代码后跑 `npm run typecheck`。已知 `packages/ai/test` 的 `fireworks-models` 和 `anthropic-empty-thinking-signature-compat` 会报错：测试里写死的模型名和最新拉取的模型数据对不上。
+- 改代码后跑 `npm run typecheck`。模型目录更新导致测试失效时，核对测试依赖的模型是否仍存在；通用兼容性遍历当前目录，特定能力分支使用固定上游样本，不手改生成物或用类型断言掩盖错误。
 - **不要跑全量 vitest**：e2e 测试检测到密钥环境变量会真实调用 API。在包目录下按单个文件跑：`node ../../node_modules/vitest/dist/cli.js --run test/xxx.test.ts`；`packages/tui` 用 `node --test test/xxx.test.ts`。
 - `packages/coding-agent/test/suite/` 用 `harness.ts` 加 faux provider，不用真实 API 和密钥。
 

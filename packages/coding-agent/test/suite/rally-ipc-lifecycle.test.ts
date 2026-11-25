@@ -99,6 +99,21 @@ describe("Rally IPC shutdown boundary (no Electron UI)", () => {
 		expect(supervisor.events.ofKind("schedule_changed").at(-1)?.data.source).toEqual({ actor: "user" });
 		expect(await update(event, plan.id, null)).toEqual([]);
 	});
+	it("lists and edits connector permissions through owned-frame IPC without a connection", async () => {
+		const { paths, supervisor } = await setup(); stops.push(registerIpc(paths, supervisor));
+		const sender = { mainFrame: {} }; transport.owner.mockReturnValue({ webContents: sender, isDestroyed: () => false });
+		const event = { sender, senderFrame: sender.mainFrame };
+		const list = transport.handlers.get(IpcChannel.connectorToolsState)!;
+		const set = transport.handlers.get(IpcChannel.connectorToolsTier)!;
+		await expect(list({ sender, senderFrame: {} }, "qqmail")).rejects.toThrow("BROWSER_NOT_ALLOWED");
+		await expect(set({ sender, senderFrame: {} }, "qqmail", "qqmail_send", "external")).rejects.toThrow("BROWSER_NOT_ALLOWED");
+		expect(await list(event, "qqmail")).toEqual(expect.arrayContaining([expect.objectContaining({ name: "qqmail_send", tier: "irreversible" })]));
+		await expect(list(event, "__proto__")).rejects.toThrow("无效的连接器");
+		await expect(set(event, "feishu", "qqmail_send", "reversible")).rejects.toThrow("工具不属于此连接器");
+		expect(await set(event, "qqmail", "qqmail_send", "external")).toEqual(expect.arrayContaining([expect.objectContaining({ name: "qqmail_send", tier: "external" })]));
+		expect(new McpStore(paths.agentDir).tier("qqmail_send")).toBe("external");
+		expect(supervisor.qqMail.available()).toBe(false);
+	});
 	it("saves MCP search disclosure through owned-frame IPC without starting a connection", async () => {
 		const { paths, supervisor } = await setup();
 		const mcp = new McpStore(paths.agentDir); mcp.save(JSON.stringify({ mcpServers: { fixture: { command: "never-execute" } } }));

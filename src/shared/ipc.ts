@@ -2,7 +2,7 @@ import type { ScheduledTask } from "./schedules.ts";
 import type { ToolProviderState, ToolProviderUpdate } from "./tool-providers.ts";
 import type { ResourceApi, ResourceRef } from "./resources.ts";
 import type { CloseBehavior, DesktopSettings } from "./desktop.ts";
-import type { FeishuConnectionState, FeishuCredentials, ImBotCredentials, ImBotState, ImSource, QqMailCredentials, QqMailState } from "./connections.ts";
+import type { ConnectorId, ConnectorToolSettings, FeishuConnectionState, FeishuCredentials, ImBotCredentials, ImBotState, ImSource, QqMailCredentials, QqMailState } from "./connections.ts";
 import type { IdentityState, IdentityText } from "./identity.ts";
 // IPC contract shared by main, preload and renderer: channel names and the typed API the preload exposes.
 
@@ -96,6 +96,8 @@ export const IpcChannel = {
 	connectionState: "connection:state",
 	connectionSelect: "connection:select",
 	connectionRequest: "connection:request",
+	connectorToolsState: "connector-tools:state",
+	connectorToolsTier: "connector-tools:tier",
 	qqMailState: "qqmail:state",
 	qqMailSave: "qqmail:save",
 	qqMailVerify: "qqmail:verify",
@@ -325,6 +327,10 @@ export interface RallyApi {
 		clearLogin(): Promise<void>;
 	};
 	resources: ResourceApi;
+	connectorTools: {
+		getState(connector: ConnectorId): Promise<ConnectorToolSettings[]>;
+		setTier(connector: ConnectorId, name: string, tier: McpRiskTier): Promise<ConnectorToolSettings[]>;
+	};
 	qqMail: {
 		getState(): Promise<QqMailState>;
 		save(credentials: QqMailCredentials): Promise<QqMailState>;

@@ -1,3 +1,12 @@
+import type { McpRiskTier } from "./mcp.ts";
+
+export type ConnectorId = "feishu" | "qqmail";
+export interface ConnectorToolSettings {
+	name: string;
+	label: string;
+	tier: McpRiskTier;
+}
+
 interface MessageSource {
 	appId: string;
 	chatId: string;

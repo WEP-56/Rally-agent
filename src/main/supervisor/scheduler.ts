@@ -4,11 +4,13 @@
 import type { QueueReason, Task, TaskRun } from "../../shared/task.ts";
 import type { EventLog } from "./event-log.ts";
 import type { TaskStore } from "./task-store.ts";
+import { isScheduleTimeAllowed } from "./schedule-timing.ts";
 
 export interface SchedulerOptions {
 	store: TaskStore;
 	events: EventLog;
 	limit?: number;
+	now?(): number;
 	/** Slots already occupied by streaming workers (docs 04 §3.2). */
 	activeIds(): string[];
 	/** Idle sessions with undelivered input; the scheduler owns admission and ordering. */
@@ -79,6 +81,10 @@ export class Scheduler {
 				if (!pending.has(task.id)) { this.setQueue(task, null); continue; }
 				if (!active.has(task.id) && active.size >= this.limit + (priority(task) === 0 ? 1 : 0)) { this.setQueue(task, "capacity"); continue; }
 				this.setQueue(task, null); active.add(task.id); this.options.wake(task.id);
+				continue;
+			}
+			if (!task.runs.length && task.schedule?.timing && !isScheduleTimeAllowed(task.schedule.timing, this.options.now?.() ?? Date.now())) {
+				this.setQueue(task, "schedule_window");
 				continue;
 			}
 			const dependency = this.dependencyReason(task);

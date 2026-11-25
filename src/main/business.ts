@@ -8,7 +8,7 @@ import { McpStore } from "./mcp-store.ts";
 import { RoleAgentCatalog } from "./role-agent-catalog.ts";
 import type { RoleWorkerExecutor } from "../shared/role-workers.ts";
 import type { McpExposure, McpRiskTier } from "../shared/mcp.ts";
-import type { FeishuCredentials, ImBotCredentials, QqMailCredentials } from "../shared/connections.ts";
+import type { ConnectorId, FeishuCredentials, ImBotCredentials, QqMailCredentials } from "../shared/connections.ts";
 import type { IdentityState } from "../shared/identity.ts";
 
 export function businessHandlers(
@@ -50,6 +50,8 @@ export function businessHandlers(
 		[IpcChannel.toolProvidersState]: () => supervisor.toolProviders.state(),
 		[IpcChannel.toolProvidersSave]: (input: unknown) => supervisor.toolProviders.save(input),
 		[IpcChannel.qqMailState]: () => supervisor.qqMail.state(),
+		[IpcChannel.connectorToolsState]: (connector: ConnectorId) => mcp.connectorTools(connector),
+		[IpcChannel.connectorToolsTier]: (connector: ConnectorId, name: string, tier: McpRiskTier) => mcp.setConnectorTier(connector, name, tier),
 		[IpcChannel.qqMailSave]: (input: QqMailCredentials) => supervisor.qqMail.save(input),
 		[IpcChannel.qqMailVerify]: () => supervisor.qqMail.verify(),
 		[IpcChannel.qqMailDisconnect]: () => supervisor.qqMail.disconnect(),

@@ -4,6 +4,7 @@ import type { ImBotState } from "../../../shared/connections";
 import type { RallyApi } from "../../../shared/ipc";
 import { cn } from "../utils/cn";
 import { QqMailCard } from "./QqMailCard";
+import { ConnectorTools } from "./ConnectorTools";
 import { timeAgo } from "./status";
 import { Button, Input, Toggle } from "./ui";
 
@@ -100,6 +101,7 @@ function BotCard({ visible, name, mark, color, summary, portal, appIdHint, instr
             <Button size="sm" variant="danger" disabled={pending} onClick={() => { setAppId(""); setAppSecret(""); void action(api.disconnect); }}>断开连接</Button>
           </div>
         </div>}
+        {"setTools" in api && <ConnectorTools connector="feishu" visible={visible} available={state != null && "tools" in state && state.tools === true} />}
         {(error || state?.error) && <p role="alert" className="mt-3 text-danger">{error || state?.error}</p>}
       </div>}
     </div>
@@ -112,7 +114,7 @@ export function ConnectionsView({ visible }: { visible: boolean }) {
       <div className="animate-rise mx-auto max-w-[680px]">
         <header className="mb-5 pt-1">
           <h1 className="font-display text-[25px] font-semibold leading-tight">连接</h1>
-          <p className="mt-1.5 text-[12.5px] text-muted">连接外部应用，在你常用的地方继续和 Rally 协作。</p>
+          <p className="mt-1.5 text-[12.5px] text-muted">连接外部应用，管理它们提供的工具与权限，在你常用的地方继续和 Rally 协作。</p>
         </header>
         <BotCard visible={visible} name="飞书" mark="飞" color="#3370ff" summary="机器人单聊、云文档与多维表格" portal="https://open.feishu.cn/app" appIdHint="cli_…"
           api={window.rally.feishu} instructions="创建企业自建应用并启用机器人。选择使用长连接接收事件，添加「接收消息」事件，开通单聊收消息和机器人发消息权限后发布。平台要求先建长连接时，可以先在这里保存，再回平台完成订阅。" />

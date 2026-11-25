@@ -7,11 +7,12 @@ import type { AssistantMessageView } from "./conversation.ts";
 import type { TaskGate } from "./gate.ts";
 import type { JobRecord } from "./jobs.ts";
 import type { ServiceRecord } from "./services.ts";
+import type { ScheduleTiming } from "./schedules.ts";
 
 export type TaskMode = "write" | "readonly";
 export type ReportState = "progress" | "ready" | "blocked" | "failed" | "dropped";
 export type TaskOutcome = "done" | "failed" | "dropped" | "cancelled";
-export type QueueReason = "dependency_failed" | "dependency" | "capacity";
+export type QueueReason = "dependency_failed" | "dependency" | "capacity" | "schedule_window";
 
 /** Frozen copy of a user message (or a confirmed main-agent proposal). */
 export interface Quote {
@@ -101,7 +102,7 @@ export interface TaskAccess {
 
 export interface Task {
 	/** Host-owned origin; each due occurrence is an ordinary worker task. */
-	schedule?: { id: string; dueAt: number };
+	schedule?: { id: string; dueAt: number; timing?: ScheduleTiming };
 	id: string;
 	roleId?: string;
 	title: string;
@@ -289,7 +290,9 @@ function derive(
 				? "上游失败"
 				: task.queue.reason === "dependency"
 					? "等待上游完成"
-					: "等待空闲名额";
+					: task.queue.reason === "schedule_window"
+						? "等待允许运行的时段"
+						: "等待空闲名额";
 		return { status: "queued", statusText: `排队中 · ${reason}` };
 	}
 	const elapsed = lastRun && !lastRun.endedAt ? now - lastRun.startedAt : undefined;

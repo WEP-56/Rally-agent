@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { McpStore } from "../../../src/main/mcp-store.ts";
 import { setProjectTrust } from "../../../src/main/project-trust.ts";
 import { getMcpToolExposure } from "../src/core/mcp-servers.ts";
-import type { McpExposure } from "../../../src/shared/mcp.ts";
+import type { McpExposure, McpRiskTier } from "../../../src/shared/mcp.ts";
 import { CapabilityCatalog } from "../../../src/main/supervisor/capability-catalog.ts";
 
 const directories: string[] = [];
@@ -21,6 +21,31 @@ function setup() {
 }
 
 describe("MCP disclosure settings", () => {
+	it("lists connector permissions before discovery and preserves existing MCP choices across restart", () => {
+		const { store, directory } = setup();
+		const mail = store.connectorTools("qqmail");
+		expect(mail.map(tool => [tool.name, tool.tier])).toEqual([
+			["qqmail_search", "reversible"], ["qqmail_read", "reversible"], ["qqmail_save_attachment", "reversible"], ["qqmail_send", "irreversible"],
+		]);
+		const feishu = store.connectorTools("feishu");
+		expect(feishu).toHaveLength(3);
+		store.setTier(feishu[0].name, "irreversible");
+		store.recordTool(feishu[0].name);
+		store.recordTool("mcp__fixture__echo");
+		store.setConnectorTier("qqmail", "qqmail_send", "external");
+		const restored = new McpStore(directory);
+		expect(restored.connectorTools("feishu")[0].tier).toBe("irreversible");
+		expect(restored.tier("qqmail_send")).toBe("external");
+		expect(restored.state().tools).toEqual([{ name: "mcp__fixture__echo", tier: "reversible" }]);
+		expect(restored.state().errors).toEqual([]);
+		const saved = readFileSync(join(directory, "settings.json"), "utf8");
+		for (const operation of [
+			() => restored.setConnectorTier("feishu", "qqmail_send", "reversible"),
+			() => restored.setConnectorTier("qqmail", "read", "irreversible"),
+			() => restored.setConnectorTier("qqmail", "qqmail_send", "bad" as McpRiskTier),
+		]) expect(operation).toThrow();
+		expect(readFileSync(join(directory, "settings.json"), "utf8")).toBe(saved);
+	});
 	it("bounds routing summaries and excludes connection details and disabled servers", async () => {
 		const { store, directory } = setup();
 		store.save(JSON.stringify({ mcpServers: Object.fromEntries(Array.from({ length: 60 }, (_, index) => [

@@ -77,6 +77,10 @@ A schedule is a saved plan that the host turns into an ordinary worker when it c
 
 Resolve dates from the fresh rally-schedules clock. If the timing the user asked for is not supported, say so and let them choose; do not approximate it with a different rhythm. After creating a plan, tell them what will run, when it is next due with the timezone, and that Rally must be running at that time.
 
+Use a window on interval plans for daytime-only work or overnight windows, and weekdays for selected days. A window counts interval slots from its opening time each day; its end is exclusive and overnight weekdays refer to the opening day. Explain that rhythm when confirming it. For a timing change, inspect schedule_list and replace timing on the existing plan, preserving the user's other restrictions. Do not create a second plan for the same work.
+
+Missed runs coalesce only during allowed days or windows. Queued work also waits for an allowed first start; work already started may finish outside the window. An unfinished previous worker blocks later runs. If schedule_list reports an interrupted worker, explain the wait and use the user's words to resume or cancel that worker; never launch a replacement to bypass it.
+
 Pausing or deleting a plan leaves a worker that is already running alone, and cancelling that worker leaves the plan alone. "Stop this and whatever it is doing" needs both.
 
 ## When you start the conversation

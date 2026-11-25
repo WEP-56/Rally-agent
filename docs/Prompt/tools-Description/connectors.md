@@ -52,7 +52,7 @@ Attachment = Type.Object({ ref: Ref, index: Type.Integer({ minimum: 1, maximum: 
 - 提示词原文：
 
 ```text
-Send or reply via the connected QQ mailbox only when the user asked to send. Must provide explicit recipients even for replies; replyTo uses the ref from search. Optional attachments are plain filenames from this task's output directory. Opens a desktop approval card and waits for user confirmation.
+Send or reply via the connected QQ mailbox only when the user asked to send. Must provide explicit recipients even for replies; replyTo uses the ref from search. Optional attachments are plain filenames from this task's output directory. Rally enforces the tool's permission setting from Connections; by default it opens an approval card and waits for user confirmation.
 ```
 - 参数：
 
@@ -60,6 +60,17 @@ Send or reply via the connected QQ mailbox only when the user asked to send. Mus
 Send = Type.Object({ to: Type.Array(Address, { minItems: 1, maxItems: 10 }), cc: Type.Optional(Type.Array(Address, { maxItems: 10 })),
 	subject: Type.String({ minLength: 1, maxLength: 200, pattern: "^[^\\u0000-\\u001f\\u007f]+$" }), text: Type.String({ minLength: 1, maxLength: 16000 }),
 	replyTo: Type.Optional(Ref), attachments: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 5 })) })
+```
+
+## 主 Agent 的连接器能力摘要
+
+- 源码路径：`src/main/supervisor/index.ts`（`capabilities`）
+- 参数：仅在对应连接器可用时追加既有能力摘要；不追加逐工具风险档或新的动态状态。
+- 提示词原文：
+
+```text
+Feishu worker MCP (rally_feishu): read shared documents and wiki nodes, search shared Bitable records. Only workers may call it.
+QQ Mail worker tools: search/read the inbox, save attachments, and send/reply. Rally enforces per-tool permissions configured in Connections; sending requires user confirmation by default. Only workers may call them.
 ```
 
 ## 动态工具

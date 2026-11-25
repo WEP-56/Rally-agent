@@ -3,9 +3,9 @@ import type { AddressInfo } from "node:net";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
-import { getModel, normalizeContext, streamSimple } from "../src/compat.ts";
+import { getModel, getModels, normalizeContext, streamSimple } from "../src/compat.ts";
 import { findEnvKeys, getEnvApiKey } from "../src/env-api-keys.ts";
-import { getSupportedThinkingLevels } from "../src/models.ts";
+import { getSupportedThinkingLevels, hasApi } from "../src/models.ts";
 import type { Context, Model, Tool } from "../src/types.ts";
 
 const originalFireworksApiKey = process.env.FIREWORKS_API_KEY;
@@ -159,26 +159,6 @@ describe("Fireworks models", () => {
 		expect(getSupportedThinkingLevels(getModel("fireworks", modelId))).toEqual(levels);
 	});
 
-	it("keeps toggle-only Messages models without a verified fallback on budget-based thinking", async () => {
-		const model = getModel("fireworks", "accounts/fireworks/models/nemotron-3-ultra-nvfp4");
-		expect(model.compat?.forceAdaptiveThinking).toBeUndefined();
-		let payload: Record<string, unknown> | undefined;
-		await streamSimple(
-			model,
-			{ messages: [{ role: "user", content: "test", timestamp: 0 }] },
-			{
-				apiKey: "test-fireworks-key",
-				reasoning: "high",
-				onPayload: (value) => {
-					payload = value as Record<string, unknown>;
-					throw new Error("payload captured");
-				},
-			},
-		).result();
-		expect(payload?.thinking).toEqual({ type: "enabled", budget_tokens: 16384, display: "summarized" });
-		expect(payload?.output_config).toBeUndefined();
-	});
-
 	it("resolves FIREWORKS_API_KEY from the environment", () => {
 		process.env.FIREWORKS_API_KEY = "test-fireworks-key";
 
@@ -187,14 +167,17 @@ describe("Fireworks models", () => {
 	});
 
 	it("sets Fireworks-specific compat for session affinity and unsupported tool fields", () => {
-		const model = getModel("fireworks", "accounts/fireworks/models/nemotron-3-ultra-nvfp4");
-
-		expect(model.compat).toBeDefined();
-		expect(model.compat?.sendSessionAffinityHeaders).toBe(true);
-		expect(model.compat?.supportsEagerToolInputStreaming).toBe(false);
-		expect(model.compat?.supportsCacheControlOnTools).toBe(false);
-		expect(model.compat?.supportsLongCacheRetention).toBe(false);
-		expect(model.compat?.allowEmptySignature).toBe(true);
+		const models = getModels("fireworks").filter(model => hasApi(model, "anthropic-messages"));
+		expect(models.length).toBeGreaterThan(0);
+		for (const model of models) {
+			expect(model.compat, model.id).toMatchObject({
+				sendSessionAffinityHeaders: true,
+				supportsEagerToolInputStreaming: false,
+				supportsCacheControlOnTools: false,
+				supportsLongCacheRetention: false,
+				allowEmptySignature: true,
+			});
+		}
 	});
 });
 

@@ -116,7 +116,7 @@ const server = createServer(async (req, res) => {
 		try {
 			const result = await call;
 			if (
-				/^(coach|tool-providers|models|mcp|memory|skills|trust|feishu|qqmail|qqbot|schedules):/.test(channel) &&
+				/^(coach|tool-providers|models|mcp|memory|skills|trust|feishu|qqmail|qqbot|connector-tools|schedules):/.test(channel) &&
 				!channel.endsWith(":state") &&
 				channel !== IpcChannel.modelsFetch
 			)
