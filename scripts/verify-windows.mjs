@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { extractFile, listPackage } from '@electron/asar';
 import { load } from 'js-yaml';
+import { verifyExternalAgentPackagePaths } from './verify-external-agent-packaging.mjs';
 
 const version = JSON.parse(readFileSync('package.json', 'utf8')).version;
 const configuration = load(readFileSync('electron-builder.yml', 'utf8'));
@@ -23,6 +24,7 @@ for (const name of ['identity.md', 'coach.md', 'model-provider.md', 'media-searc
   assert.ok(statSync(join(resources, 'skills', 'references', name)).isFile(), `Missing built-in Skill reference ${name}`);
 }
 const archive = join(resources, 'app.asar'); const files = listPackage(archive).map(path => path.replaceAll('\\', '/'));
+verifyExternalAgentPackagePaths([...files, ...readdirSync(directory, { recursive: true })]);
 for (const path of ['/out/main/index.js', '/out/preload/index.cjs', '/out/renderer/index.html']) assert.ok(files.includes(path), `Missing ${path}`);
 assert.equal(JSON.parse(extractFile(archive, 'package.json')).version, version);
 const main = extractFile(archive, join('out', 'main', 'index.js')).toString();

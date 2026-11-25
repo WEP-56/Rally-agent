@@ -1,69 +1,36 @@
-# Rally 开发交接（2026-11-23）
+# Rally 开发交接（2026-11-25）
 
-入口：[实施 TODO](开发实施TODO.md) · [浏览器工具契约](Prompt/tools-Description/browser.md) · [产品问答](superagent/00-问答记录.md) · [Prompt](Prompt/system-prompt.md)。浏览器施工方案已在验收后清理。
+入口：[发布指南](发布指南.md) · [0.4.1 发布说明](发布说明-0.4.1.md) · [产品问答](superagent/00-问答记录.md) · [Prompt](Prompt/system-prompt.md)。
 
-## 本轮结果
+## 本轮目标与状态
 
-本轮用户要求**只提交并推送修复代码，随下次版本发布**，不打 tag、不发 Release、不部署新代码。因线上命令通道卡死，已重启现有 v0.3.0 的 runtime 恢复使用。
+用户已授权修复外部执行器导致的安装包膨胀，并提交、推送、发布修复版。0.4.0 已正式发布；本轮准备 0.4.1，不移动旧 tag，不替换旧产物，不部署 VPS。发布流程必须完成到正式 Release，不能停在草稿。
 
-云端执行卡死根因已从日志确认：`/proc/<pid>/stat` 在打开后、读取前遇到进程退出，会返回 `ESRCH`；原来只认 `ENOENT`，误报进程清理失败，继而阻塞全部命令和服务。已将两者都按进程不存在处理，保留权限/IO 错误传播。新增 Linux 离线回归：旧版在同样的 `ESRCH` 注入下失败，修复后两条跨任务命令及服务启动/停止成功。
+0.4.0 的 Windows 521,834,482 字节、Linux 757,100,150 字节；主要原因是两个 ACP adapter 的生产依赖带入 Claude/Codex 原生 CLI，Linux 还同时安装 Claude glibc 与 musl 版本。0.4.1 已从根依赖移除两个 adapter 及其传递运行时，保留轻量 ACP SDK。首个本地 Windows 精简包约 250 MB，仍需核对最终 CI 产物。
 
-下一版 Linux 包带固定 gh 2.105.0，构建校验固定 SHA256、携带许可证。专用 GitHub 工具现在与 Shell 一样搜索用户 `agent/bin`，用户工具和 gh 登录配置不随代码升级覆盖。Ubuntu 22.04 服务账号下已验证官方 gh 与用户目录的可执行文件均可调用；实际 GitHub 授权由用户后续完成。当前生产版本仍未安装 gh，也未热更新上述修复。
+外部会话从用户目录按需安装的 adapter 启动，CLI 优先复用设备现有程序。可选路径配置为 `$RALLY_CODING_AGENT_DIR/external-agents.json`；默认 adapter 目录为 `external-agents/<claude-code|codex>/node_modules/.../dist/index.js`。设置页不自动安装，错误提示引导自管理。具体字段、优先级和安装命令在 `skills/references/external-agents.md`。Windows 支持 npm shim，实际读取包的 bin 字段，兼容新版 Claude 原生安装。Linux install.sh 同步修复漏复制 skills 的问题。
 
-本轮新增 Linux 3 项、既有 GitHub 专项 19 项通过；桌面构建、server 源码构建及主/渲染进程类型检查通过。`npm run typecheck` 仍只有下述两个模型测试的 9 处已知错误。VPS 两服务与健康/RPC 检查正常，T-1051 遗留两条命令标为中断、服务标为停止；下载和测试临时目录均已清理，系统盘约 4.5 GiB 可用。
+自管理仍然只有一个 `skills/SKILL.md`，八个领域文件是 references，不能各自注册 Skill，不能放到 docs/Prompt。新增路径配置已写入总索引。Worker 不共享主 Agent 的完整上下文，说明必须明确目标主机、运行账号、配置路径和验证方法。
 
-账密回告缺陷已复现并修复：保存后原先通过不唤醒的 `notice` 留待下轮处理，改为持久 `credential_result`，主 Agent 空闲时唤醒、忙时 steer。保存/取消只回告元数据，重复提交按申请和状态去重，重启恢复缺失结果。T-1050 的线上记录另外确认两次 `browser_login` 填写失败，不能将其认定为回告丢失；真实 QQ 登录填写失败的具体原因尚待单独排查。
+## 发布与验证
 
-询问卡片补齐自由文本框和提交按钮，选项外的答案通过已有用户回答接口直达 Worker，保留原文与用户身份。空白回答被拒绝，提交期间禁用操作，失败保留草稿；已答/过期问题沿用现有状态处理。主对话代答仍可用。
+- 当前发布 tag `v0.4.0` 指向 `3a07bc9`；CI `45559067156` 完成三平台构建。`4d957ec` 修正了 shutdown 测试的 Electron app.getAppPath 替身。旧 tag 没有移动。
+- 0.4.1 外部执行器定向测试 11 项通过，覆盖路径发现、npm 安装、按需原生依赖、配置错误、缺失时不安装，以及真实子进程的离线 ACP 会话。角色/Skill 相关筛选通过，Skill 格式校验通过。
+- 主进程和渲染进程类型检查通过。根 `npm run typecheck` 仍只有 `packages/ai/test/fireworks-models.test.ts` 与 `anthropic-empty-thinking-signature-compat.test.ts` 两个文件的 9 个已知模型数据错误。
+- 发布检查新增 lockfile 与 Windows/Linux 实际目录验证，阻止外部 adapter、SDK 运行时与原生 CLI 重新混入基础包。真实付费模型调用和界面视觉没有作为已验收项。
+- 本地 `.artifacts/external-agent-smoke/` 仅用于临时安装无原生依赖的 adapter、以隔离配置验证打包后的 Electron Node 复用本机 CLI；发布后清理这个临时目录。
 
-用户反馈的接管点击失效与紫色遮挡也已修复。生产 CDP 连接的 `viewportSize()` 为空，旧代码产生无宽高的帧，客户端坐标变成无效值，继而报「拖动轨迹无效」；现在读取实际视口尺寸并按 CSS 像素截图。点击/拖动改为按轨迹移动距离判断，轻微抖动不再受事件数量影响。当前接管设备看到无额外遮挡的原始网页，其他设备、Worker 截图和卡片缩略图的权限及脱敏规则保持。
+## 生产与未完成验收
 
-本次已先复现缺失尺寸与抖动误判，再通过 6 项定向测试：生产托管浏览器、隐私/原始画面、构建后界面经真实 CDP 点击/拖动/组合键/底部快捷键，以及原控制权与云端设备测试。`electron-vite build`、主进程/渲染进程类型检查通过；`npm run typecheck` 仍只有已知两个模型数据测试文件的 9 个错误。新增接管回归已接入 Windows 发布检查。B 站真实验证码和视觉由用户在后续更新版复测。
+VPS 仍运行 0.3.0；本轮没有部署授权。此前 Linux 命令退出竞态已修复并随 0.4.0 发布，GitHub CLI gh 2.105.0 也自 0.4.0 起随 Linux 包提供；不要将仓库状态当作 VPS 已升级状态。
 
-本轮新增验证：生产 router faux provider 证明保存后无需追加聊天即可收到元数据；持久中继 14 项、问题状态 7 项、Worker 直答/代答相关集成筛选 3 项、构建后界面 5 项、内容渲染 8 项通过。涵盖自由文本原样传递、重试、过期拒绝、审计与重启记录；没有调用真实模型 API 或执行视觉验收。
+浏览器接管点击/拖动与额外遮挡、账密回告、询问卡片自由回答已修复并随 0.4.0 发布。真实网站登录/验证码、完整设备视觉和外部执行器实际模型任务由用户验收；QQ 登录失败不能等同于账密回告丢失，若继续排查需读取新的实际日志。
 
-`v0.3.0` 已正式发布并部署到 VPS。应用 tag 指向 `70e031b`，发布 Actions `45184855341` 全部成功；前两轮失败仅涉及旧测试替身和图标测试路径，修复测试/工作流后从同一 tag 构建，未移动 tag。用户要求先发布再测试：密码本、浏览器真实网站和界面由用户在 Release 版验收，后续按反馈补验证和修复。
+## 必须保留的边界
 
-VPS 用正式 Linux Release 包升级到 `0.3.0`，未创建旧版或业务数据备份。两个 systemd 服务、健康检查、运行时版本、账号/浏览器状态接口均正常；随包 Chromium 用 `rally-runtime` 服务账号启动并取得 AI 快照。保留原有业务数据与密钥，清理了 0.1.0/0.2.0 旧目录、下载/解包临时目录及 apt 缓存，最后可用 **4583 MiB（85% 使用）**。SSH 信息仍仅保存在用户指定私有位置。
-
-发布前补齐：凭据重复提交只保存一次、24 小时及关联任务/run 过期、密码显隐、账号修改、清除共享登录态入口；页面脱敏比较留在宿主，不将账号库秘密传入网页；接管画面只允许当前控制设备读取。展开视图 500 ms 拉取一次，帧合并在途请求；接管输入支持拖动轨迹和键盘组合键。最新账号/隐私/发布清单 5 项、生产 router 账号专项、附件/连接界面 8 项、桌面 9 项、退出清理专项及主进程/渲染进程类型检查已通过；新增交互的完整验证跟随 Release 体验继续。
-
-- 普通外链：Windows 本地/云端模式都走客户端 WebContentsView；Android 显式调用默认浏览器。不会启动服务器浏览器。
-- 账密：router 只有 `credential_request`，消息流申请卡片打开私密表单；`WebsiteAccounts` 经既有 CredentialVault 保存 txt 密文。元数据回告可在重启补发；启用账号供同源 Worker 复用，设置支持修改/停用/删除。单独清除登录态需先结束所有浏览器任务。
-- Worker：`browser_open/snapshot/screenshot/navigate/action/login/file`，router 没有这些工具。所有任务共用一个 persistent Chromium profile，每任务独立原生窗口，上限 3，超出排队。弹出页归所属任务，下载不能串任务，上传只接受任务可见资源。
-- 控制权：默认 Agent；接管先失效旧 epoch，等待在途动作真正结束。接管期间 Worker 等待，交还后旧动作不重放，必须重新观察。关闭视图、后台或断线后保持等待；15 秒无心跳失去控制。设备吊销通知运行时并关闭该设备在途网关响应。
-- UI：主对话浏览器卡片按创建时间插入消息流，任务详情也可查看。缩略图每 3 秒按可见性刷新，敏感输入/人工接管暂停；Windows 右侧面板与 Android 移动侧栏全屏查看。默认仅观看，接管后可点选、中文输入、按键、滚动、切换标签和交还。历史仅保存窗口元数据，不保存画面。
-- 账号与输出：宿主校验精确 origin、主文档及密码输入目标；快照过滤已知私密值，画面遮蔽输入和账号回显（含 iframe），Playwright 诊断不进模型日志。Worker 截图不自动发布成附件；客户端帧、控制输入和账密提交不进事件/cache/审计正文。上传与不可逆动作沿用既有 gate，批准后核对目标/表单内容哈希。
-- 运行与清理：浏览器宿主接 ProcessRegistry，重启先清遗留进程。任务结束清所属标签、队列及临时上传下载；启动清宿主专用 `browser-files/`。浏览器崩溃后旧窗口失效，下一次显式打开可重新启动，不自动恢复旧操作。
-- 打包：Playwright 精确固定 `1.65.1`；Windows dist 准备并携带 Headless Shell；Linux 包携带对应二进制，install.sh 安装系统库。profile 不进安装器自动备份。步骤见[发布指南](发布指南.md)和 [Linux README](../deploy/linux/README.md)。
-
-## 已实际执行的验证
-
-- Windows Chromium：`tests/agent-browser/runtime.test.mjs`，持久 profile、AI snapshot/getByRef、Screencast、中文输入、Cookie 共享与重启。
-- `service.test.mjs`：3 个不同原生窗口/第 4 个排队、排队取消、接管等待初始/后续导航、过期输入、断线等待、关闭唤醒、账号启停/错 origin、跨窗口脱敏及敏感画面暂停。
-- `managed.test.mjs`：持久进程登记、真正启动/关闭、崩溃后的旧窗口拒绝与显式重开。
-- `files-and-gates.test.mjs`：拒绝不点击、批准期间表单改变不执行、上传原文件名/内容、下载资源归属、跨任务标签/下载拒绝、任务清临时文件。
-- `cloud.test.mjs`：真实网关和两台设备观看/竞争/输入/吊销，帧不进入 CloudMirror；云端原有 server 协议专项通过。
-- `rally-website-accounts.test.ts` 与 `rally-agent-browser.test.ts`：faux provider 走生产 router/Worker，主无浏览器工具，网站收到正确账密，模型上下文、事件、主会话、任务 jsonl 无唯一测试明文。普通浏览器/IPC 生命周期与账号专项合计 24 项通过；Worker 新专项单独通过。
-- Linux Ubuntu 22.04 x64：非 root 用户、独立临时 npm/浏览器/共享库目录，runtime、service、managed 三类实测通过。未安装系统库、未改变现有服务。所有 `/tmp/rally-browser-*` 已清理；最后检查可用空间 **4206 MiB（86% 使用）**。
-- Windows `electron-vite build`、server 源码构建、renderer 云端 4 项通过；临时 `electron-builder --win --dir` 成功，`packaged.test.mjs` 使用打包后的 Rally.exe/ASAR/随包 Chromium 实际启动成功。
-- Android 使用仓库 `.artifacts/gradle-home` 缓存执行 `compileDebugJavaWithJavac --offline --no-daemon` 成功。SDK 路径仍有既有 location warning，Java 有 deprecated API 提示；无编译错误。没有重新出正式 APK。
-- `npm run typecheck` 执行后只剩仓库已知 `packages/ai/test/fireworks-models.test.ts` 与 `anthropic-empty-thinking-signature-compat.test.ts` 模型数据错误；`tsconfig.node.json`、`tsconfig.web.json` 分别通过。
-
-## 下一步验收与边界
-
-1. 用户实际检查 Windows/Android 卡片视觉、点击/中文输入、滚动、遮挡、焦点与真实网站登录/发布/验证码；开发侧未启动截图或 Electron 视觉验收。
-2. `v0.3.0` 发布、正式 Linux tar 包及 VPS systemd 升级已完成；本轮三项修复随下一版发布。拖动/组合键本次已补生产 CDP 输入专项，后续补清除登录态、跨源 iframe/重定向拒绝等专项，排查 QQ 网页登录填写失败，以及持续下载的磁盘配额、长时间帧流与多账号选择体验核对；不要把未执行的测试记为通过。
-3. 账密保密覆盖专用接口和已知值过滤；Worker 仍有同用户 shell/文件能力，不构成 OS 凭据隔离。网页任意画布/变形编码输出不是已证明的安全隔离边界。
-4. 用户确认本轮功能后删除施工方案，稳定规则留在 Prompt、问答和部署文档；同步文档索引。
-5. 本机临时产物清理被工具自动审批拒绝（`blocked by policy`，未提供具体原因），批量与明确路径清理都未执行。待清理：`.artifacts/browser-package/`、`build/agent-browser/`、`.signing/ssh-tools/`、`.signing/rally-remote.py`、`.signing/browser-linux-test.tar.gz`，以及本轮失败测试目录 `C:/Users/14844/AppData/Local/Temp/rally-browser-cloud-T5T9SN`。仅删除这些本轮产物，保留原有凭据。VPS 临时目录已经全部清理，这个阻碍只涉及本机。
-
-## 必须保留的决定
-
-- 界面风格和 token 保持现有原型；功能字段以问答记录为准。
-- 用户浏览器与 Agent profile 独立；所有 Worker 共用 Agent 登录态，不能按 Worker 隔离或启动多个进程争抢 profile。
-- router 只有轻量账密申请，无浏览器控制/观察工具；自动缩略图不发送 router。
-- 对外发布等沿用任务授权和 gate，不按每个任务重复申请已启用账号。
-- 现有教练/记忆/中继已获用户确认，不重开旧验收；原 Android 附件问题已解决。
-- 私有 VPS 连接信息只在用户指定的私有位置使用，不写公开文档。Linux 系统盘小，测试使用独立临时目录，结束即清理并核对空间。
-- 本轮提交、推送、`v0.3.0` Release 与 VPS 升级均已完成。应用 tag 为 `70e031b`；测试/工作流修复为 `7afcf9c`、`57e7889`，之后的文档提交仅记录结果。后续应用改动不移动这个已发布 tag。
+- 界面保持现有原型风格和 token，功能字段以产品问答为准。
+- 普通外链在客户端打开；Agent 浏览器在执行主机，所有 Worker 共用 profile，每任务独立窗口，上限三个。主 Agent 没有浏览器操作工具。
+- 外部 Claude/Codex Worker 不接入 Rally 浏览器、MCP 或内部工具；复用目标主机自身登录，权限提升请求拒绝，不宣称主机级隔离。
+- 用户目录中的外部工具、登录数据不随应用升级覆盖。只按用户所需执行器安装，复用已有 CLI 时使用 --omit=optional 避免重复下载原生程序。
+- 不跑全量 vitest，不触发真实模型 API；按文件运行离线测试。只 git add 明确路径，不能 force push 或清理用户工作。
+- 私有 VPS 连接信息仍只在用户指定的私有位置，不写公开文档。

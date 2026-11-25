@@ -51,6 +51,10 @@ jobs:
       - run: node --test tests/cloud/profiles.test.mjs
       - run: node --test tests/cloud/cache.test.mjs
       - run: node --test tests/release.test.mjs
+      - name: Verify external agent discovery and offline ACP sessions
+        if: matrix.target != 'android'
+        working-directory: packages/coding-agent
+        run: node ../../node_modules/vitest/dist/cli.js --run test/suite/rally-external-worker-settings.test.ts
       - if: matrix.target == 'windows'
         run: node node_modules/electron/install.js
       - if: matrix.target == 'windows'
@@ -78,7 +82,6 @@ jobs:
           node ../../node_modules/vitest/dist/cli.js --run test/suite/rally-supervisor.test.ts -t "escalates questions via"
           node ../../node_modules/vitest/dist/cli.js --run test/suite/rally-supervisor.test.ts -t "shows one built-in Rally management Skill"
           node ../../node_modules/vitest/dist/cli.js --run test/suite/rally-supervisor.test.ts -t "dispatches a role worker|routes an external|closes the external ACP session"
-          node ../../node_modules/vitest/dist/cli.js --run test/suite/rally-external-worker-settings.test.ts
       - if: matrix.target == 'linux'
         run: node node_modules/playwright/cli.js install-deps chromium
       - if: matrix.target == 'linux'

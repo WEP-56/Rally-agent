@@ -171,7 +171,7 @@ export function RoleWorkersSection() {
 									if (draft.executor && draft.executor !== "rally") void loadExternalModels(draft.executor);
 								}}>{loadingExternalModels ? "读取中…" : "刷新"}</Button>
 							</div>
-							<p className="mt-1.5 text-[11px] leading-relaxed text-faint">复用任务运行主机上对应工具的登录状态，不使用 Rally 模型。外部执行器暂不提供 Rally 浏览器、MCP 或工具审批。</p>
+							<p className="mt-1.5 text-[11px] leading-relaxed text-faint">按需安装，也可让 Rally 连接任务运行主机上已有的 Claude Code / Codex，复用其登录和模型配置。可在主对话中提出配置要求，完成后点击刷新。外部执行器暂不提供 Rally 浏览器、MCP 或工具审批。</p>
 						</div>}
 					</div>
 				</details>

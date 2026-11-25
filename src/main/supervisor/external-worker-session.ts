@@ -1,24 +1,17 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
 import { Readable, Writable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { ClientApp, PROTOCOL_VERSION, methods, ndJsonStream, type ContentBlock, type NewSessionResponse } from "@agentclientprotocol/sdk"
 import type { PromptResponse } from "@agentclientprotocol/sdk/unstable";
+import { getAgentDir, getShellEnv } from "@rally/coding-agent";
 import type { ExternalAgentModel, RoleWorkerExecutor } from "../../shared/role-workers.ts";
 import type { TaskMode } from "../../shared/task.ts";
 import { processIdentity, stopProcessTree } from "./process-identity.ts";
 import { readClaudeModelConfiguration } from "./claude-model-settings.ts";
+import { resolveExternalWorkerRuntime } from "./external-worker-runtime.ts";
 
 export type ExternalExecutor = Exclude<RoleWorkerExecutor, "rally">;
-const packages: Record<ExternalExecutor, string> = {
-	"claude-code": "@agentclientprotocol/claude-agent-acp",
-	codex: "@agentclientprotocol/codex-acp",
-};
-const packageRequire = createRequire(import.meta.url);
 
 export interface ExternalToolUpdate {
 	id: string;
@@ -76,19 +69,17 @@ export class ExternalWorkerSession {
 	static async start(options: SessionOptions): Promise<ExternalWorkerSession> {
 		const signal = AbortSignal.any([AbortSignal.timeout(30_000), ...(options.signal ? [options.signal] : [])]);
 		signal.throwIfAborted();
-		let entry: string;
-		try { entry = join(dirname(packageRequire.resolve(`${packages[options.executor]}/package.json`)), "dist", "index.js"); }
-		catch { throw new Error(`${options.executor}：当前主机缺少 Rally 随附的 ACP 适配器`); }
-		const env: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: "1" };
+		const env: NodeJS.ProcessEnv = { ...getShellEnv(), ELECTRON_RUN_AS_NODE: "1" };
+		const { entry, executable } = resolveExternalWorkerRuntime(options.executor, { agentDir: getAgentDir(), env });
 		let claudeSettings: Record<string, unknown> = {};
 		if (options.executor === "claude-code") {
-			delete env.CLAUDE_CODE_EXECUTABLE;
+			env.CLAUDE_CODE_EXECUTABLE = executable;
 			const claudeConfiguration = readClaudeModelConfiguration(options.cwd, env);
 			claudeSettings = claudeConfiguration.settings;
 			Object.assign(env, claudeConfiguration.environment, { CLAUDE_AGENT_ACP_PROTOCOL: "v1", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" });
 		} else {
 			// Keep authentication and the user's Codex model provider; do not use a separate CODEX_HOME.
-			delete env.CODEX_PATH;
+			env.CODEX_PATH = executable;
 			delete env.DEFAULT_AUTH_REQUEST;
 			let existingConfig: Record<string, unknown> = {};
 			try {
@@ -102,17 +93,6 @@ export class ExternalWorkerSession {
 				hooks: false, plugin_hooks: false, skill_mcp_dependency_install: false,
 			} });
 			env.INITIAL_AGENT_MODE = options.mode === "write" ? "workspace-write" : "read-only";
-		}
-		if (process.platform === "win32" && /[\\/]app\.asar[\\/]/.test(entry)) {
-			// The adapter scripts can run inside asar, but their child executables cannot.
-			const nativePackage = options.executor === "claude-code" ? "@anthropic-ai/claude-agent-sdk" : "@openai/codex";
-			const adapterRequire = createRequire(entry);
-			const cliRequire = createRequire(adapterRequire.resolve(options.executor === "claude-code" ? nativePackage : `${nativePackage}/package.json`));
-			const platformPackage = `${nativePackage}-win32-${process.arch}`;
-			const root = dirname(cliRequire.resolve(`${platformPackage}/package.json`)).replace(/([\\/])app\.asar([\\/])/, "$1app.asar.unpacked$2");
-			if (options.executor === "claude-code") env.CLAUDE_CODE_EXECUTABLE = join(root, "claude.exe");
-			else env.CODEX_PATH = join(root, "vendor", `${process.arch === "arm64" ? "aarch64" : "x86_64"}-pc-windows-msvc`, "bin", "codex.exe");
-			if (!existsSync(env.CLAUDE_CODE_EXECUTABLE ?? env.CODEX_PATH!)) throw new Error(`${options.executor}：当前安装缺少外部执行器`);
 		}
 		if (options.executor === "codex" && process.platform === "win32") {
 			const preloadUrl = new URL("./external-worker-windows-preload.js", import.meta.url).href;
@@ -186,6 +166,7 @@ export class ExternalWorkerSession {
 				cwd: options.cwd, mcpServers: [], _meta: {
 					additionalRoots,
 					...(claude ? { claudeCode: { options: {
+						executable: process.execPath,
 						tools: options.mode === "write" ? ["Read", "Glob", "Grep", "Edit", "Write", "MultiEdit"] : ["Read", "Glob", "Grep"],
 						disallowedTools: ["Agent", "Task", "Bash", "Skill", "EnterWorktree"],
 						settingSources: [], strictMcpConfig: true, allowDangerouslySkipPermissions: false,

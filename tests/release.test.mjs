@@ -6,6 +6,19 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { load } from 'js-yaml';
+import { verifyExternalAgentPackagePaths } from '../scripts/verify-external-agent-packaging.mjs';
+
+test('release dependency tree excludes external agents, including transitive native packages', () => {
+  const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
+  verifyExternalAgentPackagePaths(Object.keys(lock.packages));
+  for (const path of [
+    'node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js',
+    'node_modules/@agentclientprotocol/codex-acp/dist/index.js',
+    '/node_modules/other/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64-musl/claude',
+    'resources\\app.asar.unpacked\\node_modules\\@openai\\codex-win32-x64\\vendor\\codex.exe',
+  ]) assert.throws(() => verifyExternalAgentPackagePaths([path]), /installed on demand/);
+  verifyExternalAgentPackagePaths(['node_modules/@agentclientprotocol/sdk/dist/index.js', 'node_modules/@anthropic-ai/sdk/index.js']);
+});
 
 test('release manifest rejects stale/debug/missing packages and hashes the exact five-file set', () => {
   const dir = mkdtempSync(join(tmpdir(), 'rally-release-'));
