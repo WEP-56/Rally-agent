@@ -184,6 +184,9 @@ function AppearanceSection() {
         ))}
       </div>
       <Group title="个性化">
+        <Row title="减少动效" desc="停止吉祥物的持续动画，并减弱界面过渡。系统开启减少动态效果时也会生效。">
+          <Toggle label="减少动效" checked={config.reduceMotion} onChange={reduceMotion => setConfig({ reduceMotion })} />
+        </Row>
         <Row className="appearance-row" title="强调色" desc="按钮、状态与高亮，右侧面板的光晕也会跟着变">
           <AccentPicker value={config.accent} onChange={accent => setConfig({ accent })} />
         </Row>

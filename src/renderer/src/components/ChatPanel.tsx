@@ -345,8 +345,7 @@ export function ChatPanel({
                 <DeliveryStatus id={m.id} delivery={m.delivery} act={action} />
               </motion.div>
             ) : (
-              <motion.div key={m.id} className=" relative ml-8 min-w-0 max-w-[88%] self-start rounded-[22px] rounded-tl-md bg-md-surface-low p-4 text-sm leading-relaxed shadow-soft" initial={{ opacity: 0, y: 8, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={SPRING_LAYOUT}>
-                <AgentAvatar size={28} className="absolute -left-9 top-1 rounded-full" />
+              <motion.div key={m.id} className="relative min-w-0 max-w-[88%] self-start rounded-[22px] rounded-tl-md bg-md-surface-low p-4 text-sm leading-relaxed shadow-soft" initial={{ opacity: 0, y: 8, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={SPRING_LAYOUT}>
                 <AttachmentCards items={m.attachments} />
                 {m.blocks?.length ? m.blocks.filter(block => block.type === "text").map((block, index) => block.type === "text" ? <RichText key={index} text={block.text} /> : null) : m.text.trim() && <RichText text={m.text} className="text-fg" />}
                 {m.taskRef && tasks.find((t) => t.id === m.taskRef) && <TaskCard task={tasks.find((t) => t.id === m.taskRef)!} />}

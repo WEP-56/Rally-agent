@@ -2,13 +2,13 @@
 
 入口：[文档索引](README.md) · [发布指南](发布指南.md) · [0.5.0 发布说明](发布说明-0.5.0.md) · [产品问答](superagent/00-问答记录.md) · [Prompt](Prompt/system-prompt.md)。
 
-## 下一会话：品牌吉祥物
+## 品牌吉祥物接入（2026-11-26）
 
-用户已确认本轮 Android 适配“完美”，要求提交代码、更新交接。下一项是品牌吉祥物，用户准备的案例位于本机 `example/dynamic-md3-agent-mascot/`。本轮没有开始集成，也没有创建新会话。
+用户提供的设计案例位于本机 `example/dynamic-md3-agent-mascot/`，原目录处于 Git 忽略范围。核心骨骼化 SVG 与性能探测已移入 `src/renderer/src/mascot/`，移植时去掉演示用场景/指标类型，只保留实际可用的状态与弹簧物理。
 
-先阅读案例的 `src/App.tsx`、`src/components/MochiMascotSvg.tsx`、`src/types/mascot.ts`、`src/components/RealWorldPreviews.tsx` 和 `src/components/IntegrationModal.tsx`。案例是 React/SVG 吉祥物，包含弹簧、视线跟随、交互，以及 idle、thinking、searching、orchestrating、coding、replying、error、completed 八种演示状态。该目录在 Git 忽略范围内，仅本机存在，不要误认为已随提交上传。
+默认头像由 `IdentityState.avatar === null` 决定，与名称、性格和工作方式无关。默认显示 Mochi；用户选择 PNG 头像后沿用原头像。聊天顶部和工位顶部显示动态吉祥物，小尺寸身份头像显示静态紧凑图，避免每条消息都启动独立动画。聊天活动只从主 Agent 的 `ChatHeaderState` 读取，不混入 worker 任务状态；活动映射到待机、思考、查询、任务编排、工具调用、回复和整理。主 Agent 的完成/错误结果短暂驱动庆祝/错误姿态，中止不标记为完成。设置-外观新增“减少动效”；系统减弱动态效果也会停用连续吉祥物动画。移动/低性能环境降帧、跳过滤镜和装饰动画，隐藏或滚出视口时暂停循环。
 
-结合现有 `src/renderer/src/components/AgentAvatar.tsx`、`PresenceCapsule.tsx`、`Workstation.tsx`、`brand.tsx` 和 `md3/components.tsx` 梳理接入位置。具体替换哪些展示位置尚未确定；不要擅自覆盖用户自定义的 Agent 头像。演示状态、日志和指标不等于 Rally 的真实能力，应映射现有状态与事件，不搬入模拟任务、虚构运行信息或新的全局配色。用户重视原型还原度、弹簧动效和温暖的个人助手气质。
+验证：`npm run typecheck`、`node node_modules/vitest/vitest.mjs --run src/renderer/src/mascot/state.test.ts src/renderer/src/components/AssistantContent.test.ts`、`npx electron-vite build` 均通过。用户已确认界面现在能看到吉祥物。随后按反馈移除吉祥物状态解析对 worker 任务列表的依赖，只由主 Agent `ChatHeaderState` 驱动态；新增 `state.test.ts` 覆盖查询、派发、回复、完成和中止。首次引导第 2 步的身份设置上方新增动态精灵与“使用默认头像，我就能一直陪着你哦”气泡，仅当前步骤运行；用户已确认效果。聊天助手消息气泡已移除重复头像并收回左侧缩进，顶部身份徽标和空状态欢迎头像保留。
 
 ## 本轮完成并获用户验收
 

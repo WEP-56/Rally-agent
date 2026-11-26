@@ -1,10 +1,10 @@
 // Electron main entry: single-instance lock, Rally paths, main window. `RALLY_SMOKE=1` runs the M0 smoke check and exits.
 
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { registerClientBrowser } from "./browser.ts";
 import { connectionHost } from "./connection-host.ts";
 import { desktopHost } from "./desktop-host.ts";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { app, BrowserWindow, dialog, nativeTheme, safeStorage, screen, shell } from "electron";
 import { broadcastChat, broadcastTask, broadcastWorkspace, broadcastServices, forwardWindowState, registerIpc } from "./ipc.ts";
 import { ensureRallyDirs, resolveRallyPaths } from "./paths.ts";
@@ -114,8 +114,11 @@ function createMainWindow(partition?: string): BrowserWindow {
 	const dark = nativeTheme.shouldUseDarkColors;
 	// Frameless: the renderer draws the prototype's title bar and window controls (IPC in ipc.ts).
 	const workArea = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
-	const width = Math.min(1360, Math.floor(workArea.width * 0.9));
-	const height = Math.min(860, Math.floor(workArea.height * 0.9));
+	const defaultWidth = Math.min(1360, Math.floor(workArea.width * 0.9));
+	const defaultHeight = Math.min(860, Math.floor(workArea.height * 0.9));
+	const savedSize = process.platform === "win32" ? readWindowSize() : null;
+	const width = Math.min(savedSize?.width ?? defaultWidth, workArea.width);
+	const height = Math.min(savedSize?.height ?? defaultHeight, workArea.height);
 	const win = new BrowserWindow({
 		width, height,
 		x: workArea.x + Math.floor((workArea.width - width) / 2),
@@ -135,6 +138,23 @@ function createMainWindow(partition?: string): BrowserWindow {
 			nodeIntegration: false,
 		},
 	});
+	if (process.platform === "win32") {
+		let saveTimer: NodeJS.Timeout | undefined;
+		const saveSize = () => {
+			if (win.isDestroyed() || win.isMaximized() || win.isMinimized()) return;
+			const [currentWidth, currentHeight] = win.getSize();
+			if (saveTimer) clearTimeout(saveTimer);
+			saveTimer = setTimeout(() => writeWindowSize(currentWidth, currentHeight), 250);
+		};
+		win.on("resize", saveSize);
+		win.on("close", () => {
+			if (saveTimer) clearTimeout(saveTimer);
+			if (!win.isMaximized() && !win.isMinimized()) {
+				const [currentWidth, currentHeight] = win.getSize();
+				writeWindowSize(currentWidth, currentHeight);
+			}
+		});
+	}
 
 	applyWindowBranding(win);
 	forwardWindowState(win);
@@ -156,4 +176,25 @@ function createMainWindow(partition?: string): BrowserWindow {
 		void win.loadFile(join(import.meta.dirname, "../renderer/index.html"));
 	}
 	return win;
+}
+
+const windowSizeFile = join(app.getPath("userData"), "window-size-v1.json");
+
+function readWindowSize(): { width: number; height: number } | null {
+	try {
+		const value: unknown = JSON.parse(readFileSync(windowSizeFile, "utf8"));
+		if (typeof value !== "object" || value === null || !("width" in value) || !("height" in value)) return null;
+		const { width, height } = value;
+		if (typeof width !== "number" || typeof height !== "number" || !Number.isFinite(width) || !Number.isFinite(height)) return null;
+		if (width < 400 || height < 300) return null;
+		return { width: Math.round(width), height: Math.round(height) };
+	} catch { return null; }
+}
+
+function writeWindowSize(width: number, height: number): void {
+	try {
+		mkdirSync(dirname(windowSizeFile), { recursive: true });
+		writeFileSync(`${windowSizeFile}.tmp`, JSON.stringify({ width, height }), { mode: 0o600 });
+		renameSync(`${windowSizeFile}.tmp`, windowSizeFile);
+	} catch (error) { console.error("Window size could not be saved", error); }
 }

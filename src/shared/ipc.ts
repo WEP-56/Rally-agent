@@ -244,9 +244,11 @@ export interface ChatDelivery {
 
 export type InboxAction = { action: "resume" } | { action: "cancel" | "retry"; id: string };
 
-export type ChatActivity = "thinking" | "replying" | "querying" | "planning" | "orchestrating" | "compacting";
+export type ChatActivity = "thinking" | "replying" | "querying" | "planning" | "orchestrating" | "compacting" | "tooling";
 
 export interface ChatHeaderState {
+	/** Real main-loop outcome; a short-lived presentation hint, never task success. */
+	loopResult?: { outcome: "completed" | "error" | "aborted"; at: number };
 	activity: ChatActivity | null;
 	showCompact: boolean;
 	showNewConversation: boolean;

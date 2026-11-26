@@ -174,7 +174,7 @@ export function RightPanel({
           const task = t.taskId ? tasks.find((x) => x.id === t.taskId) : undefined;
           return (
             <div key={t.id} className={cn("absolute inset-0", t.id !== active && "hidden")}>
-              {t.kind === "workstation" && <Workstation tasks={tasks} />}
+              {t.kind === "workstation" && <Workstation tasks={tasks} visible={visible && t.id === active && !drawer} />}
               {t.kind === "connections" && <ConnectionsView visible={visible && t.id === active} />}
               {t.kind === "resource" && t.resource && <ResourceView resource={t.resource} visible={visible && t.id === active} />}
               {t.kind === "task" && task && <TaskView task={task} onMention={onMention} />}

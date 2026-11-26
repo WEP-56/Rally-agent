@@ -47,6 +47,7 @@ export interface Config {
   accent: string;
   fontSize: "sm" | "md" | "lg";
   density: "compact" | "cozy";
+  reduceMotion: boolean;
   mcp: McpServer[];
   skills: Skill[];
 }
@@ -63,6 +64,7 @@ export const DEFAULT_CONFIG: Config = {
   accent: DEFAULT_SEED_HEX,
   fontSize: "md",
   density: "cozy",
+  reduceMotion: false,
   mcp: [
     { id: "m1", name: "filesystem", transport: "stdio", command: "npx -y @modelcontextprotocol/server-filesystem ~/projects", enabled: true, tools: 11 },
     { id: "m2", name: "github", transport: "stdio", command: "npx -y @modelcontextprotocol/server-github", enabled: true, tools: 26 },
@@ -93,7 +95,7 @@ export function loadConfig(): Config {
 }
 export function saveConfig(c: Config) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(window.runtime?.mode==="cloud"?{theme:c.theme,accent:c.accent,fontSize:c.fontSize,density:c.density}:c));
+    localStorage.setItem(KEY, JSON.stringify(window.runtime?.mode==="cloud"?{theme:c.theme,accent:c.accent,fontSize:c.fontSize,density:c.density,reduceMotion:c.reduceMotion}:c));
   } catch {
     /* ignore */
   }

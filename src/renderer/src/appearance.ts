@@ -4,7 +4,7 @@ import { applyMd3TokensToRoot } from "./md3/theme";
 import type { Config } from "./store";
 
 /** Keep the page and the Android window on the same resolved theme. */
-export function useAppearance(config: Pick<Config, "theme" | "accent" | "fontSize">) {
+export function useAppearance(config: Pick<Config, "theme" | "accent" | "fontSize" | "reduceMotion">) {
   const [systemDark, setSystemDark] = useState(() => window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false);
   useEffect(() => {
     const query = window.matchMedia?.("(prefers-color-scheme: dark)");
@@ -20,5 +20,8 @@ export function useAppearance(config: Pick<Config, "theme" | "accent" | "fontSiz
   useEffect(() => {
     document.documentElement.style.fontSize = { sm: "14px", md: "15px", lg: "16.5px" }[config.fontSize];
   }, [config.fontSize]);
+  useEffect(() => {
+    document.documentElement.dataset.reduceMotion = String(config.reduceMotion === true);
+  }, [config.reduceMotion]);
   return dark;
 }

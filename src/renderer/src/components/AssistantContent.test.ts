@@ -41,6 +41,7 @@ describe("Rally conversation rendering (no browser)", () => {
 		expect(html).not.toContain("已读取");
 		expect(html).not.toContain("思考过程");
 		expect(html).not.toContain("正在规划");
+		expect(html).not.toContain("absolute -left-9 top-1");
 		expect(html).toContain("待命");
 		expect(html).not.toContain("整理上下文 (Ctrl+Shift+N)");
 		expect(html).not.toContain("新建会话 (Ctrl+N)");

@@ -76,6 +76,7 @@ export class MainAgent {
 	private streaming: { line: ChatLine } | null = null;
 	private nextLine = 1;
 	private busy = false;
+	private loopFailed = false;
 	private compactions = 0;
 	private header: ChatHeaderState = { activity: null, showCompact: false, showNewConversation: false };
 	private localSubmissions = 0;
@@ -733,6 +734,8 @@ export class MainAgent {
 				this.setActivity(this.busy && event.reason !== "manual" ? "thinking" : null);
 				return;
 			case "agent_start":
+				this.loopFailed = false;
+				this.header = { ...this.header, loopResult: undefined };
 				this.setBusy(true);
 				this.setActivity("thinking");
 				return;
@@ -741,6 +744,8 @@ export class MainAgent {
 				this.finishStreaming();
 				return;
 			case "agent_settled":
+				this.header = { ...this.header, loopResult: { outcome: event.aborted ? "aborted" : this.loopFailed ? "error" : "completed", at: Date.now() } };
+				this.emit({ type: "header", header: this.header });
 				if (event.aborted && this.activeInput) this.inputError ??= "处理被中断，请检查已有进展后重试。";
 				this.contextBefore = undefined;
 				if (this.session) this.rotateSession(this.session.sessionManager);
@@ -802,6 +807,7 @@ export class MainAgent {
 				this.updateStreaming(event.message);
 				this.finishStreaming();
 				if (this.activeInput && !this.inboxPaused && event.message.stopReason !== "error" && event.message.stopReason !== "aborted") this.inputError = undefined;
+				this.loopFailed = event.message.stopReason === "error";
 				if (event.message.stopReason === "error") {
 					const error = event.message.errorMessage || "模型未能完成这条消息。";
 					if (this.activeInput) this.inputError = error;
@@ -933,6 +939,9 @@ export class MainAgent {
 	}
 
 	private fail(error: unknown): void {
+		this.loopFailed = true;
+		this.header = { ...this.header, loopResult: { outcome: "error", at: Date.now() } };
+		this.emit({ type: "header", header: this.header });
 		const message = error instanceof Error ? error.message : String(error);
 		this.finishStreaming();
 		this.addLine("system", `出错了：${message}`);
@@ -1004,7 +1013,8 @@ function countCompactions(manager: SessionManager): number {
 function toolActivity(name: string): ChatActivity {
 	if (QUERY_TOOLS.has(name)) return "querying";
 	if (name === "task_dispatch" || name === "schedule_create") return "planning";
-	return "orchestrating";
+	if (name.startsWith("task_") || name.startsWith("schedule_")) return "orchestrating";
+	return "tooling";
 }
 
 function imKey(source: ImSource): string {

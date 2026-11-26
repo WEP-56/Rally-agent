@@ -1,3 +1,5 @@
+import { useApp } from "../store";
+import type { ChatActivity } from "../../../shared/ipc";
 import clsx from "clsx";
 import { AlertCircle } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -11,14 +13,7 @@ import {
 import { SPRING_FAST, SPRING_JELLY } from "../md3/springs";
 
 /** Matches Rally's real `ChatActivity` union in `src/shared/ipc.ts` */
-export type RallyChatActivity =
-  | "idle"
-  | "thinking"
-  | "querying"
-  | "planning"
-  | "orchestrating"
-  | "replying"
-  | "compacting";
+export type RallyChatActivity = "idle" | ChatActivity;
 
 export const ACTIVITY_LABELS: Record<RallyChatActivity, string> = {
   idle: "待命",
@@ -28,6 +23,7 @@ export const ACTIVITY_LABELS: Record<RallyChatActivity, string> = {
   orchestrating: "编排中",
   replying: "回复中",
   compacting: "整理中",
+  tooling: "调用工具",
 };
 
 /* ─── Live Undulating MD3 12-Wave Halo Medallion ─── */
@@ -235,6 +231,8 @@ export function PresenceCapsule({
   rightOpen: boolean;
   onOpenWorkstation: () => void;
 }) {
+  const { config } = useApp();
+  const customAvatar = config.avatar?.startsWith("data:image/png;base64,");
   const unarchived = tasks.filter((t) => t.archivedAt === undefined);
   const runningTasks = unarchived.filter((t) => t.status === "running");
   const attentionTasks = unarchived.filter(
@@ -288,11 +286,11 @@ export function PresenceCapsule({
 
       {/* Prominent Unclipped MD3 12-Wave Halo Medallion */}
       <div className="relative z-10 flex items-center">
-        <LivingWavyMedallion
+        {customAvatar ? <LivingWavyMedallion
           personaName={personaName}
           mode={medallionMode}
           hasAttention={attentionTasks.length > 0}
-        />
+        /> : <AgentAvatar mascot animated size={48} className="relative -ml-1" />}
       </div>
 
       {/* Name + Context-Aware Live Subtitle */}

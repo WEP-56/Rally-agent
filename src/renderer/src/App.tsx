@@ -1,3 +1,4 @@
+import { MascotStateContext, useMascotState } from "./mascot/state";
 import { SPRING_FAST, SPRING_PANEL } from "./md3/springs";
 import { MdSnackbar } from "./md3/components";
 import { useBrowserOverlay } from "./browser-overlays";
@@ -64,7 +65,7 @@ export default function App() {
   const [maximized, setMaximized] = useState(false);
   const [palette, setPalette] = useState(false);
 
-  const [rightOpen, setRightOpen] = useState(() => !matchMedia("(max-width: 767px)").matches);
+  const [rightOpen, setRightOpen] = useState(false);
   const [narrow, setNarrow] = useState(() => matchMedia("(max-width: 767px)").matches);
   const [panelAnimating, setPanelAnimating] = useState(false);
   useEffect(() => {
@@ -213,6 +214,7 @@ export default function App() {
 
   /* ---------------- chat ---------------- */
   const chat = useChat();
+  const mascotState = useMascotState(chat.header);
   const stop = () => void chat.abort();
   const [phase, setPhase] = useState<ChatSessionPhase | null>(null);
   const [operation, setOperation] = useState<ChatSessionOperation>("compact");
@@ -413,7 +415,7 @@ export default function App() {
   const ctx: AppCtx = { config, setConfig, identityReady, identityError, reloadIdentity, openTab, openAgentBrowser, openResource, openTask, openSettings, rerunOnboarding };
 
   return (
-    <MotionConfig reducedMotion="user"><Ctx.Provider value={ctx}>
+    <MotionConfig reducedMotion={config.reduceMotion ? "always" : "user"}><Ctx.Provider value={ctx}><MascotStateContext.Provider value={mascotState}>
       <div data-platform={window.runtime.platform} className="relative flex h-full w-full flex-col overflow-hidden bg-app">
           <div className="desktop-bar"><TitleBar menus={cloud?menus.map(m=>({...m,groups:m.groups?.map(g=>g.filter(i=>i.label!=="终端"))})):menus} onSearch={() => setPalette(true)} maximized={maximized} onMin={minimize} onMax={toggleMax} onClose={close} onDoubleClick={toggleMax} /></div>
 
@@ -508,6 +510,6 @@ export default function App() {
             />
           )}
       </div>
-    </Ctx.Provider></MotionConfig>
+    </MascotStateContext.Provider></Ctx.Provider></MotionConfig>
   );
 }

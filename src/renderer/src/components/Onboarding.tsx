@@ -10,6 +10,8 @@ import { Button, RallyLogo } from "./ui";
 import { IdentityForm, MemoryForm, ProvidersForm } from "./forms";
 import { WindowControls } from "./TitleBar";
 import { ConnectionForm } from "./ConnectionForm";
+import { MochiMascotSvg } from "../mascot/MochiMascotSvg";
+import { DEFAULT_PHYSICS } from "../mascot/types";
 
 const STEPS = [
   { key: "welcome" },
@@ -98,6 +100,24 @@ export function Onboarding({ onDone, maximized, onMin, onMax, onClose }: { onDon
                     <div className="mb-2 text-xs font-medium text-accent">步骤 {i} / {last - 1}</div>
                     <h2 className="text-2xl font-semibold tracking-tight">{st.key === "connection" && window.runtime.platform === "android" ? "连接你的云端 Rally" : st.title}</h2>
                     <p className="mb-7 mt-2 text-sm text-muted">{st.key === "connection" && window.runtime.platform === "android" ? "确认服务器连接，继续设置你的 Agent。" : st.desc}</p>
+                    {st.key === "identity" && (
+                      <div className="mb-4 flex items-center gap-3 rounded-2xl bg-md-primary-container/60 px-3.5 py-3 text-md-on-primary-container">
+                        <MochiMascotSvg
+                          state="idle"
+                          physics={DEFAULT_PHYSICS}
+                          size={56}
+                          showSquircleBg={false}
+                          interactive={false}
+                          paused={i !== step}
+                          reducedMotion={config.reduceMotion}
+                          className="shrink-0"
+                        />
+                        <div className="relative rounded-2xl bg-md-surface-lowest px-3.5 py-2.5 text-[13px] leading-relaxed text-fg shadow-soft">
+                          <span className="absolute -left-1 top-1/2 h-2 w-2 -translate-y-1/2 rotate-45 rounded-[2px] bg-md-surface-lowest" aria-hidden="true" />
+                          使用默认头像，我就能一直陪着你哦
+                        </div>
+                      </div>
+                    )}
                     <div className="rounded-3xl bg-panel p-5 shadow-card">
                       {st.key === "connection" && <ConnectionForm onContinue={next} />}
                       {st.key === "identity" && <IdentityForm />}

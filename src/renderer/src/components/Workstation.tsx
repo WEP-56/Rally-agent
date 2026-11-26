@@ -16,10 +16,11 @@ import { canArchiveTask } from "../../../shared/task";
 import { SchedulesSection } from "./SchedulesSection";
 import { ScheduledWorkerBadge } from "./ScheduledWorkerBadge";
 
-function BusinessCard({ busy }: { busy: boolean }) {
+function BusinessCard({ busy, visible }: { busy: boolean; visible: boolean }) {
  const { config, openSettings } = useApp();
+ const customAvatar = config.avatar?.startsWith("data:image/png;base64,");
  return <div className="flex flex-col items-center pt-1 text-center">
-  <div className="relative flex h-[132px] w-full items-center justify-center"><OrbitRingMd3 size={286} active={busy} /><div className="relative"><PlayfulPersonaCharm name={config.name} size={96} busy={busy}><AgentAvatar size={62} className="relative z-10 rounded-full pointer-events-none" /></PlayfulPersonaCharm><ActionButton title="编辑身份" onClick={() => openSettings("general")} className="glass-strong absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full text-fg/70 hover:text-fg"><Pencil size={12} /></ActionButton></div></div>
+  <div className="relative flex h-[132px] w-full items-center justify-center">{customAvatar && <OrbitRingMd3 size={286} active={busy} />}<div className="relative">{customAvatar ? <PlayfulPersonaCharm name={config.name} size={96} busy={busy}><AgentAvatar size={62} className="relative z-10 rounded-full pointer-events-none" /></PlayfulPersonaCharm> : <AgentAvatar mascot animated size={128} interactive paused={!visible} />}<ActionButton title="编辑身份" onClick={() => openSettings("general")} className="glass-strong absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full text-fg/70 hover:text-fg"><Pencil size={12} /></ActionButton></div></div>
   <h1 className="font-display mt-1 text-[36px] font-semibold leading-none tracking-tight">{config.name}</h1>
  </div>;
 }
@@ -35,7 +36,7 @@ const FILTERS: { v: Filter; l: string }[] = [
   { v: "done", l: "已完成" },
 ];
 
-export function Workstation({ tasks }: { tasks: Task[] }) {
+export function Workstation({ tasks, visible = true }: { tasks: Task[]; visible?: boolean }) {
 	const { openTask } = useApp();
   const filterId = useId();
   const [order, setOrder] = useState<"desc" | "asc">("desc");
@@ -49,7 +50,7 @@ export function Workstation({ tasks }: { tasks: Task[] }) {
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-[620px] px-5 pb-24 pt-2">
-        <BusinessCard busy={tasks.some(task => task.archivedAt === undefined && task.status === "running")} />
+        <BusinessCard visible={visible} busy={tasks.some(task => task.archivedAt === undefined && task.status === "running")} />
         <div className="mt-8 flex items-center justify-between">
           <div className="font-display text-[19px] font-semibold">
             任务 <span className="ml-1 font-normal text-faint">{list.length}</span>
