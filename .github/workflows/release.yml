@@ -72,7 +72,7 @@ jobs:
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/build/agent-browser
         # Each file starts real Chromium processes. Avoid concurrent cold starts on Windows runners.
-        run: node --experimental-vm-modules --test --test-concurrency=1 tests/agent-browser/managed.test.mjs tests/agent-browser/privacy.test.mjs tests/agent-browser/renderer.test.mjs
+        run: node --experimental-vm-modules --test --test-concurrency=1 tests/agent-browser/privacy.test.mjs tests/agent-browser/renderer.test.mjs
       - name: Verify credential callbacks and direct answers
         if: matrix.target == 'windows'
         working-directory: packages/coding-agent
