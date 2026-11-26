@@ -45,7 +45,7 @@ Rally 是一个开源的 24/7 AI个人助手。陪你聊聊想法，也能打开
 
 ## 想要开发一个 Personal agent，推荐你看看
 - [Anthropic - always on agents](https://claude.com/resources/articles/building-always-on-agents)：24/7 个人助手与coding agent的关键区别
-- [dsh-superagent]（https://github.com/deepseek-ai/dsh-superagent-prototype）：我认为，superagent 的思路是让 Personal agent 可以一个会话尽可能无限畅聊的核心架构。顺便，你可能需要一个激进的上下文压缩策略。
+- [dsh-superagent](https://github.com/deepseek-ai/dsh-superagent-prototype)：我认为，superagent 的思路是让 Personal agent 可以一个会话尽可能无限畅聊的核心架构。顺便，你可能需要一个激进的上下文压缩策略。
 - [WEP](https://taoran.weppp.cyou/posts/personal-agent)：我对 Personal agent的一些理解。欢迎观看😳
 - GROK bot、Muse、Hark、Today 等商业化项目，试试从它们的嘴巴里“翘”出来点好东西。
 - 连接器！抱歉，开源社区在这里无法做到尽善尽美😔，那是企业私有的东西
