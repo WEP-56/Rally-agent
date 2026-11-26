@@ -7,10 +7,13 @@ import { EventLog } from "../../../../src/main/supervisor/event-log.ts";
 import { TaskStore } from "../../../../src/main/supervisor/task-store.ts";
 import { TaskSnapshot } from "../../../../src/main/supervisor/task-snapshot.ts";
 import { ScheduledTasks } from "../../../../src/main/supervisor/schedules.ts";
+import { Scheduler } from "../../../../src/main/supervisor/scheduler.ts";
+import { rallyState } from "../../../../src/main/supervisor/rally-state.ts";
+import { applyTask } from "../../../../src/shared/cloud-state.ts";
 import type { TaskEvent } from "../../../../src/shared/ipc.ts";
 import { createHarness, type Harness } from "./harness.ts";
 
-describe("archived task deletion (offline)", () => {
+describe("task archiving and deletion (offline)", () => {
 	const harnesses: Harness[] = []; const supervisors: Supervisor[] = [];
 	afterEach(async () => {
 		await Promise.all(supervisors.splice(0).map(supervisor => supervisor.dispose()));
@@ -26,6 +29,81 @@ describe("archived task deletion (offline)", () => {
 		const archive = (id: string) => { supervisor.store.cancel(id, "system"); supervisor.archive(id, true); };
 		return { paths, supervisor, create, archive, updates };
 	}
+	it.each(["interrupted", "blocked"] as const)("archives %s work without changing its outcome or restarting on restore", async status => {
+		const { paths, supervisor, create } = await setup();
+		const task = create();
+		const run = supervisor.store.startRun(task.id, "dispatch", "offline");
+		if (status === "interrupted") supervisor.store.endRunInterrupted(task.id, "interrupted");
+		else supervisor.store.report(task.id, run.id, "blocked", "等待补充条件");
+		expect(supervisor.board().tasks[0].status).toBe(status);
+		const board = supervisor.archive(task.id, true);
+		expect(board.tasks).toHaveLength(1);
+		expect(board.tasks[0]).toMatchObject({ status, archivedAt: expect.any(Number), ended: undefined });
+		const updatedBoard = applyTask(board, { type: "task", task: supervisor.store.view(task) });
+		expect(applyTask(updatedBoard, { type: "task", task: supervisor.store.view(task) }).tasks).toHaveLength(1);
+		const state = JSON.parse(rallyState(supervisor.store, 0, 2, false).split("\n")[1]);
+		expect(state.tasks).toEqual([]);
+		expect(run).toMatchObject({ endedAt: expect.any(Number), endReason: status });
+		expect(() => supervisor.store.steer(task.id, [], "继续")).toThrow("task_resume");
+		supervisor.snapshot.flush();
+		for (const records of [supervisor.events.all(), supervisor.snapshot.replay()]) {
+			const store = new TaskStore(supervisor.events, paths.workspaceDir, () => {}, undefined, records);
+			const restored = store.get(task.id)!;
+			const start = vi.fn(async () => {});
+			const wake = vi.fn();
+			const scheduler = new Scheduler({ store, events: supervisor.events, activeIds: () => [], pendingIds: () => [task.id], start, wake, onDependencyFailed: vi.fn() });
+			try {
+				expect(store.board(0, 2).tasks).toHaveLength(1);
+				expect(restored.archivedAt).toBeTypeOf("number");
+				// Approved tasks must remain idle both in the archive and after restoration.
+				store.approve(task.id, "button", []);
+				scheduler.tick();
+				store.archive(task.id, false);
+				scheduler.tick();
+				expect(store.board(0, 2).tasks[0]).toMatchObject({ status, archivedAt: undefined });
+				expect(start).not.toHaveBeenCalled();
+				expect(wake).not.toHaveBeenCalled();
+				store.archive(task.id, true);
+				store.resume(task.id, { autoApprove: true, note: "继续任务" });
+				scheduler.tick();
+				expect(restored.archivedAt).toBeUndefined();
+				expect(start).toHaveBeenCalledOnce();
+				expect(restored.runs).toHaveLength(2);
+			} finally { scheduler.dispose(); }
+		}
+	});
+	it.each(["interrupted", "blocked"] as const)("deletes archived %s work while protecting unfinished dependants", async status => {
+		const { supervisor, create, archive } = await setup();
+		const task = create();
+		const run = supervisor.store.startRun(task.id, "dispatch", "offline");
+		if (status === "interrupted") supervisor.store.endRunInterrupted(task.id, "interrupted");
+		else supervisor.store.report(task.id, run.id, "blocked", "等待补充条件");
+		supervisor.archive(task.id, true);
+		const child = create([task.id]);
+		await expect(supervisor.deleteArchived(task.id)).rejects.toThrow("依赖");
+		archive(child.id);
+		await supervisor.deleteArchived(task.id);
+		expect(supervisor.store.get(task.id)).toBeUndefined();
+	});
+	it("rejects archiving pending, running, answering, or still-streaming workers", async () => {
+		const { supervisor, create } = await setup();
+		const task = create();
+		expect(() => supervisor.archive(task.id, true)).toThrow("请先");
+		const run = supervisor.store.startRun(task.id, "dispatch", "offline");
+		supervisor.store.report(task.id, run.id, "progress", "进行中");
+		expect(() => supervisor.archive(task.id, true)).toThrow("请先");
+		const result = supervisor.store.report(task.id, run.id, "blocked", "等待选择", "选择哪个？");
+		supervisor.store.escalateAttention(task.id, result.attention!.id);
+		expect(() => supervisor.archive(task.id, true)).toThrow("请先");
+		supervisor.store.report(task.id, run.id, "blocked", "已停止", null);
+		const streaming = vi.spyOn(supervisor.workers, "streamingIds").mockReturnValue([task.id]);
+		expect(() => supervisor.archive(task.id, true)).toThrow("仍在执行");
+		streaming.mockRestore();
+		supervisor.store.recordJob({ id: "J-1", taskId: task.id, runId: run.id, shell: "powershell", command: "fixture", cwd: task.cwd, status: "running", startedAt: 1 }, "job_started");
+		expect(() => supervisor.archive(task.id, true)).toThrow();
+		expect(task.archivedAt).toBeUndefined();
+		expect(run.endedAt).toBeUndefined();
+	});
 	it("permanently removes archived tasks and private files, preserves user outputs, and survives both recovery paths", async () => {
 		const { paths, supervisor, create, archive, updates } = await setup(); const task = create();
 		const session = join(paths.sessionsTasksDir, `${task.id}.jsonl`);
@@ -87,7 +165,7 @@ describe("archived task deletion (offline)", () => {
 			now += 60000; schedules.poll(); const first = supervisor.store.list()[0]; archive(first.id); await supervisor.deleteArchived(first.id);
 			expect(schedules.list()[0]).toMatchObject({ lastTaskDeleted: true, enabled: true });
 			now += 60000; schedules.poll(); const next = supervisor.store.list()[0]; expect(next.id).not.toBe(first.id);
-			expect(supervisor.board().tasks[0].schedule).toEqual({ id: plan.id, dueAt: now });
+			expect(supervisor.board().tasks[0].schedule).toEqual({ id: plan.id, dueAt: now, timing: { kind: "interval", minutes: 1 } });
 			expect(schedules.list()[0].lastTaskDeleted).toBe(false);
 		} finally { schedules.dispose(); }
 	});

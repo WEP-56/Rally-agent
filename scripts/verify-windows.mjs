@@ -18,7 +18,7 @@ assert.deepEqual(ico, readFileSync('build/icon.ico'));
 assert.equal(ico.readUInt16LE(2), 1);
 const sizes = Array.from({ length: ico.readUInt16LE(4) }, (_, index) => ico[6 + 16 * index] || 256);
 for (const size of [16, 32, 48, 256]) assert.ok(sizes.includes(size), `Missing Windows icon size ${size}`);
-assert.deepEqual(readFileSync(join(resources, 'icon.png')), readFileSync('docs/icon.png'));
+assert.deepEqual(readFileSync(join(resources, 'icon.png')), readFileSync('build/icon.png'));
 assert.ok(statSync(join(resources, 'skills', 'SKILL.md')).isFile(), 'Missing top-level built-in Skill index');
 for (const name of ['identity.md', 'coach.md', 'model-provider.md', 'media-search.md', 'mcp.md', 'skills.md', 'roles.md', 'external-agents.md']) {
   assert.ok(statSync(join(resources, 'skills', 'references', name)).isFile(), `Missing built-in Skill reference ${name}`);

@@ -1,134 +1,30 @@
-// Settings model picker: providers as dim group captions, models beneath, and a
-// fly-out to the right for thinking strength (only when the model supports it).
-
-import { useState } from "react";
-import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import type { ModelSummary, ThinkingLevelName } from "../../../shared/models";
-import { cn } from "../utils/cn";
-import { useClickOutside } from "./ui";
+import { ChoiceSelect } from "../md3/Select";
 
 const LEVEL_LABEL: Record<string, string> = {
-	off: "关闭",
-	minimal: "极低",
-	low: "低",
-	medium: "中",
-	high: "高",
-	xhigh: "很高",
-	max: "最高",
+  off: "关闭", minimal: "极低", low: "低", medium: "中", high: "高", xhigh: "很高", max: "最高",
 };
 
-export function ModelPicker({
-	models,
-	model,
-	thinkingLevel,
-	onSelect,
-}: {
-	models: ModelSummary[];
-	model: string | null;
-	thinkingLevel: string | null;
-	onSelect: (provider: string, model: string, level?: ThinkingLevelName) => void;
+export function ModelPicker({ models, model, thinkingLevel, onSelect }: {
+  models: ModelSummary[];
+  model: string | null;
+  thinkingLevel: string | null;
+  onSelect: (provider: string, model: string, level?: ThinkingLevelName) => void;
 }) {
-	const [open, setOpen] = useState(false);
-	const [hovered, setHovered] = useState<ModelSummary | null>(null);
-	const ref = useClickOutside<HTMLDivElement>(open, () => setOpen(false));
-
-	const current = models.find((entry) => `${entry.provider}/${entry.id}` === model) ?? null;
-	const groups: { provider: string; providerName: string; models: ModelSummary[] }[] = [];
-	for (const entry of models) {
-		const group = groups.find((g) => g.provider === entry.provider);
-		if (group) group.models.push(entry);
-		else groups.push({ provider: entry.provider, providerName: entry.providerName, models: [entry] });
-	}
-	const panel = hovered?.reasoning && hovered.thinkingLevels.length > 0 ? hovered : null;
-
-	const pick = (entry: ModelSummary) => {
-		if (entry.reasoning && entry.thinkingLevels.length > 0) {
-			setHovered(entry);
-			// The model applies immediately; the panel stays open for the level choice.
-			onSelect(entry.provider, entry.id, current?.provider === entry.provider && current.id === entry.id ? (thinkingLevel as ThinkingLevelName) : undefined);
-			return;
-		}
-		onSelect(entry.provider, entry.id);
-		setOpen(false);
-	};
-
-	return (
-		<div ref={ref} className="model-picker relative">
-			<button
-				type="button"
-				onClick={() => setOpen((v) => !v)}
-				className={cn(
-					"flex h-8 max-w-[190px] items-center gap-1.5 rounded-full px-2.5 text-[12.5px] text-muted transition-colors hover:bg-hover hover:text-fg",
-					open && "bg-hover text-fg",
-				)}
-				title={current ? `${current.providerName} · ${current.id}` : "选择模型"}
-			>
-				<span className="truncate">{current ? current.name : "选择模型"}</span>
-				<ChevronDown size={13} className={cn("shrink-0 text-faint transition-transform", open && "rotate-180")} />
-			</button>
-			{open && (
-				<div className="model-picker-menu glass-strong animate-pop absolute right-0 top-full z-50 mt-1.5 flex rounded-2xl p-1.5 shadow-pop">
-					<div className="model-picker-list max-h-72 w-60 overflow-auto">
-						{models.length === 0 && (
-							<div className="px-2.5 py-3 text-[11px] leading-relaxed text-faint">
-								还没有可用模型。
-								<br />
-								请到 设置 → 供应商 中添加并保存。
-							</div>
-						)}
-						{groups.map((group) => (
-							<div key={group.provider}>
-								<div className="px-2.5 pb-1 pt-2 text-[11px] font-medium text-faint">{group.providerName}</div>
-								{group.models.map((entry) => {
-									const active = current?.provider === entry.provider && current.id === entry.id;
-									return (
-										<button
-											key={entry.id}
-											type="button"
-											onMouseEnter={() => setHovered(entry)}
-											onFocus={() => setHovered(entry)}
-											onClick={() => pick(entry)}
-											className={cn(
-												"flex w-full items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-hover",
-												active && "text-fg",
-											)}
-										>
-											<span className="flex-1 truncate">{entry.name}</span>
-											{active && <Check size={14} className="shrink-0 text-accent" />}
-											{entry.reasoning && entry.thinkingLevels.length > 0 && (
-												<ChevronRight size={13} className="shrink-0 text-faint" />
-											)}
-										</button>
-									);
-								})}
-							</div>
-						))}
-					</div>
-					{panel && (
-						<div className="model-picker-levels ml-1 w-28 shrink-0 border-l border-line pl-1">
-							<div className="px-2.5 pb-1 pt-2 text-[11px] font-medium text-faint">思考强度</div>
-							{panel.thinkingLevels.map((level) => {
-								const active =
-									current?.provider === panel.provider && current.id === panel.id && thinkingLevel === level;
-								return (
-									<button
-										key={level}
-										type="button"
-										onClick={() => {
-											onSelect(panel.provider, panel.id, level);
-											setOpen(false);
-										}}
-										className="flex w-full items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-hover"
-									>
-										<span className="flex-1">{LEVEL_LABEL[level] ?? level}</span>
-										{active && <Check size={14} className="shrink-0 text-accent" />}
-									</button>
-								);
-							})}
-						</div>
-					)}
-				</div>
-			)}
-		</div>
-	);
+  const current = models.find(entry => `${entry.provider}/${entry.id}` === model);
+  return <div className="flex min-w-0 flex-wrap items-center gap-2">
+    <ChoiceSelect aria-label="选择模型" value={model ?? ""} placeholder={models.length ? "选择模型" : "请先添加供应商"}
+      className="max-w-[240px] text-xs" disabled={!models.length}
+      options={models.map(entry => ({ value: `${entry.provider}/${entry.id}`, label: entry.name, group: entry.providerName }))}
+      onValueChange={value => {
+        const next = models.find(entry => `${entry.provider}/${entry.id}` === value);
+        if (next) onSelect(next.provider, next.id, next === current ? thinkingLevel as ThinkingLevelName : undefined);
+      }} />
+    {current?.reasoning && current.thinkingLevels.length > 0 && <ChoiceSelect aria-label="思考强度" value={thinkingLevel ?? ""} placeholder="思考强度"
+      className="text-xs" options={current.thinkingLevels.map(level => ({ value: level, label: LEVEL_LABEL[level] ?? level }))}
+      onValueChange={value => {
+        const level = current.thinkingLevels.find(level => level === value);
+        if (level) onSelect(current.provider, current.id, level);
+      }} />}
+  </div>;
 }

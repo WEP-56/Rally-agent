@@ -1,3 +1,6 @@
+import { SPRING_LAYOUT } from "../md3/springs";
+import { motion } from "motion/react";
+import { ActionButton } from "../md3/interactive";
 import { useEffect, useRef, useState } from "react";
 import { Download, Eye, EyeOff, Info, Loader2, Plus, Trash2 } from "lucide-react";
 import {
@@ -43,7 +46,7 @@ export function IdentityForm() {
   const loading = !identityReady && !identityError;
   return (
     <div>
-    <div className="glass-strong divide-y divide-line overflow-hidden rounded-[24px]">
+    <div className="glass-strong flex flex-col gap-2 [&>div]:rounded-[20px] [&>div]:bg-md-surface-low overflow-hidden rounded-[24px]">
       <div className="identity-avatar-field grid grid-cols-[56px_minmax(0,1fr)] items-center gap-x-4 gap-y-3 px-5 py-4">
         <AgentAvatar size={56} />
         <div className="min-w-0"><div className="text-[14px] font-medium">头像</div><div className="mt-0.5 text-[12.5px] leading-relaxed text-muted">PNG、JPEG 或 WebP，5 MiB 以内；居中裁成正方形</div></div>
@@ -136,12 +139,12 @@ function ModelRow({
 					placeholder="模型名"
 					className="h-6 min-w-0 flex-1 rounded bg-transparent px-1 font-mono text-[12px] hover:bg-hover focus:bg-sunken"
 				/>
-				<button onClick={() => setOpen((v) => !v)} className="rounded px-1.5 py-0.5 text-[11px] text-muted hover:bg-hover hover:text-fg">
+				<ActionButton onClick={() => setOpen((v) => !v)} className="rounded px-1.5 py-0.5 text-[11px] text-muted hover:bg-hover hover:text-fg">
 					{open ? "收起" : "元数据"}
-				</button>
-				<button onClick={onRemove} className="rounded p-1 text-faint hover:bg-red-500/10 hover:text-red-500">
+				</ActionButton>
+				<ActionButton onClick={onRemove} className="rounded p-1 text-faint hover:bg-red-500/10 hover:text-red-500">
 					<Trash2 size={13} />
-				</button>
+				</ActionButton>
 			</div>
 			{!open && (
 				<div className="mt-1 px-1 text-[11px] text-faint">
@@ -168,7 +171,7 @@ function ModelRow({
 							<div className="flex flex-wrap items-center gap-1">
 								<span className="mr-1 text-[11px] text-faint">档位</span>
 								{THINKING_LEVELS.filter((level) => level !== "off").map((level) => (
-									<button
+									<ActionButton
 										key={level}
 										onClick={() => toggleLevel(level)}
 										className={cn(
@@ -177,7 +180,7 @@ function ModelRow({
 										)}
 									>
 										{LEVEL_LABEL[level]}
-									</button>
+									</ActionButton>
 								))}
 								<span className="text-[11px] text-faint">不选 = Pi 默认档位</span>
 							</div>
@@ -240,7 +243,7 @@ function ProviderCard({
 	};
 
 	return (
-		<div className="glass-strong animate-rise rounded-[24px] p-5">
+		<motion.div className="glass-strong  rounded-[24px] p-5" initial={{ opacity: 0, y: 8, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={SPRING_LAYOUT}>
 			<div className="flex items-center gap-2">
 				<div className="flex h-8 w-8 items-center justify-center rounded-lg bg-raised text-sm font-semibold text-muted shadow-soft">
 					{(provider.name || "?")[0]}
@@ -251,9 +254,9 @@ function ProviderCard({
 					placeholder="供应商名称（选择器里的浅色小字）"
 					className="h-8 flex-1 rounded-md bg-transparent px-1.5 text-sm font-medium hover:bg-hover focus:bg-panel"
 				/>
-				<button onClick={onRemove} className="rounded-md p-1.5 text-faint hover:bg-red-500/10 hover:text-red-500">
+				<ActionButton onClick={onRemove} className="rounded-md p-1.5 text-faint hover:bg-red-500/10 hover:text-red-500">
 					<Trash2 size={14} />
-				</button>
+				</ActionButton>
 			</div>
 			<div className="mt-2 flex items-center gap-2">
 				<span className="text-[11px] text-faint">协议</span>
@@ -274,11 +277,11 @@ function ProviderCard({
 						value={provider.apiKey.startsWith("已保存:") ? "" : provider.apiKey}
 						onChange={(e) => onChange({ apiKey: e.target.value })}
 					/>
-					<button onClick={() => setShow((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-faint hover:text-fg">
+					<ActionButton aria-label={show ? "隐藏 API Key" : "显示 API Key"} aria-pressed={show} onClick={() => setShow((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-full text-faint hover:text-fg">
 						{show ? <EyeOff size={14} /> : <Eye size={14} />}
-					</button>
+					</ActionButton>
 				</div>
-				{provider.apiKey.startsWith("已保存:") && <button className="text-right text-xs text-muted" onClick={() => onChange({ apiKey: "" })}>清除已保存密钥</button>}
+				{provider.apiKey.startsWith("已保存:") && <ActionButton className="text-right text-xs text-muted" onClick={() => onChange({ apiKey: "" })}>清除已保存密钥</ActionButton>}
 			</div>
 			<div className="mt-3 flex flex-wrap items-center gap-2">
 				<Button size="sm" onClick={() => void pull()} className="bg-panel shadow-soft dark:bg-raised">
@@ -312,7 +315,7 @@ function ProviderCard({
 					))}
 				</div>
 			)}
-		</div>
+		</motion.div>
 	);
 }
 
@@ -370,7 +373,7 @@ export function ProvidersForm() {
 				</Button>
 			</div>
 			{message && <div className="px-1 text-[11px] text-muted">{message}</div>}
-			{dirty && window.runtime.mode === "cloud" && <p className="text-xs text-muted">{state?.revision !== revision.current ? "服务器配置已更新。" : "当前修改仅在保存后生效。"}<button className="ml-2 text-accent" onClick={() => { dirtyRef.current=false;setDirty(false);void reload().catch(error=>setMessage(String(error))); }}>放弃修改并刷新</button></p>}
+			{dirty && window.runtime.mode === "cloud" && <p className="text-xs text-muted">{state?.revision !== revision.current ? "服务器配置已更新。" : "当前修改仅在保存后生效。"}<ActionButton className="ml-2 text-accent" onClick={() => { dirtyRef.current=false;setDirty(false);void reload().catch(error=>setMessage(String(error))); }}>放弃修改并刷新</ActionButton></p>}
 			{errors.length > 0 && (
 				<div className="flex gap-2 rounded-xl bg-red-500/5 px-3 py-2 text-[11px] leading-relaxed text-red-500">
 					<Info size={13} className="mt-0.5 shrink-0" />
@@ -398,18 +401,18 @@ export function ProvidersForm() {
 					onRemove={() => edit(draft.filter((p) => p.id !== provider.id))}
 				/>
 			))}
-			<button
+			<ActionButton
 				onClick={() =>
 					edit([
 						...draft,
 						{ id: `rp_${uid()}`, name: "", protocol: "messages", baseUrl: "", apiKey: "", models: [] },
 					])
 				}
-				className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-sunken text-sm text-muted transition-all hover:bg-deep hover:text-fg dark:hover:bg-raised"
+				className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-sunken text-sm text-muted  hover:bg-deep hover:text-fg dark:hover:bg-raised"
 			>
 				<Plus size={15} />
 				添加供应商
-			</button>
+			</ActionButton>
 			<div className="flex gap-2.5 rounded-xl bg-sunken px-3.5 py-3 text-xs leading-relaxed text-muted">
 				<Info size={14} className="mt-0.5 shrink-0 text-faint" />
 				<div>

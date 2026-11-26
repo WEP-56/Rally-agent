@@ -18,7 +18,7 @@ vi.mock("electron", () => ({
 afterEach(() => { vi.clearAllMocks(); state.packaged = false; vi.unstubAllGlobals(); });
 describe("application branding without native UI", () => {
  it("uses generated development assets and packaged extraResources", () => {
-  expect(applicationIcon()).toBe(join("D:/fixture", process.platform === "win32" ? "build/icon.ico" : "icon.png"));
+  expect(applicationIcon()).toBe(join("D:/fixture", process.platform === "win32" ? "build/icon.ico" : "build/icon.png"));
   state.packaged = true;
   vi.stubGlobal("process", { ...process, resourcesPath: "D:/installed/resources" });
   expect(applicationIcon()).toBe(join("D:/installed/resources", process.platform === "win32" ? "icon.ico" : "icon.png"));
@@ -26,7 +26,7 @@ describe("application branding without native UI", () => {
  it("restores/focuses the window and sends tray quit through the existing application exit path", () => {
   const window = { isDestroyed: () => false, isMinimized: () => true, restore: vi.fn(), show: vi.fn(), focus: vi.fn() };
   const dispose = createApplicationTray(window as unknown as BrowserWindow);
-  expect(state.image).toBe(applicationIcon()); expect(state.tooltip).toBe("Rally");
+  expect(state.image).toBe(applicationIcon()); expect(state.tooltip).toBe("Rally · 本地");
   state.click!(); expect(window.restore).toHaveBeenCalledOnce(); expect(window.show).toHaveBeenCalledOnce(); expect(window.focus).toHaveBeenCalledOnce();
   state.menu.find(item => item.label === "退出 Rally")!.click!(); expect(state.quit).toHaveBeenCalledOnce();
   dispose(); dispose(); expect(state.destroy).toHaveBeenCalledOnce();

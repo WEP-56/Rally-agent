@@ -1,85 +1,72 @@
 :root {
-  /* brand: ink (#14141f) + orbit indigo, taken from the app icon */
-  --c-accent: #5b6cf0;
-  --c-accent-deep: color-mix(in srgb, var(--c-accent) 78%, #000);
-  --c-accent-fg: #ffffff;
-  --c-accent-soft: color-mix(in srgb, var(--c-accent) 11%, white);
-  --c-ink: #14141f;
-
-  --c-app: #f4f3f1;
-  --c-panel: #ffffff;
-  --c-sunken: #f1f0f4;
-  --c-deep: #e6e5ec;
-  --c-raised: #ffffff;
-  --c-hover: rgba(24, 24, 56, 0.05);
-  --c-press: rgba(24, 24, 56, 0.09);
-  --c-line: rgba(24, 24, 56, 0.08);
-  --c-fg: #16161f;
-  --c-muted: #636372;
-  --c-faint: #9c9cac;
-  --c-bubble: #ffffff;
-
-  --c-glass: rgba(255, 255, 255, 0.58);
-  --c-glass-strong: rgba(255, 255, 255, 0.86);
-
-  --c-warn: #d97706;
-  --c-warn-soft: rgba(217, 119, 6, 0.11);
-  --c-ok: #1f9d6b;
-  --c-danger: #e5484d;
-
-  --s-card: 0 1px 2px rgba(30, 30, 70, 0.04), 0 4px 18px rgba(30, 30, 70, 0.05);
-  --s-soft: 0 1px 2px rgba(30, 30, 70, 0.06), 0 1px 6px rgba(30, 30, 70, 0.04);
-  --s-pop: 0 14px 44px rgba(30, 30, 70, 0.16), 0 2px 8px rgba(30, 30, 70, 0.07);
-  --s-float: 0 6px 22px rgba(30, 30, 70, 0.1), 0 1px 3px rgba(30, 30, 70, 0.06);
-
-  --g-stage:
-    radial-gradient(70% 55% at 0% 0%, color-mix(in srgb, var(--c-accent) 24%, #fff) 0%, transparent 62%),
-    radial-gradient(75% 55% at 100% 100%, #ffd7bb 0%, transparent 66%),
-    radial-gradient(60% 40% at 100% 0%, #d7ecff 0%, transparent 70%),
-    linear-gradient(178deg, #e6e5fb 0%, #dde8fa 52%, #fbe9db 100%);
-
-  color-scheme: light;
+  --md-sys-color-primary: #144d75;
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: #33658e;
+  --md-sys-color-on-primary-container: #c3e0ff;
+  --md-sys-color-primary-fixed: #cee5ff;
+  --md-sys-color-primary-fixed-dim: #9ccbf9;
+  --md-sys-color-on-primary-fixed: #001d32;
+  --md-sys-color-secondary: #4f6072;
+  --md-sys-color-on-secondary: #ffffff;
+  --md-sys-color-secondary-container: #d2e4f9;
+  --md-sys-color-on-secondary-container: #556678;
+  --md-sys-color-tertiary: #654300;
+  --md-sys-color-on-tertiary: #ffffff;
+  --md-sys-color-tertiary-container: #815a14;
+  --md-sys-color-on-tertiary-container: #ffd79f;
+  --md-sys-color-error: #ba1a1a;
+  --md-sys-color-on-error: #ffffff;
+  --md-sys-color-error-container: #ffdad6;
+  --md-sys-color-on-error-container: #93000a;
+  --md-sys-color-surface: #f9f9fd;
+  --md-sys-color-surface-dim: #d9dadd;
+  --md-sys-color-surface-bright: #f9f9fd;
+  --md-sys-color-surface-container-lowest: #ffffff;
+  --md-sys-color-surface-container-low: #f3f3f7;
+  --md-sys-color-surface-container: #edeef1;
+  --md-sys-color-surface-container-high: #e7e8ec;
+  --md-sys-color-surface-container-highest: #e2e2e6;
+  --md-sys-color-on-surface: #191c1f;
+  --md-sys-color-on-surface-variant: #41474e;
+  --md-sys-color-outline: #72787f;
+  --md-sys-color-outline-variant: #c1c7cf;
+  --md-sys-color-inverse-surface: #2e3134;
+  --md-sys-color-inverse-on-surface: #f0f0f4;
+  --md-sys-color-inverse-primary: #9ccbf9;
+  --rally-color-ok: #006b5d;
+  --rally-color-on-ok: #ffffff;
+  --rally-color-ok-container: #b7f1e4;
+  --rally-color-on-ok-container: #002e27;
+  --rally-color-warn: #99460d;
+  --rally-color-on-warn: #ffffff;
+  --rally-color-warn-container: #ffdfd0;
+  --rally-color-on-warn-container: #471b00;
+  --c-accent: var(--md-sys-color-primary);
+  --c-accent-deep: var(--md-sys-color-primary);
+  --c-accent-fg: var(--md-sys-color-on-primary);
+  --c-accent-soft: var(--md-sys-color-secondary-container);
+  --c-ink: var(--md-sys-color-inverse-surface);
+  --c-app: var(--md-sys-color-surface-container);
+  --c-panel: var(--md-sys-color-surface-container-lowest);
+  --c-sunken: var(--md-sys-color-surface-container-low);
+  --c-deep: var(--md-sys-color-surface-container-highest);
+  --c-raised: var(--md-sys-color-surface-container-high);
+  --c-fg: var(--md-sys-color-on-surface);
+  --c-muted: var(--md-sys-color-on-surface-variant);
+  --c-bubble: var(--md-sys-color-surface-container-low);
+  --c-glass: var(--md-sys-color-surface-container-lowest);
+  --c-glass-strong: var(--md-sys-color-surface-container-high);
+  --c-danger: var(--md-sys-color-error);
+  --c-faint: color-mix(in srgb, var(--md-sys-color-on-surface-variant) 72%, transparent);
+  --c-hover: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+  --c-press: color-mix(in srgb, var(--md-sys-color-on-surface) 12%, transparent);
+  --c-line: var(--md-sys-color-outline-variant);
+  --c-warn: var(--rally-color-warn);
+  --c-warn-soft: var(--rally-color-warn-container);
+  --c-ok: var(--rally-color-ok);
+  --s-card: none;
+  --s-soft: none;
+  --s-float: 0 6px 22px rgb(0 0 0 / 0.08);
+  --s-pop: 0 14px 44px rgb(0 0 0 / 0.16);
   font-size: 15px;
-}
-
-:root.dark {
-  /* darker, warmer base — depth comes from light falling on surfaces, not from stacking greys */
-  --c-accent: #5a68d9;
-  --c-accent-deep: color-mix(in srgb, var(--c-accent) 70%, #000);
-  --c-accent-soft: color-mix(in srgb, var(--c-accent) 17%, #14141c);
-  --c-ink: #08080b;
-
-  --c-app: #0a0a0d;
-  --c-panel: #17171d;
-  --c-sunken: #1c1c23;
-  --c-deep: #101014;
-  --c-raised: #22222b;
-  --c-hover: rgba(255, 255, 255, 0.07);
-  --c-press: rgba(255, 255, 255, 0.12);
-  --c-line: rgba(255, 255, 255, 0.09);
-  --c-fg: #f3f3f7;
-  --c-muted: #a8a8bb;
-  --c-faint: #77778c;
-  --c-bubble: #17171d;
-
-  --c-glass: rgba(255, 255, 255, 0.055);
-  --c-glass-strong: rgba(24, 24, 31, 0.72);
-
-  --c-warn: #d99a4a;
-  --c-warn-soft: rgba(217, 154, 74, 0.13);
-  --c-ok: #3fa87d;
-
-  --s-card: 0 1px 1px rgba(0, 0, 0, 0.5), 0 10px 30px -8px rgba(0, 0, 0, 0.65);
-  --s-soft: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 10px rgba(0, 0, 0, 0.35);
-  --s-pop: 0 24px 64px rgba(0, 0, 0, 0.7), 0 2px 8px rgba(0, 0, 0, 0.4);
-  --s-float: 0 10px 30px rgba(0, 0, 0, 0.55), 0 1px 2px rgba(0, 0, 0, 0.4);
-
-  /* one quiet accent bloom behind the hero, a warm counter-light low right, then a vignette to seat it */
-  --g-stage:
-    radial-gradient(62% 46% at 50% -6%, color-mix(in srgb, var(--c-accent) 13%, transparent) 0%, transparent 66%),
-    radial-gradient(50% 44% at 104% 104%, rgba(206, 122, 96, 0.08) 0%, transparent 70%),
-    radial-gradient(44% 40% at -4% 88%, rgba(92, 116, 226, 0.07) 0%, transparent 70%),
-    linear-gradient(180deg, #17171f 0%, #101016 52%, #0a0a0e 100%);
-
-  color-scheme: dark;
 }

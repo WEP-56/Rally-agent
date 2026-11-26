@@ -1,3 +1,5 @@
+import { motion } from "motion/react";
+import { SPRING_PANEL } from "../md3/springs";
 import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, Sparkles, Rocket, Brain, Server, Cpu, UserRound } from "lucide-react";
 import type { ModelsState } from "../../../shared/models";
@@ -54,8 +56,8 @@ export function Onboarding({ onDone, maximized, onMin, onMax, onClose }: { onDon
   return (
     <div className="rally-onboarding absolute inset-0 z-[100] flex flex-col overflow-hidden bg-app">
       {/* ambient */}
-      <div className="pointer-events-none absolute -left-40 -top-40 h-[520px] w-[520px] rounded-full opacity-60 blur-3xl transition-all duration-700" style={{ background: "radial-gradient(circle, var(--c-accent-soft), transparent 70%)", transform: `translate(${step * 60}px, ${step * 20}px)` }} />
-      <div className="pointer-events-none absolute -bottom-52 -right-40 h-[560px] w-[560px] rounded-full opacity-70 blur-3xl transition-all duration-700" style={{ background: "radial-gradient(circle, var(--c-accent-soft), transparent 70%)", transform: `translate(${-step * 40}px, 0)` }} />
+      <div className="pointer-events-none absolute -left-40 -top-40 h-[520px] w-[520px] rounded-full opacity-60 blur-3xl transition-colors" style={{ background: "radial-gradient(circle, var(--c-accent-soft), transparent 70%)", transform: `translate(${step * 60}px, ${step * 20}px)` }} />
+      <div className="pointer-events-none absolute -bottom-52 -right-40 h-[560px] w-[560px] rounded-full opacity-70 blur-3xl transition-colors" style={{ background: "radial-gradient(circle, var(--c-accent-soft), transparent 70%)", transform: `translate(${-step * 40}px, 0)` }} />
 
       <div className="drag relative flex h-10 shrink-0 items-center justify-between pl-4">
         <div className="flex items-center gap-2 text-xs text-faint">
@@ -67,7 +69,7 @@ export function Onboarding({ onDone, maximized, onMin, onMax, onClose }: { onDon
 
       {/* slides */}
       <div className="relative min-h-0 flex-1">
-        <div className="flex h-full transition-transform duration-500 ease-[cubic-bezier(.2,.8,.2,1)]" style={{ transform: `translateX(-${step * 100}%)` }}>
+        <motion.div className="flex h-full" animate={{ x: `-${step * 100}%` }} transition={SPRING_PANEL}>
           {STEPS.map((st, i) => (
             <div key={st.key} inert={i !== step} className={cn("h-full w-full shrink-0 overflow-y-auto transition-opacity duration-500", i === step ? "opacity-100" : "pointer-events-none opacity-0")}>
               <div className="onboarding-slide mx-auto flex min-h-full max-w-[560px] flex-col justify-center px-8 py-10">
@@ -134,7 +136,7 @@ export function Onboarding({ onDone, maximized, onMin, onMax, onClose }: { onDon
               </div>
             </div>
           ))}
-        </div>
+        </motion.div>
       </div>
 
       {/* footer nav */}
@@ -148,7 +150,7 @@ export function Onboarding({ onDone, maximized, onMin, onMax, onClose }: { onDon
         </div>
         <div className="flex items-center gap-1.5">
           {STEPS.map((_, i) => (
-            <span key={i} className={cn("h-1.5 rounded-full transition-all duration-300", i === step ? "w-6 bg-accent" : i < step ? "w-1.5 bg-accent/50" : "w-1.5 bg-press")} />
+            <motion.span key={i} animate={{ width: i === step ? 24 : 6 }} transition={SPRING_PANEL} className={cn("h-1.5 rounded-full", i === step ? "bg-accent" : i < step ? "bg-accent/50" : "bg-press")} />
           ))}
         </div>
         <div className="flex w-40 justify-end gap-1">

@@ -1,7 +1,12 @@
+import { SPRING_FAST, SPRING_PANEL } from "./md3/springs";
+import { MdSnackbar } from "./md3/components";
+import { useBrowserOverlay } from "./browser-overlays";
+import { applyMd3TokensToRoot } from "./md3/theme";
+import { motion, MotionConfig } from "motion/react";
 import type { NotificationTarget } from "../../shared/notifications";
 import type { IdentityState } from "../../shared/identity";
 import type { ResourceRef } from "../../shared/resources";
-import { Cable, Globe, IdCard, Info, Moon, Palette, PanelRight, Plug, ListRestart, Settings as SettingsIcon, SquarePen, SquareTerminal, Sun, Wand2 } from "lucide-react";
+import { Cable, Flower2, Glasses, Globe, IdCard, Info, Moon, Palette, PanelRight, PanelsTopLeft, PencilLine, Plug, ListRestart, Settings as SettingsIcon, SquarePen, SquareTerminal, Sun, Wand2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "./chat";
 import { titleFor } from "./components/BrowserView";
@@ -60,6 +65,26 @@ export default function App() {
   const [palette, setPalette] = useState(false);
 
   const [rightOpen, setRightOpen] = useState(() => !matchMedia("(max-width: 767px)").matches);
+  const [narrow, setNarrow] = useState(() => matchMedia("(max-width: 767px)").matches);
+  const [panelAnimating, setPanelAnimating] = useState(false);
+  useEffect(() => {
+    const query = matchMedia("(max-width: 767px)");
+    const update = () => setNarrow(query.matches);
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  const [notice, setNotice] = useState<{ message: string; taskId?: string } | null>(null);
+  useBrowserOverlay(notice !== null);
+  useEffect(() => {
+    const notify = (event: Event) => setNotice((event as CustomEvent<{ message: string; taskId?: string }>).detail);
+    window.addEventListener("rally-snackbar", notify);
+    return () => window.removeEventListener("rally-snackbar", notify);
+  }, []);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 7000);
+    return () => clearTimeout(timer);
+  }, [notice]);
   const [ratio, setRatio] = useState(0.55);
   const [dragging, setDragging] = useState(false);
   const container = useRef<HTMLDivElement>(null);
@@ -89,8 +114,7 @@ export default function App() {
   const dark = config.theme === "dark" || (config.theme === "system" && sysDark);
   useEffect(() => {
     const r = document.documentElement;
-    r.classList.toggle("dark", dark);
-    r.style.setProperty("--c-accent", config.accent);
+    applyMd3TokensToRoot(config.accent, dark);
     r.style.fontSize = { sm: "14px", md: "15px", lg: "16.5px" }[config.fontSize];
   }, [dark, config.accent, config.fontSize]);
 
@@ -318,7 +342,7 @@ export default function App() {
     {
       key: "window",
       label: "窗口",
-      mnemonic: "W",
+      icon: PanelsTopLeft,
       groups: [
         [
           { label: "新建会话", shortcut: "Ctrl+N", action: newChat },
@@ -336,7 +360,7 @@ export default function App() {
     {
       key: "edit",
       label: "编辑",
-      mnemonic: "E",
+      icon: PencilLine,
       groups: [
         [
           { label: "撤销", shortcut: "Ctrl+Z", action: exec("undo") },
@@ -353,7 +377,7 @@ export default function App() {
     {
       key: "view",
       label: "查看",
-      mnemonic: "V",
+      icon: Glasses,
       groups: [
         [
           { label: "Rally 的工位", shortcut: "Ctrl+1", action: () => openTab("workstation") },
@@ -373,7 +397,7 @@ export default function App() {
         ],
       ],
     },
-    { key: "settings", label: "设置", mnemonic: "S", action: () => openSettings() },
+    { key: "settings", label: "设置", icon: Flower2, action: () => openSettings() },
   ];
 
   const commands: Cmd[] = useMemo(
@@ -401,25 +425,24 @@ export default function App() {
   const ctx: AppCtx = { config, setConfig, identityReady, identityError, reloadIdentity, openTab, openAgentBrowser, openResource, openTask, openSettings, rerunOnboarding };
 
   return (
-    <Ctx.Provider value={ctx}>
+    <MotionConfig reducedMotion="user"><Ctx.Provider value={ctx}>
       <div className="relative flex h-full w-full flex-col overflow-hidden bg-app">
-          <div className="pointer-events-none absolute -left-40 top-[calc(2.5rem-160px)] h-[520px] w-[520px] rounded-full bg-accent/[0.07] blur-3xl" />
           <div className="desktop-bar"><TitleBar menus={cloud?menus.map(m=>({...m,groups:m.groups?.map(g=>g.filter(i=>i.label!=="终端"))})):menus} onSearch={() => setPalette(true)} maximized={maximized} onMin={minimize} onMax={toggleMax} onClose={close} onDoubleClick={toggleMax} /></div>
 
           {chat.inactivity?.pausedAt !== undefined && (
-            <div role="status" className="relative flex shrink-0 items-center gap-2 border-b border-line bg-accent/10 px-4 py-2 text-sm text-fg">
-              <Moon size={15} className="shrink-0 text-accent" />
+            <div role="status" className="mx-2 mt-1 flex shrink-0 items-center gap-2 rounded-2xl bg-md-secondary-container px-4 py-2 text-sm text-md-on-secondary-container">
+              <Moon size={15} className="shrink-0 text-md-primary" />
               <span>已连续 3 天未发言，闲置保护已暂停 Agent 活动。发送一条消息即可恢复。</span>
             </div>
           )}
 
           {view === "settings" && (
             <div className="min-h-0 flex-1">
-              <Settings section={section} setSection={setSection} onBack={() => setView("main")} tasks={tasks} />
+              <Settings section={section} setSection={setSection} onBack={() => setView("main")} tasks={tasks} autoApprove={board.autoApprove} onAutoApprove={setAutoApprove} />
             </div>
           )}
-            <div ref={container} className={cn("rally-panes relative min-h-0 flex-1 p-2.5 pl-0", view === "settings" ? "hidden" : "flex")}>
-              <div className="min-w-0 flex-1 overflow-hidden">
+            <div ref={container} className={cn("rally-panes relative min-h-0 flex-1 p-2", view === "settings" ? "hidden" : "flex")}>
+              <div className="min-w-0 flex-1 overflow-hidden rounded-[26px]">
                 <ChatPanel
                   notificationFocus={notificationFocus}
                   questions={visibleQuestions}
@@ -439,25 +462,32 @@ export default function App() {
                   rightOpen={rightOpen}
                   onToggleRight={() => setRightOpen((v) => !v)}
                   inject={inject}
-                  autoApprove={board.autoApprove}
-                  onAutoApprove={setAutoApprove}
                 />
               </div>
 
-              <div
-                className={cn("rally-side relative flex shrink-0", !dragging && "transition-[width,opacity] duration-300 ease-[cubic-bezier(.2,.8,.2,1)]", !rightOpen && "pointer-events-none opacity-0")}
-                style={{ width: rightOpen ? `${ratio * 100}%` : 0 }}
+              <motion.div
+                className={cn("rally-side relative flex shrink-0", !rightOpen && "pointer-events-none")}
+                initial={false}
+                animate={{ width: narrow ? "100%" : rightOpen ? `${ratio * 100}%` : "0%", x: narrow && !rightOpen ? "100%" : "0%", opacity: rightOpen ? 1 : 0 }}
+                transition={dragging ? { duration: 0 } : SPRING_PANEL}
+                onAnimationStart={() => setPanelAnimating(true)}
+                onAnimationComplete={() => setPanelAnimating(false)}
                 inert={!rightOpen}
               >
                 {/* drag handle (the gap itself) */}
-                <div onPointerDown={startDrag} onDoubleClick={() => setRatio(0.55)} className="side-divider group relative z-10 flex w-2.5 shrink-0 cursor-col-resize items-center justify-center" title="拖拽调整宽度，双击恢复等分">
-                  <div className={cn("h-10 w-[3px] rounded-full transition-all", dragging ? "h-16 bg-accent" : "bg-transparent group-hover:bg-faint/60")} />
+                <div onPointerDown={startDrag} onDoubleClick={() => setRatio(0.55)} className="side-divider group relative z-10 flex w-2 shrink-0 cursor-col-resize items-center justify-center" title="拖拽调整宽度，双击恢复等分">
+                  <motion.div
+                    initial={false}
+                    animate={{ height: dragging ? 60 : 38, scaleX: dragging ? 1.25 : 1 }}
+                    transition={SPRING_FAST}
+                    className={cn("w-[3px] rounded-full transition-colors", dragging ? "bg-md-primary" : "bg-transparent group-hover:bg-md-outline-variant")}
+                  />
                 </div>
-                <div className="min-w-0 flex-1 overflow-hidden">
+                <div className="min-w-0 flex-1 overflow-hidden rounded-[26px]">
                   <div className="h-full" style={{ minWidth: "min(330px, 100%)" }}>
                     <RightPanel
                       onCollapse={() => setRightOpen(false)}
-					  visible={view === "main" && rightOpen && !palette && !dragging && onboarded}
+					  visible={view === "main" && rightOpen && !palette && !dragging && !panelAnimating && onboarded}
                       tabs={tabs}
                       active={active}
                       setActive={setActive}
@@ -469,10 +499,11 @@ export default function App() {
                     />
                   </div>
                 </div>
-              </div>
+              </motion.div>
             </div>
           {dragging && <div className="fixed inset-0 z-[200] cursor-col-resize" />}
 
+          <MdSnackbar message={notice?.message ?? null} actionLabel={notice?.taskId ? "撤销" : undefined} onDismiss={() => setNotice(null)} onAction={notice?.taskId ? () => { void window.rally.tasks.archive(notice.taskId!, false).catch(error => setNotice({ message: String(error) })); } : undefined} />
           <CommandPalette open={palette} onClose={() => setPalette(false)} commands={commands.filter(c => !(cloud && c.id === "tm") && !(window.runtime.platform === "android" && c.id === "br"))} tasks={tasks.filter(task => task.archivedAt === undefined)} onTask={openTask} />
           <ChatSessionDialog operation={operation} phase={phase} error={dialogError} onConfirm={() => void confirmSessionAction()} onClose={() => setPhase(null)} onHide={() => { hideHistory(compactBoundary.current); setPhase(null); }} />
 
@@ -489,6 +520,6 @@ export default function App() {
             />
           )}
       </div>
-    </Ctx.Provider>
+    </Ctx.Provider></MotionConfig>
   );
 }

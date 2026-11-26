@@ -1,29 +1,34 @@
-import { Check, ChevronDown } from "lucide-react";
+import { ChoiceSelect } from "../md3/Select";
+import { motion } from "motion/react";
+import { SPRING_JELLY } from "../md3/springs";
+import { MdSwitch, MdConnectedSegments } from "../md3/components";
 import { useBrowserOverlay } from "../browser-overlays";
 export { RallyMark as RallyLogo } from "./brand";
-import { useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
+import { useEffect, useRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
 import { cn } from "../utils/cn";
 
-type BtnProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+const SpringButton = motion.create("button");
+
+type BtnProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onDrag" | "onDragStart" | "onDragEnd" | "onAnimationStart"> & {
   variant?: "primary" | "secondary" | "ghost" | "danger" | "dark" | "glass";
   size?: "sm" | "md" | "lg";
 };
 
-export function Button({ variant = "secondary", size = "md", className, ...p }: BtnProps) {
+export function Button({ variant = "secondary", size = "md", className, disabled, ...p }: BtnProps) {
   return (
-    <button
+    <SpringButton initial={false} animate={{ borderRadius: 20, scale: 1, y: 0 }} whileHover={disabled ? undefined : { scale: 1.035, y: -1, borderRadius: 24 }} whileTap={disabled ? undefined : { scale: 0.91, y: 0.5, borderRadius: 9 }} transition={SPRING_JELLY} disabled={disabled}
       {...p}
       className={cn(
-        "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full font-medium transition-all active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40",
-        size === "sm" && "h-7 px-3 text-xs",
-        size === "md" && "h-9 px-4 text-[13px]",
-        size === "lg" && "h-11 px-6 text-sm",
-        variant === "primary" && "bg-accent text-accent-fg shadow-[0_3px_10px_color-mix(in_srgb,var(--c-accent)_26%,transparent)] hover:brightness-110",
-        variant === "dark" && "bg-ink text-white hover:bg-ink/85 dark:bg-white dark:text-ink dark:hover:bg-white/85",
-        variant === "secondary" && "bg-sunken text-fg hover:bg-deep",
+        "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full font-medium md3-state-layer disabled:pointer-events-none disabled:opacity-40",
+        size === "sm" && "h-[30px] px-3 text-[12px]",
+        size === "md" && "h-[34px] px-3.5 text-[12.5px]",
+        size === "lg" && "h-10 px-4.5 text-[13.5px]",
+        variant === "primary" && "bg-md-primary text-md-on-primary",
+        variant === "dark" && "bg-md-inverse-surface text-md-inverse-on-surface",
+        variant === "secondary" && "bg-md-secondary-container text-md-on-secondary-container",
         variant === "glass" && "glass text-fg hover:brightness-[1.03]",
         variant === "ghost" && "text-muted hover:bg-hover hover:text-fg",
-        variant === "danger" && "bg-danger/10 text-danger hover:bg-danger/15",
+        variant === "danger" && "bg-md-error-container text-md-on-error-container",
         className,
       )}
     />
@@ -31,13 +36,13 @@ export function Button({ variant = "secondary", size = "md", className, ...p }: 
 }
 
 /** Round floating button — the "IM" style chrome used on both panes. */
-export function RoundButton({ className, active, size = 40, ...p }: ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean; size?: number }) {
+export function RoundButton({ className, active, size = 38, disabled, ...p }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onDrag" | "onDragStart" | "onDragEnd" | "onAnimationStart"> & { active?: boolean; size?: number }) {
   return (
-    <button
+    <SpringButton initial={false} animate={{ borderRadius: active ? 12 : size / 2, scale: 1 }} whileHover={disabled ? undefined : { scale: 1.09, borderRadius: active ? 14 : size / 2 }} whileTap={disabled ? undefined : { scale: 0.85, borderRadius: 8 }} transition={SPRING_JELLY} disabled={disabled}
       {...p}
       style={{ width: size, height: size }}
       className={cn(
-        "glass-strong inline-flex shrink-0 items-center justify-center rounded-full text-fg/80 transition-all hover:text-fg hover:brightness-[1.04] active:scale-95",
+        "glass-strong inline-flex shrink-0 items-center justify-center rounded-full text-fg/80 md3-state-layer hover:text-fg",
         active && "text-accent",
         className,
       )}
@@ -45,12 +50,12 @@ export function RoundButton({ className, active, size = 40, ...p }: ButtonHTMLAt
   );
 }
 
-export function IconButton({ className, active, ...p }: ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean }) {
+export function IconButton({ className, active, disabled, ...p }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onDrag" | "onDragStart" | "onDragEnd" | "onAnimationStart"> & { active?: boolean }) {
   return (
-    <button
+    <SpringButton initial={false} animate={{ borderRadius: active ? 12 : 17, scale: 1 }} whileHover={disabled ? undefined : { scale: 1.09 }} whileTap={disabled ? undefined : { scale: 0.85, borderRadius: 8 }} transition={SPRING_JELLY} disabled={disabled}
       {...p}
       className={cn(
-        "inline-flex h-8 w-8 items-center justify-center rounded-full text-muted transition-colors hover:bg-hover hover:text-fg active:bg-press",
+        "inline-flex h-8 w-8 items-center justify-center rounded-full text-muted md3-state-layer hover:bg-hover hover:text-fg active:bg-press",
         active && "bg-hover text-fg",
         className,
       )}
@@ -63,7 +68,7 @@ export function Input({ className, ...p }: InputHTMLAttributes<HTMLInputElement>
     <input
       {...p}
       className={cn(
-        "h-10 w-full rounded-xl bg-sunken px-3.5 text-sm text-fg shadow-[inset_0_0_0_1px_var(--c-line)] transition-all placeholder:text-faint focus:bg-panel focus:shadow-[inset_0_0_0_1px_var(--c-accent),0_0_0_4px_color-mix(in_srgb,var(--c-accent)_16%,transparent)]",
+        "h-10 w-full rounded-xl bg-sunken px-3.5 text-sm text-fg transition-colors placeholder:text-faint focus:bg-md-surface-highest focus-visible:outline-2 focus-visible:outline-md-primary",
         className,
       )}
     />
@@ -75,7 +80,7 @@ export function Textarea({ className, ...p }: TextareaHTMLAttributes<HTMLTextAre
     <textarea
       {...p}
       className={cn(
-        "w-full resize-none rounded-xl bg-sunken px-3.5 py-2.5 text-sm leading-relaxed text-fg shadow-[inset_0_0_0_1px_var(--c-line)] transition-all placeholder:text-faint focus:bg-panel focus:shadow-[inset_0_0_0_1px_var(--c-accent),0_0_0_4px_color-mix(in_srgb,var(--c-accent)_16%,transparent)]",
+        "w-full resize-none rounded-xl bg-sunken px-3.5 py-2.5 text-sm leading-relaxed text-fg transition-colors placeholder:text-faint focus:bg-md-surface-highest focus-visible:outline-2 focus-visible:outline-md-primary",
         className,
       )}
     />
@@ -83,27 +88,7 @@ export function Textarea({ className, ...p }: TextareaHTMLAttributes<HTMLTextAre
 }
 
 export function Toggle({ checked, onChange, label, disabled }: { checked: boolean; onChange: (v: boolean) => void; label?: string; disabled?: boolean }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={cn(
-        "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors duration-200 disabled:opacity-40",
-        checked ? "bg-accent" : "bg-fg/15",
-      )}
-    >
-      <span
-        className={cn(
-          "absolute left-[3px] top-[3px] h-5 w-5 rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.3)] transition-transform duration-200 ease-[cubic-bezier(.3,1.4,.5,1)]",
-          checked && "translate-x-[18px]",
-        )}
-      />
-    </button>
-  );
+  return <MdSwitch checked={checked} onChange={onChange} label={label ?? "切换"} disabled={disabled} />;
 }
 
 export function Segmented<T extends string>({
@@ -117,22 +102,7 @@ export function Segmented<T extends string>({
   options: { value: T; label: ReactNode }[];
   className?: string;
 }) {
-  return (
-    <div className={cn("inline-flex rounded-full bg-fg/[0.06] p-[3px]", className)}>
-      {options.map((o) => (
-        <button
-          key={o.value}
-          onClick={() => onChange(o.value)}
-          className={cn(
-            "inline-flex h-7 items-center gap-1 rounded-full px-3 text-xs font-medium transition-all",
-            value === o.value ? "bg-panel text-fg shadow-soft" : "text-muted hover:text-fg",
-          )}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
+  return <div className={className}><MdConnectedSegments value={value} onChange={onChange} options={options} /></div>;
 }
 
 export function Kbd({ children, className }: { children: ReactNode; className?: string }) {
@@ -174,52 +144,5 @@ export interface Opt {
 }
 
 export function Select({ value, options, onChange, placeholder = "请选择", className, align = "left", ghost, up }: { value: string; options: Opt[]; onChange: (v: string) => void; placeholder?: string; className?: string; align?: "left" | "right"; ghost?: boolean; up?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const ref = useClickOutside<HTMLDivElement>(open, () => setOpen(false));
-  const cur = options.find((o) => o.value === value);
-  const groups = Array.from(new Set(options.map((o) => o.group || "")));
-  return (
-    <div ref={ref} className={cn("relative", className)}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className={cn(
-          ghost
-            ? "flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted transition-colors hover:bg-hover hover:text-fg"
-            : "flex h-9 w-full items-center justify-between gap-2 rounded-lg bg-sunken px-3 text-left text-sm transition-colors hover:bg-deep dark:hover:bg-raised",
-          open && (ghost ? "bg-hover text-fg" : "bg-deep dark:bg-raised"),
-        )}
-      >
-        <span className={cn("truncate", !cur && "text-faint")}>
-          {cur ? cur.label : placeholder}
-          {cur?.group && !ghost && <span className="ml-2 text-xs text-faint">{cur.group}</span>}
-        </span>
-        <ChevronDown size={14} className={cn("shrink-0 text-faint transition-transform", open && "rotate-180")} />
-      </button>
-      {open && (
-        <div className={cn("animate-pop absolute z-50 max-h-72 min-w-full overflow-auto rounded-xl bg-raised p-1.5 shadow-pop", up ? "bottom-full mb-1.5" : "mt-1.5", align === "right" ? "right-0" : "left-0")}>
-          {groups.map((g) => (
-            <div key={g}>
-              {g && <div className="px-2.5 pb-1 pt-2 text-[11px] font-medium text-faint">{g}</div>}
-              {options
-                .filter((o) => (o.group || "") === g)
-                .map((o) => (
-                  <button
-                    key={o.value}
-                    onClick={() => {
-                      onChange(o.value);
-                      setOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-hover"
-                  >
-                    <span className="flex-1">{o.label}</span>
-                    {o.hint && <span className="text-xs text-faint">{o.hint}</span>}
-                    <Check size={14} className={cn("text-accent", o.value === value ? "opacity-100" : "opacity-0")} />
-                  </button>
-                ))}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  return <ChoiceSelect value={value} options={options} onValueChange={onChange} align={align} up={up} placeholder={placeholder} className={cn(ghost && "min-h-7 bg-transparent text-xs", className)} />;
 }

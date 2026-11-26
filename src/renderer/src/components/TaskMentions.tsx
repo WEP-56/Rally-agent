@@ -1,6 +1,11 @@
+import { BrowserOverlayLease } from "../browser-overlays";
+import { ActionButton } from "../md3/interactive";
+import { SPRING_FAST, SPRING_JELLY } from "../md3/springs";
+import { motion } from "motion/react";
 import { useEffect, type KeyboardEvent } from "react";
 import { AtSign, X } from "lucide-react";
 import type { Task } from "../data";
+import { Critter } from "./brand";
 import { cn } from "../utils/cn";
 import { StatusBadge } from "./status";
 import { Input } from "./ui";
@@ -27,12 +32,13 @@ export function splitTaskMentions(text: string): { body: string; ids: string[] }
 
 export function TaskMentionTag({ task, onRemove, onOpen }: { task: TaskMention; onRemove?: () => void; onOpen?: () => void }) {
   const label = `${task.id} · ${task.title}`;
-  const name = <><AtSign size={13} className="shrink-0" aria-hidden="true" /><span className="truncate">{task.title}</span></>;
-  return <span className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-lg border border-line bg-sunken px-2 py-0.5 text-xs font-medium text-fg" title={label}>
-    {onOpen ? <button type="button" className="flex min-w-0 items-center gap-1.5 hover:text-accent" aria-label={`打开任务 ${label}`} onClick={onOpen}>{name}</button>
-      : <span className="flex min-w-0 items-center gap-1.5">{name}</span>}
-    {onRemove && <button type="button" aria-label={`移除任务 ${label}`} className="shrink-0 rounded text-muted hover:text-fg" onClick={onRemove}><X size={13} /></button>}
-  </span>;
+  const name = <><AtSign size={12} className="shrink-0 opacity-80" aria-hidden="true" /><span className="font-mono text-[11px]">{task.id.toUpperCase()}</span><span className="max-w-36 truncate opacity-85">· {task.title}</span></>;
+  return <motion.span layout initial={{ scale: 0.78, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.78, opacity: 0 }} transition={SPRING_JELLY}
+    className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-full bg-md-secondary-container py-0.5 pl-2.5 pr-1.5 text-[11.5px] font-medium text-md-on-secondary-container" title={label}>
+    {onOpen ? <ActionButton type="button" className="flex min-w-0 items-center gap-1 hover:underline" aria-label={`打开任务 ${label}`} onClick={onOpen}>{name}</ActionButton>
+      : <span className="flex min-w-0 items-center gap-1">{name}</span>}
+    {onRemove && <ActionButton type="button" aria-label={`移除任务 ${label}`} className="shrink-0 rounded-full p-0.5 text-md-on-secondary-container/75 hover:bg-md-on-secondary-container/12 hover:text-md-on-secondary-container" onClick={onRemove}><X size={11.5} /></ActionButton>}
+  </motion.span>;
 }
 
 export function TaskMentionPicker({ id, choices, active, query, search, onQuery, onKeyDown, onSelect }: {
@@ -50,19 +56,27 @@ export function TaskMentionPicker({ id, choices, active, query, search, onQuery,
     if (activeId) document.getElementById(activeId)?.scrollIntoView({ block: "nearest" });
   }, [activeId, query]);
 
-  return <div className="glass-strong absolute inset-x-0 bottom-full z-20 mb-2 flex max-h-[min(320px,45dvh)] flex-col overflow-hidden rounded-2xl border border-line p-1.5 shadow-pop sm:right-auto sm:w-96 sm:max-w-full">
+  return <motion.div
+    initial={{ opacity: 0, scale: 0.88, y: 10 }}
+    animate={{ opacity: 1, scale: 1, y: 0 }}
+    exit={{ opacity: 0, scale: 0.9, y: 8 }}
+    transition={SPRING_FAST}
+    style={{ transformOrigin: "0% 100%" }}
+    className="absolute inset-x-0 bottom-[calc(100%+8px)] z-30 flex max-h-[min(320px,45dvh)] flex-col overflow-hidden rounded-[24px] bg-md-surface-high p-2 shadow-pop sm:left-2 sm:right-auto sm:w-84 sm:max-w-[calc(100vw-32px)]"
+  >
+    <BrowserOverlayLease />
     {search ? <Input autoFocus role="combobox" aria-label="搜索任务" aria-expanded="true" aria-controls={id} aria-activedescendant={activeId} aria-autocomplete="list"
-      className="mb-1.5 shrink-0" placeholder="搜索任务标题或编号" value={query} onChange={event => onQuery(event.target.value)} onKeyDown={onKeyDown} />
-      : <div className="px-2 py-1 text-xs text-muted">引用任务</div>}
-    <div id={id} role="listbox" aria-label="任务列表" className="min-h-0 overflow-auto overscroll-contain">
-      {!choices.length && <div role="status" className="px-2 py-3 text-sm text-muted">{query ? "没有匹配的任务" : "没有可引用的任务"}</div>}
-      {choices.map((task, index) => <button key={task.id} id={`${id}-${index}`} role="option" aria-selected={index === active} tabIndex={-1} type="button"
+      className="mb-1.5 h-9 shrink-0 rounded-full bg-md-surface-lowest" placeholder="搜索任务标题或编号" value={query} onChange={event => onQuery(event.target.value)} onKeyDown={onKeyDown} />
+      : <div className="mb-1 px-2 py-0.5 text-[11px] font-medium text-muted">引用工位任务到当前对话</div>}
+    <div id={id} role="listbox" aria-label="任务列表" className="flex min-h-0 flex-col gap-1 overflow-auto overscroll-contain">
+      {!choices.length && <div role="status" className="px-2.5 py-3 text-xs text-muted">{query ? "没有匹配的任务" : "没有可引用的任务"}</div>}
+      {choices.map((task, index) => <ActionButton key={task.id} id={`${id}-${index}`} role="option" aria-selected={index === active} tabIndex={-1} type="button"
         onMouseDown={event => event.preventDefault()} onClick={() => onSelect(task)}
-        className={cn("flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left hover:bg-hover", index === active && "bg-hover")}>
-        <AtSign size={14} className="shrink-0 text-muted" aria-hidden="true" />
-        <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{task.title}</span><span className="block text-xs text-muted">{task.id}</span></span>
+        className={cn("flex w-full items-center gap-2.5 rounded-[16px] px-2.5 py-2 text-left transition-colors", index === active ? "bg-md-secondary-container text-md-on-secondary-container" : "bg-md-surface-lowest/80 hover:bg-md-surface-lowest")}>
+        <Critter seed={task.id} size={26} />
+        <span className="min-w-0 flex-1"><span className="block truncate text-[12.5px] font-medium">{task.title}</span><span className="block font-mono text-[10.5px] opacity-70">{task.id}</span></span>
         <StatusBadge status={task.status} />
-      </button>)}
+      </ActionButton>)}
     </div>
-  </div>;
+  </motion.div>;
 }

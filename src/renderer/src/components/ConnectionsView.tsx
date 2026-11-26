@@ -1,3 +1,6 @@
+import { ActionButton } from "../md3/interactive";
+import { AnimatePresence, motion } from "motion/react";
+import { SPRING_JELLY, SPRING_LAYOUT } from "../md3/springs";
 import { ChevronDown, LoaderCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ImBotState } from "../../../shared/connections";
@@ -53,9 +56,9 @@ function BotCard({ visible, name, mark, color, summary, portal, appIdHint, instr
   const configured = Boolean(state?.appId);
   const showForm = editing || !configured;
   return (
-    <div className="glass overflow-hidden rounded-[20px]">
+    <div className="glass overflow-hidden rounded-[26px]">
       <div className="flex items-center gap-3.5 px-4 py-3.5">
-        <span aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[11px] border border-line bg-panel text-[15px] font-semibold" style={{ color }}>{mark}</span>
+        <span aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[11px] bg-md-surface-low text-[15px] font-semibold" style={{ color }}>{mark}</span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2"><span className="text-[14px] font-medium">{name}</span><span className="hidden text-[11px] text-faint sm:inline">消息与协作</span></div>
           <div className="mt-0.5 truncate text-[12px] text-muted">{state?.botName ?? summary}</div>
@@ -63,11 +66,11 @@ function BotCard({ visible, name, mark, color, summary, portal, appIdHint, instr
         {state && <span className="flex shrink-0 items-center gap-1.5 text-[11.5px] text-muted" role="status">
           {connecting ? <LoaderCircle size={12} className="animate-spin" /> : <span className={cn("h-1.5 w-1.5 rounded-full", status === "connected" ? "bg-ok" : status === "error" ? "bg-danger" : "bg-faint")} />}{STATUS[status]}
         </span>}
-        <button type="button" onClick={() => setExpanded(value => !value)} aria-expanded={expanded} className="flex h-8 shrink-0 items-center gap-1 rounded-full border border-line px-3 text-[12px] font-medium text-fg hover:bg-hover">
-          {configured ? "管理" : "连接"}<ChevronDown size={13} className={cn("transition-transform", expanded && "rotate-180")} />
-        </button>
+        <ActionButton type="button" onClick={() => setExpanded(value => !value)} aria-expanded={expanded} className="flex h-8 shrink-0 items-center gap-1 rounded-full bg-md-surface-low px-3 text-[12px] font-medium text-fg hover:bg-hover">
+          {configured ? "管理" : "连接"}<motion.span animate={{ rotate: expanded ? 180 : 0 }} transition={SPRING_JELLY} className="flex items-center"><ChevronDown size={13} /></motion.span>
+        </ActionButton>
       </div>
-      {expanded && <div className="animate-fade border-t border-line px-4 pb-4 pt-3.5 text-[12.5px]">
+      <AnimatePresence initial={false}>{expanded && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SPRING_LAYOUT} className="overflow-hidden  px-4 pb-4 pt-3.5 text-[12.5px]">
         {showForm ? <form className="space-y-3" onSubmit={event => {
           event.preventDefault();
           void action(async () => {
@@ -90,11 +93,11 @@ function BotCard({ visible, name, mark, color, summary, portal, appIdHint, instr
             {!state?.paired && <Button size="sm" disabled={pending || status !== "connected"} onClick={() => void action(api.pair)}>{state?.pairing ? "刷新配对码" : "生成配对码"}</Button>}
           </div>
           {state?.pairing && <div className="rounded-xl bg-sunken px-3 py-2.5 text-muted">在 5 分钟内单聊机器人并发送 <code className="select-all text-fg">/pair {state.pairing.code}</code></div>}
-          {"setTools" in api && <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
+          {"setTools" in api && <div className="flex items-center justify-between gap-3  pt-3">
             <div><div className="font-medium">允许 Worker 使用飞书工具</div><p className="mt-1 leading-relaxed text-muted">只读访问已共享给应用的文档、知识库和多维表格。新建或重新启动的 Worker 会加载工具。</p></div>
             <Toggle label="允许 Worker 使用飞书工具" checked={state != null && "tools" in state && state.tools === true} disabled={pending || !state?.paired} onChange={enabled => void action(() => api.setTools(enabled))} />
           </div>}
-          <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
+          <div className="flex flex-wrap items-center gap-2  pt-3">
             <span className="mr-auto text-[11px] text-faint">最近消息 {state?.lastMessageAt ? timeAgo(state.lastMessageAt) : "暂无"}</span>
             <Button size="sm" variant="ghost" disabled={pending} onClick={() => { setAppId(state?.appId ?? ""); setEditing(true); }}>更换凭据</Button>
             {status !== "connected" && <Button size="sm" disabled={pending || connecting} onClick={() => void action(api.retry)}>重连</Button>}
@@ -103,7 +106,7 @@ function BotCard({ visible, name, mark, color, summary, portal, appIdHint, instr
         </div>}
         {"setTools" in api && <ConnectorTools connector="feishu" visible={visible} available={state != null && "tools" in state && state.tools === true} />}
         {(error || state?.error) && <p role="alert" className="mt-3 text-danger">{error || state?.error}</p>}
-      </div>}
+      </motion.div>}</AnimatePresence>
     </div>
   );
 }
@@ -111,7 +114,7 @@ function BotCard({ visible, name, mark, color, summary, portal, appIdHint, instr
 export function ConnectionsView({ visible }: { visible: boolean }) {
   return (
     <div className="h-full overflow-y-auto px-4 pb-6 sm:px-6">
-      <div className="animate-rise mx-auto max-w-[680px]">
+      <motion.div className=" mx-auto max-w-[680px]" initial={{ opacity: 0, y: 8, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={SPRING_LAYOUT}>
         <header className="mb-5 pt-1">
           <h1 className="font-display text-[25px] font-semibold leading-tight">连接</h1>
           <p className="mt-1.5 text-[12.5px] text-muted">连接外部应用，管理它们提供的工具与权限，在你常用的地方继续和 Rally 协作。</p>
@@ -121,7 +124,7 @@ export function ConnectionsView({ visible }: { visible: boolean }) {
         <QqMailCard visible={visible} />
         <div className="mt-3"><BotCard visible={visible} name="QQ" mark="QQ" color="#3799ff" summary="官方机器人单聊" portal="https://q.qq.com/" appIdHint="机器人 AppID"
           api={window.rally.qqBot} instructions="创建机器人并获取 AppID 和 AppSecret。新版管理端支持机器人管理员直接测试私聊；其他体验账号可在「开发设置」添加。Rally 使用长连接接收私聊消息。" /></div>
-      </div>
+      </motion.div>
     </div>
   );
 }

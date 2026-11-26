@@ -1,3 +1,4 @@
+import { MdConnectedSegments } from "../md3/components";
 import { useEffect, useRef, useState } from "react";
 import type { ConnectorId, ConnectorToolSettings } from "../../../shared/connections";
 import type { McpRiskTier } from "../../../shared/mcp";
@@ -36,16 +37,14 @@ export function ConnectorTools({ connector, visible, available }: { connector: C
     } finally { if (current === request.current) setBusy(false); }
   }
 
-  return <div className="mt-3 space-y-2 border-t border-line pt-3">
+  return <div className="mt-3 space-y-2  pt-3">
     <div className="flex items-center justify-between gap-2"><div className="font-medium">工具权限</div><Button size="sm" variant="ghost" disabled={busy} onClick={() => setRefresh(value => value + 1)}>刷新</Button></div>
     <p className="text-[12px] leading-relaxed text-muted">可逆：直接执行；有对外代价：执行并提示、留记录；不可逆：等待确认。保存后从下一次调用起生效，已经发出的确认仍需处理。</p>
     {!available && <p className="text-[11px] text-faint">连接并启用工具后可使用，也可以先设置权限。</p>}
     <fieldset disabled={busy} className="min-w-0 space-y-2">
       {tools.map(tool => <div key={tool.name} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-sunken px-3 py-2">
         <div className="min-w-0 flex-1"><div className="text-[12px]">{tool.label}</div><div className="mt-0.5 break-all font-mono text-[10px] text-faint">{tool.name}</div></div>
-        <select aria-label={`${tool.label} 风险档`} value={tool.tier} onChange={event => void setTier(tool.name, event.target.value as McpRiskTier)} className="rounded-md bg-panel px-2 py-1 text-xs">
-          <option value="reversible">可逆</option><option value="external">有对外代价</option><option value="irreversible">不可逆</option>
-        </select>
+        <MdConnectedSegments<McpRiskTier> ariaLabel={`${tool.label} 风险档`} value={tool.tier} onChange={tier => void setTier(tool.name, tier)} size="xs" options={[{ value: "reversible", label: "可逆" }, { value: "external", label: "有对外代价" }, { value: "irreversible", label: "不可逆" }]} />
       </div>)}
     </fieldset>
     {busy && tools.length === 0 && <p role="status" className="text-xs text-faint">正在读取工具权限…</p>}

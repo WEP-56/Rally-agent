@@ -1,3 +1,6 @@
+import { ActionButton } from "../md3/interactive";
+import { AnimatePresence, motion } from "motion/react";
+import { SPRING_JELLY, SPRING_LAYOUT } from "../md3/springs";
 import { useState } from "react";
 import { Brain, ChevronRight, FilePen, FilePlus2, FileX2, FileText, Globe, Search, Sparkles, SquareTerminal, Copy, Check, ListTodo, Wrench } from "lucide-react";
 import type { StepKind, ToolStep } from "../data";
@@ -57,7 +60,7 @@ function StepLine({ s, rich, open, onClick }: { s: ToolStep; rich?: boolean; ope
   const Icon = ICON[s.kind];
   const isFile = s.kind === "read" || s.kind === "write" || s.kind === "edit" || s.kind === "delete";
   return (
-    <button
+    <ActionButton
       onClick={onClick}
       className={cn(
         "group flex w-full min-w-0 items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm text-muted transition-colors",
@@ -91,17 +94,17 @@ function StepLine({ s, rich, open, onClick }: { s: ToolStep; rich?: boolean; ope
             </span>
           )}
           {s.duration && <span className="text-[11px] text-faint">{s.duration}</span>}
-          {(s.output || s.diff) && <ChevronRight size={14} className={cn("text-faint transition-transform", open && "rotate-90")} />}
+          {(s.output || s.diff) && <motion.span animate={{ rotate: open ? 90 : 0 }} transition={SPRING_JELLY} className="flex shrink-0 text-faint"><ChevronRight size={14} /></motion.span>}
         </span>
       )}
-    </button>
+    </ActionButton>
   );
 }
 
 function CopyBtn({ text }: { text: string }) {
   const [ok, setOk] = useState(false);
   return (
-    <button
+    <ActionButton
       onClick={() => {
         navigator.clipboard?.writeText(text);
         setOk(true);
@@ -110,14 +113,14 @@ function CopyBtn({ text }: { text: string }) {
       className="rounded-md p-1 text-white/50 hover:bg-white/10 hover:text-white"
     >
       {ok ? <Check size={13} /> : <Copy size={13} />}
-    </button>
+    </ActionButton>
   );
 }
 
 function StepDetail({ s }: { s: ToolStep }) {
   if (s.diff) {
     return (
-      <div className="animate-fade ml-7 mr-1 mb-2 mt-1 overflow-hidden rounded-xl bg-term shadow-soft">
+      <motion.div className=" ml-7 mr-1 mb-2 mt-1 overflow-hidden rounded-xl bg-term shadow-soft" initial={{ opacity: 0, y: 8, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={SPRING_LAYOUT}>
         <div className="flex items-center justify-between bg-white/5 px-3 py-1.5 text-xs text-white/60">
           <span className="font-mono">{s.target}</span>
           <CopyBtn text={(s.diff.add || []).join("\n")} />
@@ -133,18 +136,18 @@ function StepDetail({ s }: { s: ToolStep }) {
             <div key={"a" + i} className="flex bg-emerald-500/10 px-3 text-emerald-300"><span className="w-5 shrink-0 select-none">+</span><span className="whitespace-pre">{l || " "}</span></div>
           ))}
         </div>
-      </div>
+      </motion.div>
     );
   }
   if (!s.output) return null;
   return (
-    <div className="animate-fade ml-7 mr-1 mb-2 mt-1 overflow-hidden rounded-xl bg-term shadow-soft">
+    <motion.div className=" ml-7 mr-1 mb-2 mt-1 overflow-hidden rounded-xl bg-term shadow-soft" initial={{ opacity: 0, y: 8, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={SPRING_LAYOUT}>
       <div className="flex items-center justify-between bg-white/5 px-3 py-1.5 text-xs text-white/60">
         <span className="truncate font-mono">{s.target}</span>
         <CopyBtn text={s.output} />
       </div>
       <pre className="selectable max-h-64 overflow-auto px-3 py-2.5 font-mono text-[12px] leading-[1.65] text-white/80">{s.output}</pre>
-    </div>
+    </motion.div>
   );
 }
 
@@ -152,22 +155,28 @@ export function ToolSteps({ steps, rich, defaultOpen = false }: { steps: ToolSte
   const [open, setOpen] = useState(defaultOpen);
   const [detail, setDetail] = useState<number | null>(null);
   return (
-    <div className="glass min-w-0 overflow-hidden rounded-2xl">
-      <button aria-expanded={open} onClick={() => setOpen((v) => !v)} className="group flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-[12.5px] text-muted transition-colors hover:text-fg">
+    <div className="min-w-0 overflow-hidden rounded-[20px] bg-md-surface-lowest/90 dark:bg-md-surface-high/85">
+      <ActionButton aria-expanded={open} onClick={() => setOpen((v) => !v)} className="group flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-[12.5px] text-muted transition-colors hover:text-fg">
         {(() => { const Icon = ICON[steps[0]?.kind ?? "tool"]; return <Icon size={13} className="shrink-0 text-faint" />; })()}
-        <span className="truncate">{summarize(steps)}</span>
-        <ChevronRight size={14} className={cn("text-faint transition-transform group-hover:text-fg", open && "rotate-90")} />
-      </button>
-      {open && (
-        <div className="animate-fade flex flex-col gap-0.5 px-1.5 pb-1.5">
+        <span className="flex-1 truncate">{summarize(steps)}</span>
+        <motion.span animate={{ rotate: open ? 90 : 0 }} transition={SPRING_JELLY} className="flex shrink-0 text-faint group-hover:text-fg"><ChevronRight size={14} /></motion.span>
+      </ActionButton>
+      <AnimatePresence initial={false}>{open && (
+        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SPRING_LAYOUT} className="flex flex-col gap-0.5 overflow-hidden px-1.5 pb-1.5">
           {steps.map((s, i) => (
             <div key={i}>
               <StepLine s={s} rich={rich} open={detail === i} onClick={rich ? () => setDetail(detail === i ? null : i) : undefined} />
-              {rich && detail === i && <StepDetail s={s} />}
+              <AnimatePresence initial={false}>
+                {rich && detail === i && (
+                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SPRING_LAYOUT} className="overflow-hidden">
+                    <StepDetail s={s} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           ))}
-        </div>
-      )}
+        </motion.div>
+      )}</AnimatePresence>
     </div>
   );
 }

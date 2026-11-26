@@ -1,3 +1,5 @@
+import { Checkbox, Disclosure } from "../md3/interactive";
+import { ChoiceSelect } from "../md3/Select";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Pencil, Plus, Sparkles, Trash2, Upload, X } from "lucide-react";
 import type { ExternalAgentModel, RoleWorkerDraft, RoleWorkerExecutor, RoleWorkerProfile } from "../../../shared/role-workers";
@@ -142,31 +144,31 @@ export function RoleWorkersSection() {
 				<label className="block"><span className="mb-1.5 block text-xs font-medium">工作规范</span><Textarea rows={3} maxLength={4000} value={draft.workstyle} onChange={event => update("workstyle", event.target.value)} placeholder="检查步骤、质量标准、交付格式" /></label>
 				{(!draft.executor || draft.executor === "rally") && <label className="block">
 					<span className="mb-1.5 block text-xs font-medium">Rally 模型</span>
-					<select className="h-10 w-full rounded-xl bg-deep px-3.5 text-sm text-fg shadow-[inset_0_0_0_1px_var(--c-line)]" value={selectedModel} onChange={event => {
-						const model = models?.available.find(item => `${item.provider}/${item.id}` === event.target.value);
+					<ChoiceSelect className="h-10 w-full rounded-xl bg-deep px-3.5 text-sm text-fg focus:bg-md-surface-highest" value={selectedModel} onValueChange={choiceValue => {
+						const model = models?.available.find(item => `${item.provider}/${item.id}` === choiceValue);
 						update("model", model ? { provider: model.provider, model: model.id } : undefined);
 					}}>
 						<option value="">沿用默认任务模型</option>
 						{models?.available.map(model => <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>{model.providerName} · {model.name}</option>)}
-					</select>
+					</ChoiceSelect>
 				</label>}
-				<details key={draft.id} className="rounded-2xl bg-sunken p-3">
+				<Disclosure key={draft.id} className="rounded-2xl bg-sunken p-3">
 					<summary className="cursor-pointer text-xs font-medium">实验性功能</summary>
 					<div className="mt-3 space-y-3">
 						<label className="block">
 							<span className="mb-1.5 block text-xs font-medium">Worker 执行器</span>
-							<select className="h-10 w-full rounded-xl bg-deep px-3.5 text-sm text-fg shadow-[inset_0_0_0_1px_var(--c-line)]" value={draft.executor ?? "rally"} onChange={event => chooseExecutor(event.target.value as RoleWorkerExecutor)}>
+							<ChoiceSelect className="h-10 w-full rounded-xl bg-deep px-3.5 text-sm text-fg focus:bg-md-surface-highest" value={draft.executor ?? "rally"} onValueChange={choiceValue => chooseExecutor(choiceValue as RoleWorkerExecutor)}>
 								<option value="rally">Rally 原生 Worker</option><option value="claude-code">Claude Code</option><option value="codex">Codex</option>
-							</select>
+							</ChoiceSelect>
 						</label>
 						{draft.executor && draft.executor !== "rally" && <div>
 							<div className="mb-1.5 text-xs font-medium">{draft.executor === "claude-code" ? "Claude Code 模型" : "Codex 模型"}</div>
 							<div className="flex gap-2">
-								<select aria-label="外部模型" className="h-10 min-w-0 flex-1 rounded-xl bg-deep px-3.5 text-sm text-fg shadow-[inset_0_0_0_1px_var(--c-line)]" value={selectedModel} onChange={event => update("externalModel", event.target.value || undefined)}>
+								<ChoiceSelect aria-label="外部模型" className="h-10 min-w-0 flex-1 rounded-xl bg-deep px-3.5 text-sm text-fg focus:bg-md-surface-highest" value={selectedModel} onValueChange={choiceValue => update("externalModel", choiceValue || undefined)}>
 									<option value="">选择外部模型</option>
 									{selectedModel && !externalModels.some(model => model.id === selectedModel) && <option value={selectedModel}>{selectedModel}（已保存）</option>}
 									{externalModels.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
-								</select>
+								</ChoiceSelect>
 								<Button disabled={loadingExternalModels} onClick={() => {
 									if (draft.executor && draft.executor !== "rally") void loadExternalModels(draft.executor);
 								}}>{loadingExternalModels ? "读取中…" : "刷新"}</Button>
@@ -174,8 +176,8 @@ export function RoleWorkersSection() {
 							<p className="mt-1.5 text-[11px] leading-relaxed text-faint">按需安装，也可让 Rally 连接任务运行主机上已有的 Claude Code / Codex，复用其登录和模型配置。可在主对话中提出配置要求，完成后点击刷新。外部执行器暂不提供 Rally 浏览器、MCP 或工具审批。</p>
 						</div>}
 					</div>
-				</details>
-				<div><div className="mb-2 text-xs font-medium">推荐 Skills <span className="font-normal text-faint">（只提示优先参考，不限制使用）</span></div>{availableSkills.length ? <div className="max-h-52 space-y-1 overflow-y-auto rounded-2xl bg-sunken p-2">{availableSkills.map(skill => <label key={skill.path} className="flex cursor-pointer items-start gap-2 rounded-xl px-2 py-1.5 hover:bg-hover"><input type="checkbox" className="mt-0.5 accent-[var(--c-accent)]" checked={draft.recommendedSkills.includes(skill.name)} onChange={event => update("recommendedSkills", event.target.checked ? [...draft.recommendedSkills, skill.name] : draft.recommendedSkills.filter(name => name !== skill.name))} /><span className="min-w-0"><span className="block text-xs font-medium">{skill.name}</span><span className="block text-[11px] leading-relaxed text-muted">{skill.description}{!skill.enabled && " · 当前在全局设置中停用"}</span></span></label>)}</div> : <p className="rounded-2xl bg-sunken px-3 py-4 text-xs text-faint">当前没有发现可选 Skills；角色仍可正常使用。</p>}</div>
+				</Disclosure>
+				<div><div className="mb-2 text-xs font-medium">推荐 Skills <span className="font-normal text-faint">（只提示优先参考，不限制使用）</span></div>{availableSkills.length ? <div className="max-h-52 space-y-1 overflow-y-auto rounded-2xl bg-sunken p-2">{availableSkills.map(skill => <label key={skill.path} className="flex cursor-pointer items-start gap-2 rounded-xl px-2 py-1.5 hover:bg-hover"><Checkbox className="mt-0.5 accent-[var(--c-accent)]" checked={draft.recommendedSkills.includes(skill.name)} onChange={event => update("recommendedSkills", event.target.checked ? [...draft.recommendedSkills, skill.name] : draft.recommendedSkills.filter(name => name !== skill.name))} /><span className="min-w-0"><span className="block text-xs font-medium">{skill.name}</span><span className="block text-[11px] leading-relaxed text-muted">{skill.description}{!skill.enabled && " · 当前在全局设置中停用"}</span></span></label>)}</div> : <p className="rounded-2xl bg-sunken px-3 py-4 text-xs text-faint">当前没有发现可选 Skills；角色仍可正常使用。</p>}</div>
 			</div>
 			<div className="mt-5 flex items-center justify-between gap-3"><p className="text-xs text-danger" role="alert">{error}</p><div className="ml-auto flex gap-2"><Button disabled={busy} onClick={() => { modelRequest.current++; setDraft(null); setError(""); }}>取消</Button><Button variant="primary" disabled={busy || !draft.name.trim() || ((draft.executor ?? "rally") !== "rally" && !draft.externalModel)} onClick={() => void save()}>{busy ? "保存中…" : "保存角色"}</Button></div></div>
 		</div>}

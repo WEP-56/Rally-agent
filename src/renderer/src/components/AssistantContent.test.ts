@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { AssistantContent } from "./AssistantContent";
+import { PresenceCapsule } from "./PresenceCapsule";
 import { ChatPanel } from "./ChatPanel";
 import { GateCard } from "./GateCard";
 import { QuestionCard } from "./QuestionCard";
@@ -33,7 +34,7 @@ describe("Rally conversation rendering (no browser)", () => {
 				{ id: "2", role: "assistant", text: "INTERMEDIATE_MESSAGE", blocks: [{ type: "text", text: "INTERMEDIATE_MESSAGE" }] },
 				{ id: "3", role: "assistant", text: "", blocks: [{ type: "tool", toolCallId: "hidden" }], toolCalls: [{ id: "hidden", name: "read", input: "hidden.txt", startedAt: 1, status: "running" }] },
 			], tasks: [], header: { activity: null, showCompact: false, showNewConversation: false }, busy: false, onSend: () => {}, onStop: () => {}, onNewChat: () => {}, onCompactChat: () => {}, rightOpen: true,
-			onToggleRight: () => {}, autoApprove: false, onAutoApprove: async () => {},
+			onToggleRight: () => {},
 		}));
 		expect(html).not.toContain("THINKING_ONLY_MESSAGE");
 		expect(html).toContain("INTERMEDIATE_MESSAGE");
@@ -55,7 +56,6 @@ describe("Rally conversation rendering (no browser)", () => {
 			tasks: [{ id: "T-1064", title: "邮件任务", summary: "fixture", createdAt: now - 5, duration: "1 秒", progress: 0, status: "needs_gate", tags: [], messages: [], gates: decisions }],
 			header: { activity: "querying", showCompact: true, showNewConversation: false },
 			busy: false, onSend: () => {}, onStop: () => {}, onNewChat: () => {}, onCompactChat: () => {}, rightOpen: true, onToggleRight: () => {},
-			autoApprove: false, onAutoApprove: async () => {},
 		}));
 		const pending = render([gate]);
 		const denied = render([{ ...gate, decision: { value: "deny", actor: "user", at: now, reason: "测试拒绝", basis: [] } }]);
@@ -67,7 +67,7 @@ describe("Rally conversation rendering (no browser)", () => {
 		}
 		expect(pending).toContain("确认发送</button>");
 		expect(pending).toContain("查询中");
-		expect(pending).toContain("motion-safe:animate-spin");
+		expect(pending).toContain("查询中");
 		expect(pending).toContain("整理上下文 (Ctrl+Shift+N)");
 		expect(pending).not.toContain("新建会话 (Ctrl+N)");
 		expect(denied).toContain("已拒绝");
@@ -133,4 +133,30 @@ describe("Rally conversation rendering (no browser)", () => {
 		const closed = renderToStaticMarkup(createElement(QuestionCard, { ...props, question: { ...question, closed: { reason: "replaced", at: 3 } } }));
 		expect(closed).toContain("问题已替换"); expect(closed).not.toContain("<button");
 	});
+});
+
+
+describe("MD3 live status and composer", () => {
+  it("keeps background work visible while the main agent is idle and excludes archives", () => {
+    const task = { id: "T-1", title: "任务", summary: "", createdAt: 1, duration: "", progress: 0, tags: [], messages: [], status: "running" as const };
+    const html = renderToStaticMarkup(createElement(PresenceCapsule, {
+      personaName: "Rally", activity: "idle", rightOpen: false, onOpenWorkstation: () => {},
+      tasks: [task, { ...task, id: "T-2", archivedAt: 2 }, { ...task, id: "T-3", status: "pending_approval" }],
+    }));
+    expect(html).toContain("工位 1 项执行中");
+    expect(html).toContain("打开工位");
+    expect(html).not.toContain("待命");
+  });
+
+  it("shows a single stop action while busy and moves auto approval out of the composer", () => {
+    const html = renderToStaticMarkup(createElement(ChatPanel, {
+      messages: [{ id: "m", role: "user", text: "任务" }], tasks: [], header: { activity: "planning", showCompact: false, showNewConversation: false },
+      busy: true, onSend: () => {}, onStop: () => {}, onNewChat: () => {}, onCompactChat: () => {},
+      rightOpen: true, onToggleRight: () => {},
+    }));
+    expect(html).toContain("制订任务");
+    expect(html.match(/title="停止回复并暂停队列"/g)).toHaveLength(1);
+    expect(html).not.toContain('title="发送消息"');
+    expect(html).not.toContain("自动批准");
+  });
 });

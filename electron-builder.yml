@@ -17,7 +17,7 @@ extraResources:
     to: browser
   - from: build/icon.ico
     to: icon.ico
-  - from: docs/icon.png
+  - from: build/icon.png
     to: icon.png
   - from: skills
     to: skills

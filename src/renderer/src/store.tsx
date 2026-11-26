@@ -1,3 +1,4 @@
+import { DEFAULT_SEED_HEX, SEED_PRESETS } from "./md3/theme";
 import { createContext, useContext } from "react";
 import type { ResourceRef } from "../../shared/resources";
 import { DEFAULT_IDENTITY } from "../../shared/identity";
@@ -50,14 +51,7 @@ export interface Config {
   skills: Skill[];
 }
 
-export const ACCENTS = [
-  { name: "轨道靛", value: "#5b6cf0" },
-  { name: "晨雾紫", value: "#8b5cf6" },
-  { name: "海盐青", value: "#0ea5a4" },
-  { name: "琥珀", value: "#e08a1e" },
-  { name: "珊瑚", value: "#ee5a67" },
-  { name: "石墨", value: "#4b4b5c" },
-];
+export const ACCENTS = SEED_PRESETS.map(seed => ({ name: seed.name, value: seed.hex }));
 
 export const DEFAULT_CONFIG: Config = {
   ...DEFAULT_IDENTITY,
@@ -66,7 +60,7 @@ export const DEFAULT_CONFIG: Config = {
   rallyModel: "",
   taskModel: "",
   theme: "light",
-  accent: "#5b6cf0",
+  accent: DEFAULT_SEED_HEX,
   fontSize: "md",
   density: "cozy",
   mcp: [
@@ -91,7 +85,7 @@ export function loadConfig(): Config {
   const remote = window.runtime?.mode === "cloud" ? { ...cloudRead<IdentityState>(IpcChannel.identityState), memoryPath: cloudRead<MemoryState>(IpcChannel.memoryState)?.dir ?? "正在同步…" } : {};
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...DEFAULT_CONFIG, ...JSON.parse(raw), ...remote };
+    if (raw) return { ...DEFAULT_CONFIG, ...JSON.parse(raw), ...remote, density: "cozy" };
   } catch {
     /* ignore */
   }

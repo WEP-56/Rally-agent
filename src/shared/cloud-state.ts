@@ -27,7 +27,7 @@ export function applyTask(current: TaskBoard, event: TaskEvent): TaskBoard {
 	const tasks = exists
 		? current.tasks.map((task) => (task.id === event.task.id ? event.task : task))
 		: [...current.tasks, event.task];
-	const open = tasks.filter((task) => !task.ended);
+	const open = tasks.filter((task) => !task.ended && task.archivedAt === undefined);
 	const ended = tasks
 		.filter((task) => task.ended && task.archivedAt === undefined)
 		.sort((a, b) => b.updatedAt - a.updatedAt || Number(b.id.slice(2)) - Number(a.id.slice(2)))

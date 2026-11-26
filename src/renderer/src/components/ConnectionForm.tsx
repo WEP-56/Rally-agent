@@ -1,4 +1,8 @@
-import { useId, useState } from "react";
+import { motion } from "motion/react";
+import { SPRING_FAST } from "../md3/springs";
+import { useBrowserOverlay } from "../browser-overlays";
+import { ActionButton } from "../md3/interactive";
+import { useEffect, useId, useRef, useState } from "react";
 import { ArrowRight, Check, Cloud, LoaderCircle, Monitor } from "lucide-react";
 import { connectionUrl } from "../../../shared/connection";
 import { bridge } from "../connection";
@@ -14,15 +18,24 @@ export function ConnectionForm({ reason = "", onContinue }: { reason?: string; o
   const [key, setKey] = useState("");
   const [error, setError] = useState(reason || state?.error || "");
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const dialog = useRef<HTMLDialogElement>(null);
+  const confirmationId = useId();
+  useBrowserOverlay(confirming);
+  useEffect(() => {
+    if (confirming) dialog.current?.showModal();
+    else dialog.current?.close();
+  }, [confirming]);
   let normalized = "";
   try { normalized = connectionUrl(url); } catch { /* Validation is shown on submit. */ }
   const paired = state?.profiles?.includes(normalized);
   const unchanged = mode === state?.mode && (mode === "local" || (normalized === state.url && !key.trim()));
 
-  async function select() {
+  async function select(confirmed = false) {
     if (busy) return;
     if (unchanged && onContinue) { onContinue(); return; }
-    if (state?.mode === "local" && mode === "cloud" && !confirm("切换会退出本地 Rally 并停止本地运行中的工作。继续？")) return;
+    if (state?.mode === "local" && mode === "cloud" && !confirmed) { setConfirming(true); return; }
+    setConfirming(false);
     setError("");
     try {
       const address = mode === "cloud" ? connectionUrl(url) : "";
@@ -54,13 +67,13 @@ export function ConnectionForm({ reason = "", onContinue }: { reason?: string; o
             { value: "local", title: "本地运行", icon: Monitor, desc: "使用这台电脑的文件与工具，电脑运行时执行任务。" },
             { value: "cloud", title: "连接云端", icon: Cloud, desc: "任务在服务器持续运行，电脑和手机共享同一套 Rally。" },
           ] as const).map(item => (
-            <button key={item.value} type="button" disabled={busy} aria-pressed={mode === item.value}
+            <ActionButton key={item.value} type="button" disabled={busy} aria-pressed={mode === item.value}
               onClick={() => { setMode(item.value); setError(""); }}
-              className={cn("rounded-2xl border p-4 text-left transition-colors disabled:opacity-50", mode === item.value ? "border-accent bg-accent-soft" : "border-line bg-panel hover:bg-hover")}>
+              className={cn("rounded-2xl p-4 text-left transition-colors disabled:opacity-50", mode === item.value ? "bg-md-secondary-container text-md-on-secondary-container" : "bg-panel hover:bg-hover")}>
               <div className="mb-3 flex items-center justify-between text-accent"><item.icon size={22} />{mode === item.value && <Check size={16} />}</div>
               <div className="text-sm font-semibold">{item.title}</div>
               <p className="mt-2 text-xs leading-relaxed text-muted">{item.desc}</p>
-            </button>
+            </ActionButton>
           ))}
         </div>
       ) : <p className="text-sm leading-relaxed text-muted">手机连接云端 Rally，与电脑共享对话和任务。</p>}
@@ -68,9 +81,9 @@ export function ConnectionForm({ reason = "", onContinue }: { reason?: string; o
         {mode === "cloud" && <>
           <label className="block space-y-2 text-sm font-medium">
             <span>服务器地址</span>
-            <Input required type="url" autoComplete="url" disabled={busy} placeholder="https://rally.example.com 或 http://IP:4711" value={url} list={profilesId} onChange={e => { setUrl(e.target.value); setKey(""); }} />
+            <Input required type="url" autoComplete="url" disabled={busy} placeholder="https://rally.example.com 或 http://IP:4711" value={url} onChange={e => { setUrl(e.target.value); setKey(""); }} />
           </label>
-          <datalist id={profilesId}>{state?.profiles?.map(profile => <option key={profile} value={profile} />)}</datalist>
+          <div id={profilesId} className="flex flex-wrap gap-2">{state?.profiles?.map(profile => <ActionButton key={profile} disabled={busy} onClick={() => { setUrl(profile); setKey(""); }} className="max-w-full truncate rounded-full bg-md-secondary-container px-3 py-1.5 text-xs text-md-on-secondary-container" title={profile}>{profile}</ActionButton>)}</div>
           <label className="block space-y-2 text-sm font-medium">
             <span>设备接入密钥</span>
             <Input type="password" autoComplete="off" disabled={busy} required={!paired} placeholder={paired ? "已配对，可留空；重新配对时填写新密钥" : "粘贴一次性设备接入密钥"} value={key} onChange={e => setKey(e.target.value)} />
@@ -89,6 +102,12 @@ export function ConnectionForm({ reason = "", onContinue }: { reason?: string; o
           </Button>
         </div>
       </form>
+      <motion.dialog ref={dialog} aria-labelledby={confirmationId} onCancel={event => { event.preventDefault(); setConfirming(false); }} initial={false} animate={{ opacity: confirming ? 1 : 0, scale: confirming ? 1 : 0.94 }} transition={SPRING_FAST}
+        className="m-auto w-[min(400px,90vw)] rounded-[28px] bg-md-surface-high p-6 text-md-on-surface shadow-pop backdrop:bg-black/30">
+        <h2 id={confirmationId} className="text-lg font-semibold">切换到云端？</h2>
+        <p className="my-4 text-sm leading-relaxed text-muted">切换会退出本地 Rally，并停止本地运行中的工作。</p>
+        <div className="flex justify-end gap-2"><Button type="button" onClick={() => setConfirming(false)}>取消</Button><Button type="button" variant="primary" onClick={() => void select(true)}>继续切换</Button></div>
+      </motion.dialog>
     </section>
   );
 }

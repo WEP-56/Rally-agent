@@ -13,14 +13,14 @@ export function applicationIcon(): string {
  const root = app.isPackaged ? process.resourcesPath : app.getAppPath();
  return process.platform === "win32"
   ? join(root, app.isPackaged ? "icon.ico" : "build/icon.ico")
-  : join(root, app.isPackaged ? "icon.png" : "docs/icon.png");
+  : join(root, app.isPackaged ? "icon.png" : "build/icon.png");
 }
 
 /** Bind the running window and its pinned taskbar entry to Rally before showing it. */
 export function applyWindowBranding(window: BrowserWindow): void {
  const root = app.isPackaged ? process.resourcesPath : app.getAppPath();
  // Use a decoded bitmap for the window; the ICO remains the shell/tray resource.
- window.setIcon(join(root, app.isPackaged ? "icon.png" : "docs/icon.png"));
+ window.setIcon(join(root, app.isPackaged ? "icon.png" : "build/icon.png"));
  if (process.platform === "win32") {
   const command = [process.execPath, ...(!app.isPackaged ? [app.getAppPath()] : [])].map(path => `"${path}"`).join(" ");
   window.setAppDetails({ appId: applicationId(), appIconPath: applicationIcon(), appIconIndex: 0, relaunchCommand: command, relaunchDisplayName: "Rally" });

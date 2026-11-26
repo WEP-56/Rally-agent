@@ -1,3 +1,4 @@
+import { ActionButton } from "../md3/interactive";
 import { useEffect, useRef, useState } from "react";
 import { Globe, Hand, Play, X } from "lucide-react";
 import type { AgentBrowserWindow, BrowserFrame, BrowserUserInput } from "../../../shared/agent-browser";
@@ -65,7 +66,7 @@ export function AgentBrowserView({ id, visible, onClose }: { id: string; visible
 	return <div className="flex h-full min-h-0 flex-col gap-3 p-4">
 		<div className="flex flex-wrap items-center gap-2 text-sm"><Globe size={16} className="text-accent" /><span className="min-w-0 flex-1 truncate">{browser?.origin || "任务浏览器"}</span>
 			{browser && browser.owner !== "closed" && (owned ? <Button size="sm" disabled={pending} onClick={() => void action(async () => { updateAgentBrowser(await window.rally.agentBrowser.handBack(id)); setOwnedEpoch(undefined); setText(""); })}><Play size={13} />交还</Button> : <Button size="sm" disabled={pending || browser.owner === "user" || browser.owner === "taking"} onClick={() => void action(async () => { const next = await window.rally.agentBrowser.take(id); updateAgentBrowser(next); setOwnedEpoch(next.epoch); })}><Hand size={13} />接管</Button>)}
-			{onClose && <button aria-label="关闭浏览器视图" onClick={onClose}><X size={18} /></button>}
+			{onClose && <ActionButton aria-label="关闭浏览器视图" onClick={onClose}><X size={18} /></ActionButton>}
 		</div>
 		<div className="text-xs text-muted">{browser?.operation || "正在连接…"}{browser?.owner !== "closed" && !owned && " · 仅观看"}</div>
 		{(browser?.tabs?.length ?? 0) > 1 && <div className="flex gap-2 overflow-auto">{browser!.tabs!.map((tab, index) => <Button key={tab.id} size="sm" disabled={!owned || pending || tab.active} onClick={() => send({ kind: "tab", tabId: tab.id })}>{index + 1} · {tab.origin || "新标签页"}</Button>)}</div>}

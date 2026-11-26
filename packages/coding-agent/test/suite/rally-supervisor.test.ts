@@ -2112,7 +2112,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		expect(supervisor.main.isBusy()).toBe(false);
 	});
 
-	it("archives only ended tasks, survives replay and clears archive on resume", async () => {
+	it("rejects archiving unfinished dispatches, survives replay and clears archive on resume", async () => {
 		const { supervisor } = await setup();
 		const task = createTask(supervisor);
 		expect(() => supervisor.archive(task.id, true)).toThrow("请先在主对话中结束任务");

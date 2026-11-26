@@ -65,7 +65,7 @@ export class Scheduler {
 		const { store, events } = this.options;
 		const open = store
 			.list()
-			.filter((task) => !task.ended && task.approval.state === "approved")
+			.filter((task) => !task.ended && task.archivedAt === undefined && task.approval.state === "approved")
 			.sort((a, b) => priority(a) - priority(b) || queuedAt(a) - queuedAt(b));
 		const openIds = new Set(open.map((task) => task.id));
 		for (const id of [...this.queued.keys()]) if (!openIds.has(id)) this.queued.delete(id);
@@ -76,9 +76,9 @@ export class Scheduler {
 		for (const task of open) {
 			if (this.options.canRun?.() === false) return;
 			const lastRun = task.runs[task.runs.length - 1];
-			const interruptedAt = lastRun?.endReason === "interrupted" ? lastRun.endedAt : undefined;
-			// An interrupted run waits for the user's decision: resume or cancel (docs 01 §4.9).
-			if (interruptedAt && !task.inputs.some((input) => input.kind === "resume" && !input.deliveredAt && input.at >= interruptedAt)) continue;
+			const stoppedAt = lastRun?.endReason === "interrupted" || lastRun?.endReason === "blocked" ? lastRun.endedAt : undefined;
+			// Interrupted and archived blocked runs need an explicit continuation.
+			if (stoppedAt !== undefined && !task.inputs.some((input) => input.kind === "resume" && !input.deliveredAt && input.at >= stoppedAt)) continue;
 			if (lastRun?.inactivityPausedAt !== undefined && !lastRun.endedAt) {
 				if (active.has(task.id)) continue;
 				const inputs = task.inputs.filter(input => !input.deliveredAt);

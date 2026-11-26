@@ -1,9 +1,14 @@
+import { SPRING_FAST, SPRING_JELLY, SPRING_LAYOUT } from "../md3/springs";
+import { ActionButton } from "../md3/interactive";
+import { AnimatePresence, motion } from "motion/react";
+import { HorizontalDragScroll } from "../md3/components";
+import { BrowserOverlayLease, useBrowserOverlay } from "../browser-overlays";
 import { AgentAvatar } from "./AgentAvatar";
 import { File } from "lucide-react";
 import { ResourceView } from "./Attachments";
 import { Critter } from "./brand";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Cable, Plus, X, Globe, SquareTerminal, IdCard, ChevronRight, PanelRightClose } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowLeft, Cable, Plus, X, Globe, SquareTerminal, IdCard, ChevronRight, PanelRightClose } from "lucide-react";
 import type { Tab } from "../store";
 import { useApp } from "../store";
 import type { Task } from "../data";
@@ -35,7 +40,7 @@ function Launcher({ onPick, tasks }: { onPick: (k: NewKind) => void; tasks: Task
         {(Object.keys(KIND_META) as NewKind[]).filter(k => !(k === "terminal" && window.runtime.mode === "cloud") && !(k === "browser" && window.runtime.platform === "android")).map((k) => {
           const M = KIND_META[k];
           return (
-            <button
+            <ActionButton
               key={k}
               onClick={() => onPick(k)}
               className="group flex w-full items-center gap-3 rounded-2xl px-2.5 py-2.5 text-left transition-colors hover:bg-fg/[0.05]"
@@ -45,19 +50,19 @@ function Launcher({ onPick, tasks }: { onPick: (k: NewKind) => void; tasks: Task
               </div>
               <div className="min-w-0 flex-1"><div className="text-[13.5px] font-medium">{M.title}</div><div className="mt-0.5 truncate text-[11.5px] text-faint">{M.desc}</div></div>
               <Kbd>{M.key}</Kbd>
-            </button>
+            </ActionButton>
           );
         })}
       </div>
       <div className="mt-4 px-1 text-[11px] font-medium text-faint">最近任务</div>
       <div className="mt-1.5 flex flex-col gap-0.5">
         {recent.map((t) => (
-          <button key={t.id} onClick={() => openTask(t.id)} className="group flex items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-hover">
+          <ActionButton key={t.id} onClick={() => openTask(t.id)} className="group flex items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-hover">
             <Critter seed={t.id} size={26} />
             <span className="flex-1 truncate text-[13px]">{t.title}</span>
             <span className="text-[11px] text-faint">{timeAgo(t.createdAt)}</span>
             <ChevronRight size={13} className="text-faint" />
-          </button>
+          </ActionButton>
         ))}
       </div>
     </div>
@@ -88,41 +93,7 @@ export function RightPanel({
   onCollapse: () => void;
 }) {
   const [drawer, setDrawer] = useState(false);
-  const [dragging, setDragging] = useState(false);
-  const strip = useRef<HTMLDivElement>(null);
-  const selectedTab = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ id: number; x: number; left: number; moved: boolean } | null>(null);
-  const skipClick = useRef(false);
-
-  useLayoutEffect(() => {
-    const list = strip.current;
-    const tab = selectedTab.current;
-    if (!visible || !list || !tab) return;
-    const viewport = list.getBoundingClientRect();
-    const target = tab.getBoundingClientRect();
-    // Scroll only the tabs; scrollIntoView can also move the surrounding panel.
-    if (target.left < viewport.left) list.scrollLeft += target.left - viewport.left;
-    else if (target.right > viewport.right) list.scrollLeft += target.right - viewport.right;
-  }, [active, tabs.length, visible]);
-
-  useEffect(() => {
-    const list = strip.current;
-    if (!list) return;
-    const wheel = (event: WheelEvent) => {
-      if (event.ctrlKey || event.shiftKey || event.deltaX || !event.deltaY || list.scrollWidth <= list.clientWidth) return;
-      const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? list.clientWidth : 1;
-      list.scrollLeft += event.deltaY * scale;
-      event.preventDefault();
-    };
-    list.addEventListener("wheel", wheel, { passive: false });
-    return () => list.removeEventListener("wheel", wheel);
-  }, []);
-
-  const endDrag = (id: number) => {
-    if (drag.current?.id !== id) return;
-    drag.current = null;
-    setDragging(false);
-  };
+  useBrowserOverlay(drawer);
   useEffect(() => {
     if (!drawer) return;
     const k = (e: KeyboardEvent) => e.key === "Escape" && setDrawer(false);
@@ -136,40 +107,12 @@ export function RightPanel({
   };
 
   return (
-    <div className="stage relative flex h-full min-w-0 flex-col overflow-hidden rounded-[28px]">
+    <div className="md3-workstation-stage relative flex h-full min-w-0 flex-col overflow-hidden rounded-[28px]">
       {/* tab strip */}
-      <div className="drag relative z-10 flex h-16 shrink-0 items-center justify-center px-16">
-        <div className="no-drag glass-strong flex min-w-0 max-w-full items-center gap-0.5 rounded-full p-1">
-        <div ref={strip} className={cn("no-scrollbar flex min-w-0 select-none items-center gap-0.5 overflow-x-auto", dragging && "cursor-grabbing")}
-          onPointerDown={event => {
-            skipClick.current = false;
-            const list = event.currentTarget;
-            if (event.pointerType !== "mouse" || event.button !== 0 || list.scrollWidth <= list.clientWidth || (event.target instanceof Element && event.target.closest("button"))) return;
-            drag.current = { id: event.pointerId, x: event.clientX, left: list.scrollLeft, moved: false };
-          }}
-          onPointerMove={event => {
-            const gesture = drag.current;
-            if (!gesture || gesture.id !== event.pointerId) return;
-            const delta = event.clientX - gesture.x;
-            if (!gesture.moved) {
-              if (Math.abs(delta) < 5) return;
-              gesture.moved = true;
-              skipClick.current = true;
-              event.currentTarget.setPointerCapture(event.pointerId);
-              setDragging(true);
-            }
-            event.currentTarget.scrollLeft = gesture.left - delta;
-          }}
-          onPointerLeave={event => { if (!drag.current?.moved) endDrag(event.pointerId); }}
-          onPointerUp={event => endDrag(event.pointerId)}
-          onPointerCancel={event => endDrag(event.pointerId)}
-          onLostPointerCapture={event => endDrag(event.pointerId)}
-          onClickCapture={event => {
-            if (!skipClick.current || event.detail === 0) return;
-            skipClick.current = false;
-            event.stopPropagation();
-            event.preventDefault();
-          }}>
+      <div className="drag relative z-10 grid grid-cols-[42px_minmax(0,1fr)_42px] h-16 shrink-0 items-center px-2">
+        <ActionButton className="no-drag flex h-10 w-10 items-center justify-center rounded-full text-muted md:invisible" aria-label="返回对话" onClick={onCollapse}><ArrowLeft size={18} /></ActionButton>
+        <div className="no-drag col-start-2 flex min-w-0 max-w-full items-center gap-0.5 rounded-full bg-md-surface-high/92 p-1">
+        <HorizontalDragScroll activeKey={active ?? ""} className="gap-0.5">
         {tabs.map((t) => {
           const isActive = t.id === active;
           const task = t.taskId ? tasks.find((x) => x.id === t.taskId) : undefined;
@@ -177,7 +120,7 @@ export function RightPanel({
           return (
             <div
               key={t.id}
-              ref={isActive ? selectedTab : undefined}
+              data-active={isActive}
               onMouseDown={(e) => {
                 if (e.button === 1 && t.kind !== "workstation") {
                   e.preventDefault();
@@ -186,41 +129,43 @@ export function RightPanel({
               }}
               onClick={() => setActive(t.id)}
               className={cn(
-                "group relative flex h-[30px] shrink-0 min-w-[64px] max-w-[160px] items-center gap-1.5 rounded-full px-3 text-[12px] transition-colors",
-                isActive ? "z-10 bg-ink text-white shadow-soft dark:bg-white dark:text-ink" : "text-muted hover:text-fg",
+                "group relative flex h-[30px] shrink-0 min-w-[64px] max-w-[164px] cursor-pointer items-center gap-1.5 rounded-full px-3 text-[12px] font-medium transition-colors",
+                isActive ? "z-10 text-md-on-secondary-container" : "text-muted hover:bg-fg/[0.055] hover:text-fg",
               )}
             >
-              {!isActive && <span className="pointer-events-none absolute inset-x-0.5 bottom-1 top-0 rounded-lg transition-colors group-hover:bg-hover" />}
+              {isActive && <motion.span layoutId="right-panel-active-tab" transition={SPRING_FAST} className="absolute inset-0 rounded-full bg-md-secondary-container" />}
 
-              <span className={cn("relative flex shrink-0 items-center", !isActive && "-translate-y-0.5")}>
-                {task ? <Critter seed={task.id} size={19} /> : t.kind === "workstation" ? <AgentAvatar size={17} /> : Icon && <Icon size={13} strokeWidth={1.9} />}
+              <span className="relative flex shrink-0 items-center">
+                {task ? <Critter seed={task.id} size={18} /> : t.kind === "workstation" ? <AgentAvatar size={17} /> : Icon && <Icon size={13} strokeWidth={1.9} />}
               </span>
-              <span className={cn("relative flex-1 truncate", !isActive && "-translate-y-0.5")}>{t.kind === "workstation" ? "工位" : t.kind === "task" ? t.taskId : t.title}</span>
-              {t.kind !== "workstation" && <button
+              <span className="relative flex-1 truncate">{t.kind === "workstation" ? "工位" : t.kind === "task" ? t.taskId : t.title}</span>
+              {t.kind !== "workstation" && <ActionButton
                 onClick={(e) => {
                   e.stopPropagation();
                   closeTab(t.id);
                 }}
                 className={cn(
-                  "relative flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-faint hover:bg-press hover:text-fg",
-                  !isActive && "-translate-y-0.5 opacity-0 group-hover:opacity-100",
+                  "relative flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-full text-faint hover:bg-press hover:text-fg",
+                  !isActive && "opacity-0 group-hover:opacity-100",
                 )}
               >
-                <X size={12} />
-              </button>}
+                <X size={11.5} />
+              </ActionButton>}
             </div>
           );
         })}
-        </div>
-        <button
+        </HorizontalDragScroll>
+        <ActionButton
           onClick={() => setDrawer((v) => !v)}
-          className={cn("ml-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted transition-all hover:bg-hover hover:text-fg", drawer && "rotate-45 bg-hover text-fg")}
+          className={cn("ml-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted hover:bg-hover hover:text-fg", drawer && "bg-md-secondary-container text-md-on-secondary-container")}
           title="新标签页"
         >
-          <Plus size={16} />
-        </button>
+          <motion.span animate={{ rotate: drawer ? 45 : 0 }} transition={SPRING_JELLY} className="flex items-center justify-center">
+            <Plus size={15} />
+          </motion.span>
+        </ActionButton>
         </div>
-        <RoundButton size={36} className="no-drag absolute right-3.5" title="收起右侧栏 (Ctrl+B)" onClick={onCollapse}><PanelRightClose size={15} strokeWidth={1.8} /></RoundButton>
+        <RoundButton size={36} className="no-drag justify-self-end" title="收起右侧栏 (Ctrl+B)" onClick={onCollapse}><PanelRightClose size={15} strokeWidth={1.8} /></RoundButton>
       </div>
 
       {/* content */}
@@ -241,27 +186,44 @@ export function RightPanel({
         })}
         {tabs.length === 0 && (
           <div className="flex h-full items-center justify-center overflow-y-auto p-6">
-            <div className="animate-rise w-full max-w-[520px]">
+            <motion.div className=" w-full max-w-[520px]" initial={{ opacity: 0, y: 8, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={SPRING_LAYOUT}>
               <div className="mb-1 text-lg font-semibold">新标签页</div>
               <div className="mb-5 text-sm text-faint">选择要打开的页面</div>
               <Launcher onPick={pick} tasks={tasks} />
-            </div>
+            </motion.div>
           </div>
         )}
 
         {/* drawer */}
-        {drawer && (
-          <>
-            <div className="animate-fade absolute inset-0 z-20 bg-black/[0.06] dark:bg-black/30" onClick={() => setDrawer(false)} />
-            <div className="glass-strong animate-pop absolute right-4 top-0 z-30 w-[340px] max-w-[calc(100%_-_32px)] rounded-3xl p-2 shadow-pop">
-              <div className="mb-3 flex items-center justify-between px-1">
-                <span className="text-[13px] font-semibold">打开新标签页</span>
-                <Kbd>Esc</Kbd>
-              </div>
-              <Launcher onPick={pick} tasks={tasks} />
-            </div>
-          </>
-        )}
+        <AnimatePresence>
+          {drawer && (
+            <>
+              <BrowserOverlayLease />
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                className="absolute inset-0 z-20 bg-black/[0.08] dark:bg-black/32"
+                onClick={() => setDrawer(false)}
+              />
+              <motion.div
+                initial={{ opacity: 0, y: -10, scale: 0.92 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -8, scale: 0.94 }}
+                transition={SPRING_FAST}
+                style={{ transformOrigin: "85% 0%" }}
+                className="absolute right-4 top-0 z-30 w-[340px] max-w-[calc(100%_-_32px)] rounded-[28px] bg-md-surface-high p-3 shadow-pop"
+              >
+                <div className="mb-2.5 flex items-center justify-between px-1.5">
+                  <span className="text-[13px] font-semibold">打开新标签页</span>
+                  <Kbd>Esc</Kbd>
+                </div>
+                <Launcher onPick={pick} tasks={tasks} />
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );

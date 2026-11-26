@@ -132,7 +132,7 @@ it.each([true, false])("keeps development and installed taskbar identities separ
   const root = packaged ? process.resourcesPath : native.appPath;
   const expectedId = packaged ? "dev.rally.app" : "dev.rally.app.development";
   expect(applicationId()).toBe(expectedId);
-  expect(window.setIcon).toHaveBeenCalledWith(join(root, packaged ? "icon.png" : "docs/icon.png"));
+  expect(window.setIcon).toHaveBeenCalledWith(join(root, packaged ? "icon.png" : "build/icon.png"));
   expect(window.setAppDetails).toHaveBeenCalledWith({
     appId: expectedId, appIconPath: join(root, packaged ? "icon.ico" : "build/icon.ico"), appIconIndex: 0,
     relaunchCommand: `"${process.execPath}"${packaged ? "" : ` "${native.appPath}"`}`, relaunchDisplayName: "Rally",

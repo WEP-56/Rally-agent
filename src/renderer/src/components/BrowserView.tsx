@@ -1,3 +1,4 @@
+import { ActionButton } from "../md3/interactive";
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, RotateCw, Lock, Globe, ExternalLink, Server, Home, X } from "lucide-react";
 import { BROWSER_START, browserAddress } from "../../../shared/browser";
@@ -31,7 +32,7 @@ export function BrowserView({ id, visible, initialUrl, onTitle }: { id: string; 
         {state.loading ? <X size={14} /> : <RotateCw size={14} />}
       </IconButton>
       <IconButton title="起始页" disabled={!browser.created} onClick={() => go(BROWSER_START)}><Home size={14} /></IconButton>
-      <form className="relative ml-1 flex h-8 flex-1 items-center glass-strong rounded-full px-3 transition-all focus-within:bg-panel focus-within:shadow-[0_0_0_3px_var(--c-accent-soft),var(--s-soft)]" onSubmit={event => { event.preventDefault(); go(addr); }}>
+      <form className="relative ml-1 flex h-8 flex-1 items-center glass-strong rounded-full px-3 transition-colors focus-within:bg-panel focus-within:shadow-[0_0_0_3px_var(--c-accent-soft),var(--s-soft)]" onSubmit={event => { event.preventDefault(); go(addr); }}>
         {state.url.startsWith("https://") ? <Lock size={12} className="shrink-0 text-faint" /> : isLocal ? <Server size={12} className="shrink-0 text-accent" /> : <Globe size={12} className="shrink-0 text-faint" />}
         <input ref={address} aria-label="网址" disabled={!browser.created} value={addr} onChange={event => setAddr(event.target.value)} onFocus={event => event.target.select()} placeholder="输入网址、localhost 端口或搜索内容" className="ml-2 h-full w-full bg-transparent text-[13px] text-fg placeholder:text-faint" />
         {state.loading && <div className="absolute bottom-0 left-4 right-4 h-0.5 overflow-hidden rounded-full"><div className="h-full w-1/3 animate-pulse rounded-full bg-accent" /></div>}
@@ -42,7 +43,7 @@ export function BrowserView({ id, visible, initialUrl, onTitle }: { id: string; 
     <div ref={viewport} className="relative min-h-0 flex-1 overflow-hidden rounded-b-[inherit] bg-panel">
       {state.error ? <div role="alert" className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
         <Globe size={32} className="text-faint" /><div className="text-sm font-medium">无法显示此页面</div><div className="break-all text-xs text-faint">{state.error}</div>
-        <button className="rounded-lg bg-sunken px-3 py-2 text-xs hover:bg-hover" onClick={() => void browser.action("reload")}>重新加载</button>
+        <ActionButton className="rounded-lg bg-sunken px-3 py-2 text-xs hover:bg-hover" onClick={() => void browser.action("reload")}>重新加载</ActionButton>
       </div> : state.url === BROWSER_START ? <div className="h-full overflow-y-auto bg-panel"><div className="mx-auto max-w-[560px] px-6 pt-14">
         <div className="text-center text-2xl font-semibold tracking-tight">打开网页或本地服务</div><div className="mt-1.5 text-center text-sm text-faint">任务启动的服务会自动出现在这里</div>
         <div className="mt-8"><LocalServices onOpen={go} /></div>

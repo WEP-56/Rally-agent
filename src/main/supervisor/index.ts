@@ -378,7 +378,13 @@ export class Supervisor {
 
 	archive(taskId: string, archived: boolean): TaskBoard {
 		if (typeof archived !== "boolean") throw new Error("无效的归档操作");
+		if (archived && !this.store.get(taskId)?.ended && this.workers.streamingIds().includes(taskId)) {
+			throw new TaskErrorLike("TASK_RUNNING", "任务仍在执行，请停止后再归档");
+		}
 		this.store.archive(taskId, archived);
+		if (archived && !this.store.get(taskId)?.ended) {
+			void this.workers.closeTask(taskId).catch(error => console.error("Archived worker cleanup failed", error));
+		}
 		const board = this.board();
 		this.options.emitTask({ type: "snapshot", board });
 		return board;

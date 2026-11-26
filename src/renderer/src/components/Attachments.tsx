@@ -1,3 +1,4 @@
+import { ActionButton } from "../md3/interactive";
 import { useEffect, useRef, useState } from "react";
 import { Download, File, RefreshCw } from "lucide-react";
 import type { Resource, ResourceRef } from "../../../shared/resources";
@@ -7,9 +8,9 @@ import { Button } from "./ui";
 export function fileSize(size: number) { return size < 1024 ? `${size} B` : size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} KiB` : `${(size / 1024 / 1024).toFixed(1)} MiB`; }
 export function AttachmentCards({ items = [] }: { items?: ResourceRef[] }) {
   const { openResource } = useApp();
-  return <div className="flex flex-wrap gap-2">{items.map(item => <button key={item.id} onClick={() => openResource(item)} className="flex min-w-0 max-w-full items-center gap-3 rounded-2xl bg-sunken p-3 text-left hover:bg-hover">
+  return <div className="flex flex-wrap gap-2">{items.map(item => <ActionButton key={item.id} onClick={() => openResource(item)} className="flex min-w-0 max-w-full items-center gap-3 rounded-2xl bg-sunken p-3 text-left hover:bg-hover">
     <AttachmentThumbnail resource={item} /><span className="min-w-0"><span className="block truncate text-sm">{item.name}</span><span className="block text-xs text-muted">{fileSize(item.size)} · 点击预览</span></span>
-  </button>)}</div>;
+  </ActionButton>)}</div>;
 }
 function AttachmentThumbnail({ resource }: { resource: ResourceRef }) {
   const [url, setUrl] = useState("");

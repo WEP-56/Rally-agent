@@ -1,3 +1,6 @@
+import { ActionButton } from "../md3/interactive";
+import { AnimatePresence, motion } from "motion/react";
+import { SPRING_JELLY, SPRING_LAYOUT } from "../md3/springs";
 import { ChevronDown, LoaderCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { QqMailState } from "../../../shared/connections";
@@ -35,9 +38,9 @@ export function QqMailCard({ visible }: { visible: boolean }) {
 
   const status = pending ? "checking" : state?.status ?? "disconnected";
   const configured = Boolean(state?.address);
-  return <div className="glass mt-3 overflow-hidden rounded-[20px]">
+  return <div className="glass mt-3 overflow-hidden rounded-[26px]">
     <div className="flex items-center gap-3.5 px-4 py-3.5">
-      <span aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[11px] border border-line bg-panel text-[15px] font-semibold text-[#4a8fe7]">@</span>
+      <span aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[11px] bg-md-surface-low text-[15px] font-semibold text-[#4a8fe7]">@</span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2"><span className="text-[14px] font-medium">QQ 邮箱</span><span className="hidden text-[11px] text-faint sm:inline">邮箱</span></div>
         <div className="mt-0.5 truncate text-[12px] text-muted">{state?.address ?? "收件箱、附件与邮件发送"}</div>
@@ -45,11 +48,11 @@ export function QqMailCard({ visible }: { visible: boolean }) {
       <span className="flex shrink-0 items-center gap-1.5 text-[11.5px] text-muted" role="status">
         {status === "checking" ? <LoaderCircle size={12} className="animate-spin" /> : <span className={cn("h-1.5 w-1.5 rounded-full", status === "connected" ? "bg-ok" : status === "error" ? "bg-danger" : "bg-faint")} />}{label[status]}
       </span>
-      <button type="button" aria-expanded={expanded} onClick={() => { setExpanded(value => !value); setCode(""); }} className="flex h-8 shrink-0 items-center gap-1 rounded-full border border-line px-3 text-[12px] font-medium text-fg hover:bg-hover">
-        {configured ? "管理" : "连接"}<ChevronDown size={13} className={cn("transition-transform", expanded && "rotate-180")} />
-      </button>
+      <ActionButton type="button" aria-expanded={expanded} onClick={() => { setExpanded(value => !value); setCode(""); }} className="flex h-8 shrink-0 items-center gap-1 rounded-full bg-md-surface-low px-3 text-[12px] font-medium text-fg hover:bg-hover">
+        {configured ? "管理" : "连接"}<motion.span animate={{ rotate: expanded ? 180 : 0 }} transition={SPRING_JELLY} className="flex items-center"><ChevronDown size={13} /></motion.span>
+      </ActionButton>
     </div>
-    {expanded && <div className="animate-fade border-t border-line px-4 pb-4 pt-3.5 text-[12.5px]">
+    <AnimatePresence initial={false}>{expanded && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={SPRING_LAYOUT} className="overflow-hidden  px-4 pb-4 pt-3.5 text-[12.5px]">
       {editing || !configured ? <form className="space-y-3" onSubmit={event => {
         event.preventDefault();
         const code = authorizationCode; setCode("");
@@ -64,7 +67,7 @@ export function QqMailCard({ visible }: { visible: boolean }) {
         </div>
       </form> : <div className="space-y-3">
         <div><div className="font-medium">Worker 邮箱工具</div><p className="mt-1 leading-relaxed text-muted">读取和检索收件箱、保存附件、发送或回复邮件。发送默认需要你确认，可在下方调整权限。新建或重新启动的 Worker 会加载工具。</p></div>
-        <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
+        <div className="flex flex-wrap items-center gap-2  pt-3">
           <span className="mr-auto text-[11px] text-faint">{state?.checkedAt ? `最近验证 ${timeAgo(state.checkedAt)}` : "已保存配置，使用时连接"}</span>
           <Button size="sm" variant="ghost" disabled={pending} onClick={() => { setAddress(state?.address ?? ""); setEditing(true); setError(""); }}>更换凭据</Button>
           <Button size="sm" disabled={pending} onClick={() => void action(api.verify)}>验证连接</Button>
@@ -73,6 +76,6 @@ export function QqMailCard({ visible }: { visible: boolean }) {
       </div>}
       <ConnectorTools connector="qqmail" visible={visible} available={configured} />
       {(error || state?.error) && <p role="alert" className="mt-3 text-danger">{error || state?.error}</p>}
-    </div>}
+    </motion.div>}</AnimatePresence>
   </div>;
 }

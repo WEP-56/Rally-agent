@@ -1,0 +1,423 @@
+
+
+:root {
+  /* ─── MD3 Typography Scale (System + Roboto Flex / CJK Clean Stack) ─── */
+  --md-ref-typeface-brand: "Roboto Flex", "Inter", "HarmonyOS Sans SC", "PingFang SC", "MiSans", "Microsoft YaHei UI", sans-serif;
+  --md-ref-typeface-plain: "Roboto Flex", "Inter", -apple-system, BlinkMacSystemFont, "HarmonyOS Sans SC", "PingFang SC", "MiSans", "Microsoft YaHei UI", sans-serif;
+  --md-ref-typeface-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas, ui-monospace, monospace;
+
+  /* ─── MD3 Shape Corner Scale (incl. 2025 Expressive Radii) ─── */
+  --md-sys-shape-corner-none: 0px;
+  --md-sys-shape-corner-extra-small: 4px;
+  --md-sys-shape-corner-small: 8px;
+  --md-sys-shape-corner-medium: 12px;
+  --md-sys-shape-corner-large: 16px;
+  --md-sys-shape-corner-large-increased: 20px;
+  --md-sys-shape-corner-extra-large: 28px;
+  --md-sys-shape-corner-extra-large-increased: 32px;
+  --md-sys-shape-corner-full: 9999px;
+
+  /* ─── MD3 8dp Spacing System ─── */
+  --md-sys-spacing-xxs: 4px;
+  --md-sys-spacing-xs: 8px;
+  --md-sys-spacing-sm: 12px;
+  --md-sys-spacing-md: 16px;
+  --md-sys-spacing-lg: 24px;
+  --md-sys-spacing-xl: 32px;
+
+  /* ─── MD3 Expressive Motion & Spring Approximations ─── */
+  --md-sys-motion-easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-easing-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --md-sys-motion-easing-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --md-spring-spatial-fast: cubic-bezier(0.32, 1.42, 0.58, 1);
+  --md-spring-spatial-default: cubic-bezier(0.22, 1.15, 0.36, 1);
+  --md-spring-effects: cubic-bezier(0.2, 0, 0, 1);
+
+  --md-sys-motion-duration-short2: 110ms;
+  --md-sys-motion-duration-short3: 160ms;
+  --md-sys-motion-duration-medium1: 240ms;
+  --md-sys-motion-duration-medium3: 340ms;
+  --md-sys-motion-duration-long1: 440ms;
+}
+
+@theme inline {
+  --color-md-primary: var(--md-sys-color-primary);
+  --color-md-on-primary: var(--md-sys-color-on-primary);
+  --color-md-primary-container: var(--md-sys-color-primary-container);
+  --color-md-on-primary-container: var(--md-sys-color-on-primary-container);
+
+  --color-md-secondary: var(--md-sys-color-secondary);
+  --color-md-on-secondary: var(--md-sys-color-on-secondary);
+  --color-md-secondary-container: var(--md-sys-color-secondary-container);
+  --color-md-on-secondary-container: var(--md-sys-color-on-secondary-container);
+
+  --color-md-tertiary: var(--md-sys-color-tertiary);
+  --color-md-on-tertiary: var(--md-sys-color-on-tertiary);
+  --color-md-tertiary-container: var(--md-sys-color-tertiary-container);
+  --color-md-on-tertiary-container: var(--md-sys-color-on-tertiary-container);
+
+  --color-md-error: var(--md-sys-color-error);
+  --color-md-on-error: var(--md-sys-color-on-error);
+  --color-md-error-container: var(--md-sys-color-error-container);
+  --color-md-on-error-container: var(--md-sys-color-on-error-container);
+
+  --color-md-surface: var(--md-sys-color-surface);
+  --color-md-surface-dim: var(--md-sys-color-surface-dim);
+  --color-md-surface-bright: var(--md-sys-color-surface-bright);
+  --color-md-surface-lowest: var(--md-sys-color-surface-container-lowest);
+  --color-md-surface-low: var(--md-sys-color-surface-container-low);
+  --color-md-surface-container: var(--md-sys-color-surface-container);
+  --color-md-surface-high: var(--md-sys-color-surface-container-high);
+  --color-md-surface-highest: var(--md-sys-color-surface-container-highest);
+
+  --color-md-on-surface: var(--md-sys-color-on-surface);
+  --color-md-on-surface-variant: var(--md-sys-color-on-surface-variant);
+  --color-md-outline: var(--md-sys-color-outline);
+  --color-md-outline-variant: var(--md-sys-color-outline-variant);
+
+  --color-md-inverse-surface: var(--md-sys-color-inverse-surface);
+  --color-md-inverse-on-surface: var(--md-sys-color-inverse-on-surface);
+  --color-md-inverse-primary: var(--md-sys-color-inverse-primary);
+
+  --color-rally-ok: var(--rally-color-ok);
+  --color-rally-ok-container: var(--rally-color-ok-container);
+  --color-rally-on-ok-container: var(--rally-color-on-ok-container);
+
+  --color-rally-warn: var(--rally-color-warn);
+  --color-rally-warn-container: var(--rally-color-warn-container);
+  --color-rally-on-warn-container: var(--rally-color-on-warn-container);
+
+  --font-sans: var(--md-ref-typeface-plain);
+  --font-display: var(--md-ref-typeface-brand);
+  --font-mono: var(--md-ref-typeface-mono);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--md-sys-color-surface-container);
+  color: var(--md-sys-color-on-surface);
+  font-family: var(--md-ref-typeface-plain);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+  user-select: none;
+  transition:
+    background-color var(--md-sys-motion-duration-medium1) var(--md-spring-effects),
+    color var(--md-sys-motion-duration-medium1) var(--md-spring-effects);
+}
+
+input,
+textarea,
+.selectable {
+  user-select: text;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+input,
+textarea {
+  font: inherit;
+  outline: none;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--md-sys-color-primary) 24%, transparent);
+}
+
+/* ─── Subtle Scrollbars ─── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--md-sys-color-on-surface-variant) 22%, transparent) transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--md-sys-color-on-surface-variant) 22%, transparent);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--md-sys-color-on-surface-variant) 38%, transparent);
+}
+.no-scrollbar {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+.no-scrollbar::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+
+/* ─── Authentic MD3 State Layer (Safe for Motion Physical Springs!) ─── */
+/* The default must stay below Tailwind positioning utilities in the cascade. */
+@layer components {
+  .md3-state-layer { position: relative; }
+}
+
+.md3-state-layer {
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.md3-state-layer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 130ms ease-out;
+}
+
+.md3-state-layer:hover:not(:disabled)::after {
+  opacity: 0.075;
+}
+
+.md3-state-layer:active:not(:disabled)::after {
+  opacity: 0.125;
+}
+
+.md3-state-layer:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
+}
+
+.md3-interactive {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  transition:
+    border-radius 240ms var(--md-spring-spatial-fast),
+    transform 220ms var(--md-spring-spatial-fast),
+    background-color 180ms var(--md-spring-effects),
+    color 180ms var(--md-spring-effects);
+}
+
+.md3-interactive::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms var(--md-spring-effects);
+}
+
+.md3-interactive:hover:not(:disabled)::after {
+  opacity: 0.075;
+}
+
+.md3-interactive:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
+}
+
+.md3-interactive:active:not(:disabled)::after {
+  opacity: 0.12;
+}
+
+/* Expressive Pill -> Squircle Press Morph */
+.md3-morph-pill {
+  border-radius: var(--md-sys-shape-corner-full);
+}
+.md3-morph-pill:active:not(:disabled) {
+  border-radius: 10px;
+  transform: scale(0.97);
+}
+
+.md3-morph-icon {
+  border-radius: var(--md-sys-shape-corner-full);
+}
+.md3-morph-icon[data-selected="true"] {
+  border-radius: 13px;
+}
+.md3-morph-icon:active:not(:disabled) {
+  border-radius: 9px;
+  transform: scale(0.93);
+}
+
+/* ─── M3 Expressive Grouped List (Contained, Not Boxed — ZERO Divider Lines!) ─── */
+/* Consecutive items share an outer 22px silhouette with 2.5px negative-space breathing gaps
+   and 8px inner corners, morphing to 16px on hover/active! */
+.md3-grouped-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.md3-grouped-item {
+  border-radius: 8px;
+  transition:
+    border-radius 260ms var(--md-spring-spatial-fast),
+    background-color 180ms var(--md-spring-effects),
+    transform 220ms var(--md-spring-spatial-default);
+}
+
+.md3-grouped-list > .md3-grouped-item:first-child {
+  border-top-left-radius: 22px;
+  border-top-right-radius: 22px;
+}
+
+.md3-grouped-list > .md3-grouped-item:last-child {
+  border-bottom-left-radius: 22px;
+  border-bottom-right-radius: 22px;
+}
+
+.md3-grouped-list > .md3-grouped-item:only-child {
+  border-radius: 22px;
+}
+
+.md3-grouped-list > .md3-grouped-item[data-interactive="true"]:hover {
+  border-radius: 18px;
+}
+
+.md3-grouped-list > .md3-grouped-item[data-expanded="true"] {
+  border-radius: 22px;
+  margin-block: 3px;
+}
+
+/* ─── Workstation Ambient Tonal Stage (No harsh borders, pure HCT tonal wash) ─── */
+.md3-workstation-stage {
+  background-color: var(--md-sys-color-surface-container-low);
+  background-image:
+    radial-gradient(
+      68% 48% at 18% 0%,
+      color-mix(in srgb, var(--md-sys-color-primary-container) 48%, transparent) 0%,
+      transparent 72%
+    ),
+    radial-gradient(
+      62% 50% at 92% 96%,
+      color-mix(in srgb, var(--md-sys-color-tertiary-container) 36%, transparent) 0%,
+      transparent 74%
+    );
+}
+
+.dark .md3-workstation-stage {
+  background-color: var(--md-sys-color-surface-container-low);
+  background-image:
+    radial-gradient(
+      64% 44% at 32% -4%,
+      color-mix(in srgb, var(--md-sys-color-primary-container) 34%, transparent) 0%,
+      transparent 70%
+    ),
+    radial-gradient(
+      56% 46% at 96% 102%,
+      color-mix(in srgb, var(--md-sys-color-tertiary-container) 22%, transparent) 0%,
+      transparent 72%
+    );
+}
+
+.md3-chat-stage {
+  background-color: var(--md-sys-color-surface);
+  background-image: radial-gradient(
+    55% 32% at 50% -8%,
+    color-mix(in srgb, var(--md-sys-color-primary-container) 24%, transparent) 0%,
+    transparent 75%
+  );
+}
+
+.dark .md3-chat-stage {
+  background-color: var(--md-sys-color-surface);
+  background-image: radial-gradient(
+    55% 32% at 50% -8%,
+    color-mix(in srgb, var(--md-sys-color-primary-container) 16%, transparent) 0%,
+    transparent 75%
+  );
+}
+
+.chat-edge-mask {
+  mask-image: linear-gradient(to bottom, transparent, black 12px, black calc(100% - 10px), transparent);
+}
+
+/* ─── Keyframe Animations (Purposeful State Transitions Only) ─── */
+@keyframes md3-enter-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes md3-scale-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes md3-clover-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes md3-pulse-ring {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.72;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+}
+
+.animate-md3-enter {
+  animation: md3-enter-up var(--md-sys-motion-duration-medium3) var(--md-spring-spatial-default) both;
+}
+
+.animate-md3-pop {
+  animation: md3-scale-pop 220ms var(--md-spring-spatial-fast) both;
+}
+
+.animate-clover-slow {
+  animation: md3-clover-spin 36s linear infinite;
+}
+
+.animate-clover-active {
+  animation: md3-clover-spin 7s linear infinite;
+}
+
+.animate-pulse-gentle {
+  animation: md3-pulse-ring 2.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

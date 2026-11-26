@@ -1,3 +1,4 @@
+import { Disclosure } from "../md3/interactive";
 import { useEffect, useState } from "react";
 import { FolderInput, RefreshCw, Search, Wand2 } from "lucide-react";
 import type { SkillsState } from "../../../shared/skills";
@@ -50,6 +51,6 @@ export function SkillsSection() {
 				<Toggle checked={skill.enabled} onChange={(enabled) => void change(() => window.rally.skills.setEnabled(skill.path, enabled))} />
 			</div>)}
 		</fieldset>
-		{state?.diagnostics.length ? <details className="mt-4 text-xs text-muted"><summary>加载提示（{state.diagnostics.length}）</summary>{state.diagnostics.map((item) => <p key={item} className="mt-2 break-all">{item}</p>)}</details> : null}
+		{state?.diagnostics.length ? <Disclosure className="mt-4 text-xs text-muted"><summary>加载提示（{state.diagnostics.length}）</summary>{state.diagnostics.map((item) => <p key={item} className="mt-2 break-all">{item}</p>)}</Disclosure> : null}
 	</>;
 }

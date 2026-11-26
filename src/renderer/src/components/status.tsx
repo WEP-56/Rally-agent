@@ -2,30 +2,38 @@ import { CheckCircle2, CircleDashed, Loader2, AlertCircle } from "lucide-react";
 import type { TaskStatus } from "../data";
 import { cn } from "../utils/cn";
 
-export const STATUS_META: Record<TaskStatus, { label: string; cls: string; dot: string }> = {
-  running: { label: "进行中", cls: "bg-accent-soft text-accent", dot: "bg-accent" },
-  done: { label: "已完成", cls: "bg-ok/10 text-ok", dot: "bg-ok" },
-  failed: { label: "失败", cls: "bg-amber-500/12 text-amber-600 dark:text-amber-400", dot: "bg-amber-500" },
-  cancelled: { label: "已取消", cls: "bg-sunken text-faint", dot: "bg-press" },
-  dropped: { label: "无需处理", cls: "bg-sunken text-faint", dot: "bg-press" },
-  pending_approval: { label: "待批准", cls: "bg-amber-500/12 text-amber-600 dark:text-amber-400", dot: "bg-amber-500" },
-  needs_answer: { label: "待回答", cls: "bg-amber-500/12 text-amber-600 dark:text-amber-400", dot: "bg-amber-500" },
-  needs_gate: { label: "待确认", cls: "bg-amber-500/12 text-amber-600 dark:text-amber-400", dot: "bg-amber-500" },
-  blocked: { label: "受阻", cls: "bg-amber-500/12 text-amber-600 dark:text-amber-400", dot: "bg-amber-500" },
-  interrupted: { label: "已中断", cls: "bg-amber-500/12 text-amber-600 dark:text-amber-400", dot: "bg-amber-500" },
-  queued: { label: "排队中", cls: "bg-sunken text-faint", dot: "bg-press" },
+export const STATUS_META: Record<TaskStatus, { label: string; cls: string; dot: string; pulse?: boolean }> = {
+  running: { label: "进行中", cls: "bg-md-primary-container text-md-on-primary-container", dot: "bg-md-primary", pulse: true },
+  done: { label: "已完成", cls: "bg-rally-ok-container text-rally-on-ok-container", dot: "bg-rally-ok" },
+  failed: { label: "失败", cls: "bg-md-error-container text-md-on-error-container", dot: "bg-md-error" },
+  cancelled: { label: "已取消", cls: "bg-md-surface-highest text-md-on-surface-variant", dot: "bg-md-outline" },
+  dropped: { label: "无需处理", cls: "bg-md-surface-highest text-md-on-surface-variant", dot: "bg-md-outline" },
+  pending_approval: { label: "待批准", cls: "bg-md-tertiary-container text-md-on-tertiary-container", dot: "bg-md-tertiary", pulse: true },
+  needs_answer: { label: "待回答", cls: "bg-md-tertiary-container text-md-on-tertiary-container", dot: "bg-md-tertiary", pulse: true },
+  needs_gate: { label: "待确认", cls: "bg-md-tertiary-container text-md-on-tertiary-container", dot: "bg-md-tertiary", pulse: true },
+  blocked: { label: "受阻", cls: "bg-rally-warn-container text-rally-on-warn-container", dot: "bg-rally-warn" },
+  interrupted: { label: "已中断", cls: "bg-rally-warn-container text-rally-on-warn-container", dot: "bg-rally-warn" },
+  queued: { label: "排队中", cls: "bg-md-surface-highest text-md-on-surface-variant", dot: "bg-md-outline" },
 };
 
 export function StatusIcon({ status, size = 16 }: { status: TaskStatus; size?: number }) {
-  if (status === "running") return <Loader2 size={size} className="animate-spin text-accent" />;
-  if (status === "done") return <CheckCircle2 size={size} className="text-faint" />;
-  if (status === "failed") return <AlertCircle size={size} className="text-amber-500" />;
+  if (status === "running") return <Loader2 size={size} className="animate-spin text-md-primary" />;
+  if (status === "done") return <CheckCircle2 size={size} className="text-rally-ok" />;
+  if (status === "failed") return <AlertCircle size={size} className="text-md-error" />;
   return <CircleDashed size={size} className="text-faint" />;
 }
 
 export function StatusBadge({ status, className }: { status: TaskStatus; className?: string }) {
   const m = STATUS_META[status];
-  return <span className={cn("inline-flex h-5 items-center gap-1 rounded-full px-2 text-[10.5px] font-medium", m.cls, className)}><span className={cn("h-1 w-1 rounded-full", m.dot)} />{m.label}</span>;
+  return (
+    <span className={cn("inline-flex h-[21px] shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-semibold tracking-[0.01em]", m.cls, className)}>
+      <span className="relative flex h-1.5 w-1.5 items-center justify-center">
+        {m.pulse && <span className={cn("absolute inline-flex h-full w-full animate-ping rounded-full opacity-65", m.dot)} />}
+        <span className={cn("relative h-1.5 w-1.5 rounded-full", m.dot)} />
+      </span>
+      {m.label}
+    </span>
+  );
 }
 
 export function timeAgo(t: number) {

@@ -1,1 +1,68 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/console.css"><title>Rally · 部署控制台</title></head><body><main><header><div class="brand"><img width="36" height="36" src="/mark.png" alt=""> Rally <small>部署控制台</small></div><button id="logout" hidden>退出</button></header><section id="login"><h1>连接你的 Rally 实例</h1><p>输入部署时生成的管理密钥，管理设备与接入权限。</p><form id="auth"><label>管理密钥<input id="admin" type="password" required autocomplete="current-password"></label><button class="primary">进入控制台</button></form></section><div id="panel" hidden><h1>设备与接入</h1><p id="instance"></p><section><h2>签发接入密钥</h2><form id="issue"><label>设备名称<input id="name" maxlength="80" required placeholder="例如：我的手机"></label><button class="primary">生成一次性密钥</button></form><output id="issued"></output></section><section><div class="row"><h2>设备连接</h2><button id="refresh">刷新</button></div><div id="devices"></div></section><section><div class="row"><div><h2>允许新设备配对</h2><p>关闭后已连接的设备仍可使用。</p></div><button id="pairing"></button></div></section></div><p role="status" aria-live="polite" id="status"></p></main><script src="/console.js" defer></script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" type="image/png" sizes="320x320" href="/mark.png">
+  <link rel="stylesheet" href="/console.css">
+  <title>Rally · 部署控制台</title>
+</head>
+<body>
+<main>
+  <header class="topbar">
+    <div class="brand"><img width="40" height="40" src="/mark.png" alt=""><div>Rally<span>部署控制台</span></div></div>
+    <button id="logout" class="tonal" hidden>退出登录</button>
+  </header>
+  <section id="login" class="login surface">
+    <div class="hero-mark" aria-hidden="true"><img src="/mark.png" width="64" height="64" alt=""></div>
+    <span class="eyebrow">你的云端工位</span>
+    <h1>连接你的 Rally 实例</h1>
+    <p>管理设备与接入权限，让电脑和手机连接同一个 Rally。</p>
+    <form id="auth">
+      <label for="admin">管理密钥</label>
+      <input id="admin" type="password" required autocomplete="current-password" placeholder="输入部署时生成的管理密钥">
+      <button class="primary" type="submit">进入控制台 <span aria-hidden="true">↗</span></button>
+    </form>
+  </section>
+  <div id="panel" hidden>
+    <div class="page-heading"><span class="eyebrow">控制台</span><h1>设备与接入</h1><p id="instance" class="instance"></p></div>
+    <section class="stats" aria-label="设备统计">
+      <div class="stat"><span>设备总数</span><strong id="stat-total">0</strong></div>
+      <div class="stat"><span>已配对</span><strong id="stat-paired">0</strong></div>
+      <div class="stat"><span>等待配对</span><strong id="stat-pending">0</strong></div>
+      <div class="stat"><span>最近在线</span><strong id="stat-recent">0</strong></div>
+    </section>
+    <p id="updated" class="updated"></p>
+    <div class="dashboard">
+      <section class="surface issue-section" aria-labelledby="issue-title">
+        <div class="section-heading"><span class="section-icon" aria-hidden="true">＋</span><div><h2 id="issue-title">添加设备</h2><p>为每台设备生成专属的一次性接入密钥。</p></div></div>
+        <form id="issue"><label for="name">设备名称</label><input id="name" maxlength="80" required placeholder="例如：我的手机" autocomplete="off"><button class="primary" type="submit">生成接入密钥</button></form>
+        <div id="issued-panel" class="key-result" hidden>
+          <div class="row"><h3>一次性接入密钥</h3><button id="copy-key" class="tonal small" type="button">复制</button></div>
+          <output id="issued" aria-label="一次性接入密钥"></output>
+          <p>只显示这一次。在客户端填写服务器地址和此密钥，即可完成配对。</p>
+        </div>
+      </section>
+      <section class="surface pairing-section" aria-labelledby="pairing-title">
+        <div class="row"><div><h2 id="pairing-title">允许新设备配对</h2><p>关闭后，已配对的设备仍可使用。</p></div><button id="pairing" class="switch" type="button" role="switch" aria-checked="false" aria-label="允许新设备配对"><span class="switch-thumb" aria-hidden="true">✓</span></button></div>
+        <span id="pairing-state" class="status-chip">正在读取</span>
+      </section>
+      <section class="surface devices-section" aria-labelledby="devices-title">
+        <div class="row section-heading"><div><h2 id="devices-title">设备连接 <span id="device-count" class="count">0</span></h2><p>查看配对状态，管理设备访问权限。</p></div><button id="refresh" class="tonal small" type="button">刷新</button></div>
+        <div id="devices" class="device-list"></div>
+      </section>
+    </div>
+  </div>
+  <p role="status" aria-live="polite" id="status" class="snackbar" hidden></p>
+  <footer>Rally · 你的个人助手</footer>
+</main>
+<dialog id="revoke-dialog" aria-labelledby="revoke-title" aria-describedby="revoke-description">
+  <form method="dialog">
+    <span class="dialog-icon" aria-hidden="true">↗</span><h2 id="revoke-title">吊销设备访问权限？</h2><p id="revoke-description"></p>
+    <div class="dialog-actions"><button value="cancel" class="tonal" autofocus>保留设备</button><button value="confirm" class="danger">确认吊销</button></div>
+  </form>
+</dialog>
+<script src="/console.js" defer></script>
+</body>
+</html>

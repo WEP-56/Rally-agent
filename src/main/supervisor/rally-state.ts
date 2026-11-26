@@ -5,7 +5,7 @@ import type { TaskStore } from "./task-store.ts";
 /** A fresh projection for the model, independent of the UI board and compressed history. */
 export function rallyState(store: TaskStore, active: number, limit: number, autoApprove: boolean, now = Date.now()): string {
 	const all = store.list();
-	const open = all.filter(task => !task.ended);
+	const open = all.filter(task => !task.ended && task.archivedAt === undefined);
 	const tasks = open.map(task => {
 		const liveRuns = new Set(task.runs.filter(run => !run.endedAt).map(run => run.id));
 		const view = taskView({ ...task,

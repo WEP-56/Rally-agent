@@ -13,3 +13,9 @@ export function useBrowserOverlay(open: boolean): void {
 	}, [open]);
 }
 export function useBrowserObscured(): boolean { return useSyncExternalStore(subscribe, snapshot, () => false); }
+
+/** Mount inside an AnimatePresence child so its lease lasts through the exit spring. */
+export function BrowserOverlayLease() {
+  useBrowserOverlay(true);
+  return null;
+}

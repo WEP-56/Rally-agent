@@ -1,3 +1,8 @@
+import { SPRING_LAYOUT } from "../md3/springs";
+import { ActionButton } from "../md3/interactive";
+import { generateMd3Tokens } from "../md3/theme";
+import { AnimatePresence, motion } from "motion/react";
+import { SPRING_FAST } from "../md3/springs";
 import { CoachForm } from "./CoachForm";
 import { WebsiteAccountsSection } from "./WebsiteAccountsSection";
 import { ConnectionForm } from "./ConnectionForm";
@@ -31,6 +36,7 @@ function Github({ size = 14 }: { size?: number }) {
 const SETTING_GROUPS = [
   {
     id: "assistant", label: "个人助手", sections: [
+      { id: "execution", label: "执行与批准", icon: Check, desc: "常规工位任务的启动批准策略" },
       { id: "general", label: "身份", icon: UserRound, desc: "名称、性格与工作方式" },
       { id: "memory", label: "记忆", icon: Brain, desc: "长期记忆的存储位置与管理" },
       { id: "coach", label: "教练", icon: Brain, desc: "静默整理记忆，发现值得聊的点子" },
@@ -73,20 +79,20 @@ function Group({ title, children, action }: { title?: string; children: React.Re
           {action}
         </div>
       )}
-      <div className="glass-strong divide-y divide-line overflow-hidden rounded-[24px]">{children}</div>
+      <div className="flex flex-col gap-2">{children}</div>
     </section>
   );
 }
 
 function Row({ title, desc, children }: { title: React.ReactNode; desc?: React.ReactNode; children?: React.ReactNode }) {
   return (
-    <div className="flex min-h-[64px] items-center gap-4 px-5 py-4">
+    <motion.div whileHover={{ scale: 1.005, borderRadius: 24 }} transition={SPRING_LAYOUT} className="flex min-h-[58px] flex-wrap items-center gap-3 rounded-[20px] bg-md-surface-low px-4 py-3 dark:bg-md-surface-high/88">
       <div className="min-w-0 flex-1">
         <div className="text-[14px] font-medium">{title}</div>
         {desc && <div className="mt-0.5 text-[12.5px] leading-relaxed text-muted">{desc}</div>}
       </div>
       {children}
-    </div>
+    </motion.div>
   );
 }
 
@@ -117,9 +123,9 @@ function DesktopSection() {
  </Group>
  <Group title="关闭窗口时">
   <div className="space-y-3 p-5" role="radiogroup" aria-label="关闭窗口时">
-   {([{ value: "quit", title: "退出应用", desc: window.runtime.mode === "cloud" ? "关闭此客户端，服务器上的任务继续运行。" : "结束本机 Agent、后台作业与服务，保存状态后退出。" }, { value: "tray", title: "收起至托盘", desc: "保持 Rally 运行。点击托盘图标恢复窗口，在托盘菜单选择退出。" }] as const).map(item => <button key={item.value} role="radio" aria-checked={state?.closeBehavior === item.value} disabled={!state || saving || (item.value === "tray" && !state.trayAvailable)} onClick={() => void update(item.value)} className={cn("flex w-full items-center gap-4 rounded-2xl p-4 text-left ring-1 transition-colors disabled:opacity-50", state?.closeBehavior === item.value ? "bg-accent/10 ring-accent/40" : "bg-sunken ring-line hover:bg-hover")}>
+   {([{ value: "quit", title: "退出应用", desc: window.runtime.mode === "cloud" ? "关闭此客户端，服务器上的任务继续运行。" : "结束本机 Agent、后台作业与服务，保存状态后退出。" }, { value: "tray", title: "收起至托盘", desc: "保持 Rally 运行。点击托盘图标恢复窗口，在托盘菜单选择退出。" }] as const).map(item => <ActionButton key={item.value} role="radio" aria-checked={state?.closeBehavior === item.value} disabled={!state || saving || (item.value === "tray" && !state.trayAvailable)} onClick={() => void update(item.value)} className={cn("flex w-full items-center gap-4 rounded-2xl p-4 text-left transition-colors disabled:opacity-50", state?.closeBehavior === item.value ? "bg-accent/10 " : "bg-sunken  hover:bg-hover")}>
     <span className="min-w-0 flex-1"><span className="block text-sm font-medium">{item.title}</span><span className="mt-1 block text-xs leading-relaxed text-muted">{item.desc}</span></span>{state?.closeBehavior === item.value && <Check size={16} className="shrink-0 text-accent" />}
-   </button>)}
+   </ActionButton>)}
    <p className="text-xs text-muted">此设置保存在当前电脑，切换本地或云端模式后继续生效。托盘菜单中的“退出 Rally”始终退出应用。</p>
    {state && !state.trayAvailable && <p className="text-xs text-muted">系统托盘暂不可用，关闭窗口将退出应用。</p>}
   </div>
@@ -149,18 +155,20 @@ function NotificationsSection() {
 
 function AppearanceSection() {
   const { config, setConfig } = useApp();
+  const light = generateMd3Tokens(config.accent, false);
+  const dark = generateMd3Tokens(config.accent, true);
   const themes = [
-    { v: "light" as const, l: "浅色", icon: Sun, bg: "#f4f3f1", panel: "linear-gradient(160deg,#e6e5fb,#fbe9db)", fg: "#d4d4dc" },
-    { v: "dark" as const, l: "深色", icon: Moon, bg: "#0e0e15", panel: "linear-gradient(160deg,#1b1a38,#261d2b)", fg: "#3a3a4a" },
-    { v: "system" as const, l: "跟随系统", icon: Monitor, bg: "linear-gradient(90deg,#f4f3f1 50%,#0e0e15 50%)", panel: "linear-gradient(90deg,#e6e5fb 50%,#1b1a38 50%)", fg: "#9a9aa8" },
+    { v: "light" as const, l: "浅色", icon: Sun, bg: light["--md-sys-color-surface-container"], panel: light["--md-sys-color-primary-container"], fg: light["--md-sys-color-outline-variant"] },
+    { v: "dark" as const, l: "深色", icon: Moon, bg: dark["--md-sys-color-surface-container"], panel: dark["--md-sys-color-primary-container"], fg: dark["--md-sys-color-outline-variant"] },
+    { v: "system" as const, l: "跟随系统", icon: Monitor, bg: `linear-gradient(90deg, ${light["--md-sys-color-surface-container"]} 50%, ${dark["--md-sys-color-surface-container"]} 50%)`, panel: `linear-gradient(90deg, ${light["--md-sys-color-primary-container"]} 50%, ${dark["--md-sys-color-primary-container"]} 50%)`, fg: light["--md-sys-color-outline"] },
   ];
   return (
     <>
       <h3 className="mb-2 px-2 text-[12px] font-semibold uppercase tracking-[0.12em] text-fg/45">主题</h3>
       <div className="mb-6 grid grid-cols-3 gap-3">
         {themes.map((t) => (
-          <button key={t.v} onClick={() => setConfig({ theme: t.v })} className="group text-left">
-            <div className={cn("aspect-[1.55] rounded-[20px] p-2 transition-all", config.theme === t.v ? "shadow-[0_0_0_2.5px_var(--c-accent)]" : "shadow-soft group-hover:shadow-card")} style={{ background: t.bg }}>
+          <ActionButton key={t.v} onClick={() => setConfig({ theme: t.v })} className="group text-left">
+            <div className={cn("aspect-[1.55] rounded-[20px] p-2 transition-colors", config.theme === t.v ? "shadow-[0_0_0_2.5px_var(--c-accent)]" : "shadow-soft group-hover:shadow-card")} style={{ background: t.bg }}>
               <div className="flex h-full gap-1.5">
                 <div className="flex w-[38%] flex-col gap-1 rounded-xl p-2" style={{ background: "rgba(128,128,150,.12)" }}>
                   <div className="h-1.5 w-3/4 rounded-full" style={{ background: t.fg }} />
@@ -171,18 +179,20 @@ function AppearanceSection() {
               </div>
             </div>
             <div className="mt-2 flex items-center gap-1.5 px-1 text-[13px] font-medium"><t.icon size={13} className="text-faint" />{t.l}{config.theme === t.v && <Check size={13} className="ml-auto text-accent" />}</div>
-          </button>
+          </ActionButton>
         ))}
       </div>
       <Group title="个性化">
         <Row title="强调色" desc="按钮、状态与高亮，右侧面板的光晕也会跟着变">
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <input type="color" aria-label="自定义强调色" value={config.accent} onChange={event => setConfig({ accent: event.target.value })} className="h-7 w-7 cursor-pointer rounded-full" />
             {ACCENTS.map((a) => (
-              <button
+              <ActionButton
                 key={a.value}
+                whileHover={{ scale: 1.15, y: -1 }} whileTap={{ scale: 0.86 }}
                 title={a.name}
                 onClick={() => setConfig({ accent: a.value })}
-                className={cn("h-7 w-7 rounded-full transition-transform hover:scale-110", config.accent === a.value && "shadow-[0_0_0_2px_var(--c-panel),0_0_0_4px_var(--c-accent)]")}
+                className={cn("h-7 w-7 rounded-full", config.accent === a.value && "shadow-[0_0_0_2px_var(--c-panel),0_0_0_4px_var(--c-accent)]")}
                 style={{ background: a.value }}
               />
             ))}
@@ -203,12 +213,12 @@ function AboutSection() {
   useEffect(() => { let alive = true; void window.rally.getAppInfo().then(value => { if (alive) setInfo(value); }).catch(reason => { if (alive) setError(String(reason)); }); return () => { alive = false; }; }, []);
   return (
     <>
-      <div className="relative mb-7 flex flex-col items-center overflow-hidden rounded-[28px] bg-ink px-6 pb-8 pt-10 text-center text-white">
+      <div className="relative mb-7 flex flex-col items-center overflow-hidden rounded-[28px] bg-md-primary-container px-6 pb-8 pt-10 text-center text-md-on-primary-container">
         <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(70% 80% at 50% 0%, color-mix(in srgb, var(--c-accent) 40%, transparent), transparent 70%)" }} />
         <div className="relative flex h-[120px] w-full items-center justify-center"><OrbitRing size={300} /><RallyLogo size={88} glow className="relative rounded-[24px]" /></div>
         <div className="font-display relative mt-2 text-[30px] font-semibold">Rally</div>
-        <div className="relative mt-1 text-[13px] text-white/60">{window.runtime.mode === "cloud" ? "云端个人助手" : "桌面个人助手"}{info ? ` · 版本 ${info.version}` : ""}</div>
-        {info && <div className="relative mt-3 font-mono text-[11px] text-white/35">{window.runtime.engine ?? (info.versions.electron ? `Electron ${info.versions.electron}` : "云端运行时")} · 基于 Pi 构建 · {info.platform}</div>}
+        <div className="relative mt-1 text-[13px] text-md-on-primary-container/80">{window.runtime.mode === "cloud" ? "云端个人助手" : "桌面个人助手"}{info ? ` · 版本 ${info.version}` : ""}</div>
+        {info && <div className="relative mt-3 font-mono text-[11px] text-md-on-primary-container/60">{window.runtime.engine ?? (info.versions.electron ? `Electron ${info.versions.electron}` : "云端运行时")} · 基于 Pi 构建 · {info.platform}</div>}
       </div>
       {error && <p role="alert" className="mb-3 text-xs text-danger">{error}</p>}
       <Group>
@@ -227,7 +237,9 @@ function AboutSection() {
   );
 }
 
-export function Settings({ section, setSection, onBack, tasks }: { section: string; setSection: (s: string) => void; onBack: () => void; tasks: Task[] }) {
+export function Settings({ section, setSection, onBack, tasks, autoApprove, onAutoApprove }: { section: string; setSection: (s: string) => void; onBack: () => void; tasks: Task[]; autoApprove: boolean; onAutoApprove: (value: boolean) => Promise<void> }) {
+  const [approvalError, setApprovalError] = useState("");
+  const [approvalSaving, setApprovalSaving] = useState(false);
   const { config } = useApp();
   const [detail,setDetail]=useState(section !== "general");
   useEffect(()=>{const back=(e:Event)=>{if(detail&&matchMedia("(max-width:767px)").matches){setDetail(false);e.preventDefault();e.stopImmediatePropagation();}};window.addEventListener("rally-back",back,true);return()=>window.removeEventListener("rally-back",back,true);},[detail]);
@@ -237,8 +249,8 @@ export function Settings({ section, setSection, onBack, tasks }: { section: stri
   })).filter(group => group.sections.length > 0);
   const cur = groups.flatMap(group => group.sections).find(s => s.id === (section === "trust" ? "workspace" : section)) || SECTIONS[0];
   return (
-    <div data-detail={detail} className="rally-settings animate-fade flex h-full w-full flex-col gap-2.5 p-2.5 pl-0 md:flex-row md:gap-0 md:pl-2.5">
-      <aside className="flex min-h-0 shrink-0 flex-col md:w-[290px] md:pr-2.5">
+    <motion.div data-detail={detail} className="rally-settings  flex h-full w-full flex-col gap-2.5 p-2.5 pl-0 md:flex-row md:gap-0 md:pl-2.5" initial={{ opacity: 0, y: 8, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={SPRING_LAYOUT}>
+      <motion.aside initial={false} animate={{ x: 0 }} className="flex min-h-0 shrink-0 flex-col md:w-[290px] md:pr-2.5">
         <div className="flex items-center gap-3 px-2 pb-3 pt-1 md:px-3 md:pb-4 md:pt-2">
           <RoundButton title="返回 (Esc)" aria-label="返回应用" onClick={onBack}><ArrowLeft size={17} strokeWidth={1.9} /></RoundButton>
           <div className="min-w-0"><div className="font-display text-[22px] font-semibold leading-none">设置</div><div className="mt-1 truncate text-xs text-faint">{config.name}</div></div>
@@ -249,30 +261,31 @@ export function Settings({ section, setSection, onBack, tasks }: { section: stri
               <h2 id={`settings-group-${group.id}`} className="mb-1.5 px-4 text-[11px] font-medium tracking-wide text-faint">{group.label}</h2>
               <div className="flex flex-col gap-0.5">
                 {group.sections.map(s => (
-                  <button
+                  <ActionButton
                     key={s.id}
                     aria-label={s.label}
                     aria-current={cur.id === s.id ? "page" : undefined}
                     onClick={() => {setSection(s.id);setDetail(true)}}
                     className={cn(
-                      "group relative flex shrink-0 items-center gap-3 rounded-2xl py-2.5 pl-4 pr-3 text-left transition-all",
-                      cur.id === s.id ? "bg-panel shadow-card ring-1 ring-line" : "hover:bg-fg/[0.045]",
+                      "group relative flex shrink-0 items-center gap-3 rounded-2xl py-2.5 pl-4 pr-3 text-left isolate",
+                      cur.id === s.id ? "text-md-on-secondary-container" : "hover:bg-fg/[0.045]",
                     )}
                   >
-                    {cur.id === s.id && <span className="absolute -left-px top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-accent" />}
+                    {cur.id === s.id && <motion.span layoutId="settings-nav-pill" transition={SPRING_FAST} className="absolute inset-0 -z-10 rounded-full bg-md-secondary-container" />}
                     <s.icon size={17} strokeWidth={1.7} className={cn("shrink-0 transition-colors", cur.id === s.id ? "text-accent" : "text-faint group-hover:text-muted")} />
                     <span className="min-w-0 flex-1 truncate pr-1 text-[14px] font-medium">{s.label}</span>
-                  </button>
+                  </ActionButton>
                 ))}
               </div>
             </section>
           ))}
         </nav>
-      </aside>
-      <main className="stage relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-[28px] shadow-card ring-1 ring-black/[0.06] dark:ring-white/[0.1]">
-        <div key={cur.id} className="relative z-10 h-full overflow-y-auto"><div className="mx-auto max-w-[680px] px-5 pb-20 pt-8 md:px-8">
-          <button className="mb-3 min-h-11 px-2 text-muted md:hidden" onClick={()=>setDetail(false)}>← 设置目录</button><div className="animate-rise mb-7 border-b border-line px-1 pb-5"><h1 className="font-display text-[28px] font-semibold leading-tight">{cur.label}</h1><p className="mt-1 text-[13px] text-fg/55">{cur.desc}</p></div>
-          <div className="animate-rise" style={{ animationDelay: "40ms" }}>
+      </motion.aside>
+      <motion.main key={detail ? "detail" : "index"} initial={{ x: 24, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={SPRING_FAST} className="md3-workstation-stage relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-[28px] shadow-card ">
+        <AnimatePresence mode="wait" initial={false}><motion.div key={cur.id} initial={{ x: 24, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: -16, opacity: 0 }} transition={SPRING_FAST} className="relative z-10 h-full overflow-y-auto"><div className="mx-auto max-w-[680px] px-5 pb-20 pt-8 md:px-8">
+          <ActionButton className="mb-3 min-h-11 px-2 text-muted md:hidden" onClick={()=>setDetail(false)}>← 设置目录</ActionButton><motion.div className=" mb-7  px-1 pb-5" initial={{ opacity: 0, y: 8, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={SPRING_LAYOUT}><h1 className="font-display text-[28px] font-semibold leading-tight">{cur.label}</h1><p className="mt-1 text-[13px] text-fg/55">{cur.desc}</p></motion.div>
+          <motion.div className="" initial={{ opacity: 0, y: 8, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={SPRING_LAYOUT}>
+          {cur.id === "execution" && <Group title="任务批准"><Row title="自动批准常规工位任务" desc="开启后，常规任务直接开始执行；工具权限和需要单独确认的操作仍按原有规则处理。"><Toggle label="自动批准常规工位任务" checked={autoApprove} disabled={approvalSaving} onChange={async value => { setApprovalSaving(true); setApprovalError(""); try { await onAutoApprove(value); } catch (error) { setApprovalError(String(error)); } finally { setApprovalSaving(false); } }} /></Row>{approvalError && <p role="alert" className="p-3 text-sm text-danger">{approvalError}</p>}</Group>}
           {cur.id === "connection" && <ConnectionForm/>}
           {cur.id === "archive" && <ArchivedTasksSection tasks={tasks} />}
           {cur.id === "general" && <><IdentityCard /><IdentityForm /></>}
@@ -289,9 +302,9 @@ export function Settings({ section, setSection, onBack, tasks }: { section: stri
           {cur.id === "desktop" && window.runtime.platform !== "android" && <DesktopSection />}
           {cur.id === "notifications" && <NotificationsSection />}
           {cur.id === "about" && <AboutSection />}
-          </div>
-        </div></div>
-      </main>
-    </div>
+          </motion.div>
+        </div></motion.div></AnimatePresence>
+      </motion.main>
+    </motion.div>
   );
 }

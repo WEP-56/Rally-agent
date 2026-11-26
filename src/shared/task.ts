@@ -196,6 +196,11 @@ export type TaskDisplayStatus =
 	| "queued"
 	| "running";
 
+/** Stopped work can be filed away without changing its outcome. */
+export function canArchiveTask(status: TaskDisplayStatus): boolean {
+	return ["done", "failed", "cancelled", "dropped", "interrupted", "blocked"].includes(status);
+}
+
 /** Open tasks, the most recent 20 unarchived ended tasks, and recoverable archived tasks. */
 export interface TaskBoard {
 	tasks: TaskView[];
@@ -284,9 +289,12 @@ function derive(
 	if (task.attention?.escalatedAt && !task.attention.answer) {
 		return { status: "needs_answer", statusText: `等你回答 · ${task.attention.id}` };
 	}
-	const hasResume = lastRun?.endedAt !== undefined && task.inputs.some((input) => input.kind === "resume" && input.at >= lastRun.endedAt!);
+	const hasResume = lastRun?.endedAt !== undefined && task.inputs.some((input) => input.kind === "resume" && input.deliveredAt === undefined && input.at >= lastRun.endedAt!);
 	if (lastRun?.endReason === "interrupted" && !hasResume) {
 		return { status: "interrupted", statusText: "因 Rally 重启中断" };
+	}
+	if (lastRun?.endReason === "blocked" && !hasResume) {
+		return { status: "blocked", statusText: "受阻" };
 	}
 	if (lastRun?.lastReport?.state === "blocked" && !lastRun.endedAt && !task.jobs?.some(job => job.status === "running" && job.runId === lastRun.id)) {
 		const after = task.inputs.filter((input) => input.at > (lastRun.lastReport?.at ?? 0)).length;

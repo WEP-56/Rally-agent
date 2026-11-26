@@ -2,7 +2,7 @@ import { useId } from "react";
 import markUrl from "../assets/rally-mark.png";
 import { cn } from "../utils/cn";
 
-/** The real Rally app icon (ink squircle + R + orbit + spark). */
+/** Rally's companion artwork, generated from docs/icon.png. */
 export function RallyMark({ size = 32, className, glow }: { size?: number; className?: string; glow?: boolean }) {
   return (
     <img
@@ -17,7 +17,7 @@ export function RallyMark({ size = 32, className, glow }: { size?: number; class
   );
 }
 
-/** Orbit ring with a small spark travelling along it — lifted straight from the icon's motif. */
+/** Decorative orbit and spark around the companion artwork. */
 export function OrbitRing({ size = 260, className }: { size?: number; className?: string }) {
   const id = useId().replace(/:/g, "");
   return (

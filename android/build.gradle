@@ -80,7 +80,7 @@ tasks.register('prepareRallyAssets', Sync) {
     from('../THIRD_PARTY_NOTICES/geckoview-sources.txt') { into 'licenses' }
 }
 tasks.register('prepareRallyResources', Copy) {
-    from('../src/renderer/src/assets/rally-mark.png')
+    from('../build/icon.png')
     into bundledResources.get().dir('drawable')
     rename { 'rally.png' }
 }

@@ -17,7 +17,7 @@ import type {
 	TaskAccess,
 	TaskUsage,
 } from "../../shared/task.ts";
-import { questionViews, taskView } from "../../shared/task.ts";
+import { canArchiveTask, questionViews, taskView } from "../../shared/task.ts";
 import type { ToolCall } from "../../shared/tools.ts";
 import type { AssistantMessageView } from "../../shared/conversation.ts";
 import type { ResourceRef } from "../../shared/resources.ts";
@@ -95,7 +95,10 @@ export class TaskStore {
 		this.events.assertWritable();
 		this.assertNotDeleting(taskId);
 		const task = this.require(taskId);
-		if (!task.ended || task.archivedAt === undefined) throw new TaskError("NOT_ARCHIVED", "只能彻底删除已经结束并归档的任务");
+		const stopped = task.runs.every(run => run.endedAt !== undefined) && canArchiveTask(taskView(task).status);
+		if (task.archivedAt === undefined || (!task.ended && !stopped)) {
+			throw new TaskError("NOT_ARCHIVED", "只能彻底删除已经停止执行并归档的任务");
+		}
 		if (this.list().some(other => !other.ended && other.dependsOn.includes(taskId))) throw new TaskError("TASK_REFERENCED", "仍有未结束任务依赖此任务，请先处理下游任务");
 		this.deleting.add(taskId);
 		return task;
@@ -135,7 +138,7 @@ export class TaskStore {
 	}
 
 	board(active: number, limit: number, now = Date.now()): TaskBoard {
-		const open = this.list().filter((task) => !task.ended);
+		const open = this.list().filter((task) => !task.ended && task.archivedAt === undefined);
 		const archived = this.list().filter(task => task.archivedAt !== undefined);
 		const ended = this.list()
 			.filter((task) => task.ended && task.archivedAt === undefined)
@@ -148,8 +151,15 @@ export class TaskStore {
 		this.events.assertWritable();
 		this.assertNotDeleting(taskId);
 		const task = this.require(taskId);
-		if (!task.ended) throw new TaskError("NOT_ENDED", "请先在主对话中结束任务，再归档");
 		if ((task.archivedAt !== undefined) === archived) return;
+		if (archived) {
+			if (!canArchiveTask(taskView(task).status)) throw new TaskError("NOT_ENDED", "请先在主对话中结束任务，再归档");
+			if (!task.ended && task.jobs?.some(job => job.status === "running")) throw new TaskError("TASK_RUNNING", "任务仍有作业运行，请停止后再归档");
+			// A blocked worker keeps its run open for follow-up input. Filing it away
+			// closes that idle run so restoration cannot silently restart it.
+			const run = task.runs.find(item => item.endedAt === undefined);
+			if (!task.ended && run) this.endRun(task, run, "blocked");
+		}
 		const updatedAt = Date.now();
 		const archivedAt = archived ? updatedAt : undefined;
 		this.events.append("task_archived", { task: { ...task, archivedAt, updatedAt }, archived, actor: "user" });
@@ -320,7 +330,10 @@ export class TaskStore {
 
 	steer(taskId: string, quotes: Quote[], body?: string, note?: string): Task {
 		const task = this.require(taskId);
+		if (task.archivedAt !== undefined) throw new TaskError("TASK_ARCHIVED", "任务已归档，请用 task_resume 续接");
 		if (task.ended) throw new TaskError("ALREADY_ENDED", "任务已结束，请用 task_resume");
+		const lastRun = task.runs.at(-1);
+		if (lastRun?.endedAt !== undefined && ["interrupted", "blocked"].includes(taskView(task).status)) throw new TaskError("RUN_ENDED", "本轮执行已停止，请用 task_resume 续接");
 		this.addInput(task, "steer", { quotes, body, note });
 		return this.snapshot(task);
 	}

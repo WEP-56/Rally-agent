@@ -1,6 +1,6 @@
 # Rally 开发交接（2026-11-25）
 
-入口：[发布指南](发布指南.md) · [0.4.1 发布说明](发布说明-0.4.1.md) · [产品问答（不要再增量此文档了，即将抛弃）](superagent/00-问答记录.md) · [Prompt](Prompt/system-prompt.md)。
+入口：[发布指南](发布指南.md) · [0.4.1 发布说明](https://github.com/WEP-56/Rally-agent/releases/tag/v0.4.1) · [产品问答（不要再增量此文档了，即将抛弃）](superagent/00-问答记录.md) · [Prompt](Prompt/system-prompt.md)。
 
 ## 本轮目标与状态
 

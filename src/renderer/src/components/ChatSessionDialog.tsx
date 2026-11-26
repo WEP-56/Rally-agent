@@ -1,3 +1,5 @@
+import { motion } from "motion/react";
+import { SPRING_FAST } from "../md3/springs";
 import { useEffect, useRef } from "react";
 import { LoaderCircle } from "lucide-react";
 import { useBrowserOverlay } from "../browser-overlays";
@@ -16,7 +18,7 @@ export function ChatSessionDialog({ operation, phase, error, onConfirm, onHide, 
 		if (phase && !dialog.current?.open) dialog.current?.showModal();
 		if (!phase && dialog.current?.open) dialog.current.close();
 	}, [phase]);
-	return <dialog ref={dialog} onCancel={event => { event.preventDefault(); if (phase !== "busy") onClose(); }}
+	return <motion.dialog initial={false} animate={{ opacity: phase ? 1 : 0, scale: phase ? 1 : 0.96 }} transition={SPRING_FAST} ref={dialog} onCancel={event => { event.preventDefault(); if (phase !== "busy") onClose(); }}
 		aria-labelledby="chat-session-title" aria-describedby="chat-session-description" aria-busy={phase === "busy"}
 		className="glass-strong m-auto w-[min(400px,90vw)] rounded-[30px] p-7 text-center text-fg shadow-pop backdrop:bg-ink/30 backdrop:backdrop-blur-[3px]">
 		<RallyLogo size={56} glow className="mx-auto" />
@@ -36,5 +38,5 @@ export function ChatSessionDialog({ operation, phase, error, onConfirm, onHide, 
 			{phase === "confirm" && <Button variant={fresh ? "danger" : "primary"} onClick={onConfirm}>{fresh ? "确认新建会话" : "确认整理"}</Button>}
 			{phase === "done" && <Button variant="primary" onClick={onHide}>屏蔽旧会话</Button>}
 		</div>}
-	</dialog>;
+	</motion.dialog>;
 }

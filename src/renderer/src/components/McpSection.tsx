@@ -1,3 +1,5 @@
+import { ActionButton, Disclosure } from "../md3/interactive";
+import { ChoiceSelect } from "../md3/Select";
 import { useEffect, useState } from "react";
 import { Plug, RefreshCw, Trash2, Pencil, Plus } from "lucide-react";
 import type { McpConfigurationState, McpExposure, McpRiskTier, McpServerSettings } from "../../../shared/mcp";
@@ -69,9 +71,9 @@ export function McpSection() {
 		<fieldset disabled={busy || dirty || editor !== null} className="space-y-2">
 			{state?.tools.map((tool) => <div key={tool.name} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-sunken px-3 py-2">
 				<span className="min-w-0 break-all font-mono text-xs text-muted">{tool.name}</span>
-				<select aria-label={`${tool.name} 风险档`} value={tool.tier} onChange={(event) => void change(() => window.rally.mcp.setTier(tool.name, event.target.value as McpRiskTier))} className="rounded-md bg-panel px-2 py-1 text-xs"><RiskOptions /></select>
+				<ChoiceSelect aria-label={`${tool.name} 风险档`} value={tool.tier} onValueChange={choiceValue => void change(() => window.rally.mcp.setTier(tool.name, choiceValue as McpRiskTier))} className="rounded-md bg-panel px-2 py-1 text-xs">{RiskOptions()}</ChoiceSelect>
 			</div>)}
-			<div className="flex flex-wrap gap-2"><input aria-label="MCP 工具完整名称" placeholder="mcp__server__tool" value={toolName} onChange={(event) => setToolName(event.target.value)} className="min-w-0 flex-1 rounded-lg bg-sunken px-3 py-2 font-mono text-xs outline-none" /><select aria-label="新工具风险档" value={tier} onChange={(event) => setTier(event.target.value as McpRiskTier)} className="rounded-lg bg-sunken px-2 py-1 text-xs"><RiskOptions /></select><Button disabled={!toolName.trim()} onClick={() => void change(() => window.rally.mcp.setTier(toolName.trim(), tier))}>保存风险档</Button></div>
+			<div className="flex flex-wrap gap-2"><input aria-label="MCP 工具完整名称" placeholder="mcp__server__tool" value={toolName} onChange={(event) => setToolName(event.target.value)} className="min-w-0 flex-1 rounded-lg bg-sunken px-3 py-2 font-mono text-xs outline-none" /><ChoiceSelect aria-label="新工具风险档" value={tier} onValueChange={choiceValue => setTier(choiceValue as McpRiskTier)} className="rounded-lg bg-sunken px-2 py-1 text-xs">{RiskOptions()}</ChoiceSelect><Button disabled={!toolName.trim()} onClick={() => void change(() => window.rally.mcp.setTier(toolName.trim(), tier))}>保存风险档</Button></div>
 		</fieldset>
 	</>;
 }
@@ -91,30 +93,30 @@ function ServerSettings({ server, change, edit }: { server: McpServerSettings; c
 		<div className="flex items-center gap-4">
 			<Plug size={16} className="shrink-0 text-faint" />
 			<div className="min-w-0 flex-1"><div className="text-sm font-medium">{server.name} <span className="text-[10px] uppercase text-faint">{server.transport}</span></div><div className="mt-1 truncate font-mono text-xs text-faint" title={server.address}>{server.address}</div></div>
-			<button aria-label={`编辑 ${server.name}`} title={`编辑 ${server.name}`} onClick={edit} className="rounded-md p-1.5 text-faint hover:bg-hover hover:text-fg"><Pencil size={14} /></button>
-			<button aria-label={`删除 ${server.name}`} onClick={() => void change(() => window.rally.mcp.update(server.name, null))} className="rounded-md p-1.5 text-faint hover:bg-red-500/10 hover:text-red-500"><Trash2 size={14} /></button>
+			<ActionButton aria-label={`编辑 ${server.name}`} title={`编辑 ${server.name}`} onClick={edit} className="rounded-md p-1.5 text-faint hover:bg-hover hover:text-fg"><Pencil size={14} /></ActionButton>
+			<ActionButton aria-label={`删除 ${server.name}`} onClick={() => void change(() => window.rally.mcp.update(server.name, null))} className="rounded-md p-1.5 text-faint hover:bg-red-500/10 hover:text-red-500"><Trash2 size={14} /></ActionButton>
 			<Toggle label={`启用 ${server.name}`} checked={server.enabled} onChange={enabled => void change(() => window.rally.mcp.update(server.name, enabled))} />
 		</div>
 		<div className="mt-3 flex flex-wrap items-center justify-between gap-2">
 			<span className="text-xs text-muted">默认工具披露</span>
-			<select aria-label={`${server.name} 默认工具披露`} value={server.exposure} onChange={event => void set(event.target.value as McpExposure)} className="rounded-md bg-sunken px-2 py-1 text-xs"><ExposureOptions /></select>
+			<ChoiceSelect aria-label={`${server.name} 默认工具披露`} value={server.exposure} onValueChange={choiceValue => void set(choiceValue as McpExposure)} className="rounded-md bg-sunken px-2 py-1 text-xs">{ExposureOptions()}</ChoiceSelect>
 		</div>
-		<details className="mt-3 text-xs">
+		<Disclosure className="mt-3 text-xs">
 			<summary className="cursor-pointer text-muted">单个工具或匹配规则{rules.length ? `（${rules.length}）` : ""}</summary>
 			<p className="my-2 leading-relaxed text-faint">填写服务器原始工具名，如 search_issues；可用 * 匹配多个工具。精确名称优先，其次按列表顺序取首条匹配规则；删除规则后使用其余匹配规则或服务器默认值。</p>
 			<div className="space-y-2">
 				{rules.map(([tool, mode]) => <div key={tool} className="flex flex-wrap items-center gap-2 rounded-lg bg-sunken px-2.5 py-2">
 					<span className="min-w-0 flex-1 break-all font-mono">{tool}</span>
-					<select aria-label={`${server.name}/${tool} 工具披露`} value={mode} onChange={event => void set(event.target.value as McpExposure, tool)} className="rounded-md bg-panel px-2 py-1"><ExposureOptions /></select>
-					<button aria-label={`删除 ${server.name}/${tool} 披露规则`} onClick={() => void set(null, tool)} className="rounded-md p-1.5 text-faint hover:bg-hover hover:text-fg"><Trash2 size={13} /></button>
+					<ChoiceSelect aria-label={`${server.name}/${tool} 工具披露`} value={mode} onValueChange={choiceValue => void set(choiceValue as McpExposure, tool)} className="rounded-md bg-panel px-2 py-1">{ExposureOptions()}</ChoiceSelect>
+					<ActionButton aria-label={`删除 ${server.name}/${tool} 披露规则`} onClick={() => void set(null, tool)} className="rounded-md p-1.5 text-faint hover:bg-hover hover:text-fg"><Trash2 size={13} /></ActionButton>
 				</div>)}
 				<div className="flex flex-wrap gap-2">
 					<input aria-label={`${server.name} 原始工具名或匹配规则`} placeholder="search_issues 或 search_*" value={pattern} onChange={event => setPattern(event.target.value)} className="min-w-0 flex-1 rounded-lg bg-sunken px-3 py-2 font-mono outline-none" />
-					<select aria-label={`${server.name} 新规则披露方式`} value={exposure} onChange={event => setExposure(event.target.value as McpExposure)} className="rounded-lg bg-sunken px-2 py-1"><ExposureOptions /></select>
+					<ChoiceSelect aria-label={`${server.name} 新规则披露方式`} value={exposure} onValueChange={choiceValue => setExposure(choiceValue as McpExposure)} className="rounded-lg bg-sunken px-2 py-1">{ExposureOptions()}</ChoiceSelect>
 					<Button disabled={!pattern.trim()} onClick={() => void set(exposure, pattern.trim())}>保存规则</Button>
 				</div>
 			</div>
-		</details>
+		</Disclosure>
 	</div>;
 }
 
