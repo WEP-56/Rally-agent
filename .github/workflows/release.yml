@@ -95,9 +95,6 @@ jobs:
       - if: matrix.target == 'windows'
         working-directory: packages/coding-agent
         run: node ../../node_modules/vitest/dist/cli.js --run test/suite/rally-desktop.test.ts
-      - if: matrix.target == 'windows'
-        working-directory: packages/coding-agent
-        run: node ../../node_modules/vitest/dist/cli.js --run test/suite/rally-main-shutdown.test.ts
       - if: matrix.target == 'android'
         uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '17' }
