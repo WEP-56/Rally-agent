@@ -5,6 +5,8 @@ import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
+import android.content.res.Configuration;
+import android.graphics.Color;
 import android.net.Uri;
 import android.provider.DocumentsContract;
 import android.os.Build;
@@ -14,6 +16,7 @@ import android.security.keystore.KeyProperties;
 import android.util.Base64;
 import android.util.Log;
 import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -56,6 +59,7 @@ public final class MainActivity extends Activity {
     private Bridge bridge;
     private Bridge.Download pickingDownload;
     private FrameLayout root;
+    private boolean darkAppearance;
     private final ExecutorService pool = Executors.newFixedThreadPool(4);
 
     @Override public void onCreate(Bundle saved) {
@@ -70,9 +74,11 @@ public final class MainActivity extends Activity {
                 return insets;
             });
         } else root.setFitsSystemWindows(true);
-        root.setBackgroundColor(0xfff4f3f1);
-        getWindow().getDecorView().setSystemUiVisibility(android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         setContentView(root);
+        SharedPreferences appearance = getSharedPreferences("appearance", MODE_PRIVATE);
+        boolean systemDark = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        boolean dark = appearance.getBoolean("dark", systemDark);
+        applyAppearance(dark, appearance.getInt("background", dark ? 0xff101418 : 0xfff7f9ff));
         showStatus("正在启动 Rally…", false);
         if (runtime == null) {
             boolean debug = (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
@@ -88,11 +94,34 @@ public final class MainActivity extends Activity {
 
     private String get(String key) { return prefs.getString(key, ""); }
 
+    private void applyAppearance(boolean dark, int background) {
+        darkAppearance = dark;
+        setTheme(dark ? android.R.style.Theme_Material_NoActionBar : android.R.style.Theme_Material_Light_NoActionBar);
+        // The root paints the system-bar insets, including Android 15's transparent bars.
+        root.setBackgroundColor(background);
+        getWindow().setStatusBarColor(Build.VERSION.SDK_INT >= 30 ? Color.TRANSPARENT : background);
+        getWindow().setNavigationBarColor(Build.VERSION.SDK_INT >= 30 ? Color.TRANSPARENT : background);
+        if (Build.VERSION.SDK_INT >= 28) getWindow().setNavigationBarDividerColor(Color.TRANSPARENT);
+        if (Build.VERSION.SDK_INT >= 29) {
+            getWindow().setStatusBarContrastEnforced(false);
+            getWindow().setNavigationBarContrastEnforced(false);
+        }
+        if (Build.VERSION.SDK_INT >= 30) {
+            WindowInsetsController controller = getWindow().getInsetsController();
+            int lightBars = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+            if (controller != null) controller.setSystemBarsAppearance(dark ? 0 : lightBars, lightBars);
+        } else {
+            View decor = getWindow().getDecorView();
+            int lightBars = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            decor.setSystemUiVisibility((decor.getSystemUiVisibility() & ~lightBars) | (dark ? 0 : lightBars));
+        }
+    }
+
     private void showStatus(String message, boolean retry) {
         if (isDestroyed()) return;
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL); panel.setGravity(Gravity.CENTER); panel.setPadding(40, 40, 40, 40);
-        TextView text = new TextView(this); text.setText(message); text.setTextSize(18); text.setTextColor(0xff16161f);
+        TextView text = new TextView(this); text.setText(message); text.setTextSize(18); text.setTextColor(darkAppearance ? 0xffe2e2e9 : 0xff16161f);
         panel.addView(text);
         if (retry) { Button button = new Button(this); button.setText("重新打开"); button.setOnClickListener(v -> recreate()); panel.addView(button); }
         root.removeAllViews(); root.addView(panel, new FrameLayout.LayoutParams(-1, -1));
@@ -304,6 +333,19 @@ public final class MainActivity extends Activity {
 
         private void call(String id, String method, String args) {
             if (!active || id == null || !id.matches("[0-9a-f-]{36}") || args == null || args.length() > 1024 * 1024) return;
+            if (method.equals("setAppearance")) {
+                try {
+                    JSONArray values = new JSONArray(args);
+                    boolean dark = values.getBoolean(0);
+                    String background = values.getString(1);
+                    if (!background.matches("#[0-9a-fA-F]{6}")) throw new IllegalArgumentException("无效主题颜色");
+                    int color = Color.parseColor(background);
+                    getSharedPreferences("appearance", MODE_PRIVATE).edit().putBoolean("dark", dark).putInt("background", color).apply();
+                    applyAppearance(dark, color);
+                    reply(id, true, null);
+                } catch (Exception error) { reply(id, false, "无法更新系统栏主题"); }
+                return;
+            }
             if (method.equals("openExternal")) {
                 try {
                     Uri url = Uri.parse(new JSONArray(args).getString(0));

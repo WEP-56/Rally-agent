@@ -9,6 +9,7 @@ export interface ConnectionState {
 }
 export interface ConnectionBridge {
 	openExternal?(url: string): Promise<void>;
+	setAppearance?(dark: boolean, background: string): Promise<void>;
 	state(): Promise<ConnectionState>;
 	select(mode: "local" | "cloud", url: string, key: string): Promise<void>;
 	request<T>(endpoint: "rpc" | "events", body: object): Promise<T>;

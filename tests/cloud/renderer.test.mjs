@@ -9,6 +9,11 @@ import { CloudMirror } from '../../src/shared/cloud-state.ts';
 
 test('bundled Android entry starts through its native port and shows cloud connection fields', async () => {
   const html = readFileSync('out/renderer/index.html', 'utf8');
+  const cssPath = /<link[^>]+href="([^"]+\.css)"/.exec(html)?.[1];
+  assert.ok(cssPath);
+  const css = readFileSync(resolve('out/renderer', cssPath), 'utf8');
+  const glass = [...css.matchAll(/\.chat-header-overlay:{1,2}before\s*\{([^}]+)\}/g)].map(match => match[1]).join('\n');
+  assert.match(glass, /(?:^|[;\s])backdrop-filter:\s*blur\(16px\)/, 'The production CSS must keep the unprefixed filter for Gecko');
   const failures = [];
   const console = new VirtualConsole(); console.on('jsdomError', error => failures.push(error.message));
   const dom = new JSDOM(html, { url: 'moz-extension://rally/ui/index.html', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: console });
@@ -26,8 +31,9 @@ test('bundled Android entry starts through its native port and shows cloud conne
       onDisconnect: { addListener() {} },
       postMessage: envelope => {
         const message = JSON.parse(envelope.json);
-        assert.equal(message.method, 'state');
-        queueMicrotask(() => reply({ json: JSON.stringify({ id: message.id, ok: true, value: { platform: 'android', mode: 'choose', url: '', instance: '', profiles: [] } }) }));
+        assert.ok(['state', 'setAppearance'].includes(message.method));
+        const value = message.method === 'state' ? { platform: 'android', mode: 'choose', url: '', instance: '', profiles: [] } : null;
+        queueMicrotask(() => reply({ json: JSON.stringify({ id: message.id, ok: true, value }) }));
       },
     };
   } } };

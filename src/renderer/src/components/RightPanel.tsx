@@ -107,7 +107,7 @@ export function RightPanel({
   };
 
   return (
-    <div className="md3-workstation-stage relative flex h-full min-w-0 flex-col overflow-hidden rounded-[28px]">
+    <div className="rally-panel-frame md3-workstation-stage relative flex h-full min-w-0 flex-col overflow-hidden rounded-[28px]">
       {/* tab strip */}
       <div className="drag relative z-10 grid grid-cols-[42px_minmax(0,1fr)_42px] h-16 shrink-0 items-center px-2">
         <ActionButton className="no-drag flex h-10 w-10 items-center justify-center rounded-full text-muted md:invisible" aria-label="返回对话" onClick={onCollapse}><ArrowLeft size={18} /></ActionButton>

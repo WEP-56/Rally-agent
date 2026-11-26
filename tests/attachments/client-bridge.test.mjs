@@ -11,9 +11,10 @@ async function until(check) { const end = Date.now() + 5000; while (!check() && 
 for (const platform of ['android', 'desktop']) test(`built ${platform} cloud client routes resource bytes through native bridge and keeps desktop settings local`, async () => {
   const failures = []; const virtual = new VirtualConsole(); virtual.on('jsdomError', error => failures.push(error.message));
   const dom = new JSDOM(readFileSync('out/renderer/index.html', 'utf8'), { url: 'https://rally-client.test', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole: virtual });
-  const { window } = dom; let reply; let stopped = false; const uploads = []; const requests = []; const nativeEvents = new Map();
+  const { window } = dom; let reply; let stopped = false; const uploads = []; const requests = []; const appearances = []; const nativeEvents = new Map();
   window.HTMLCanvasElement.prototype.getContext = () => null;
   window.HTMLElement.prototype.scrollTo = window.HTMLElement.prototype.scrollIntoView = () => {};
+  window.scrollTo = () => {};
   window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
   window.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
   window.localStorage.setItem('rally.onboarded.v1', '1');
@@ -29,6 +30,8 @@ for (const platform of ['android', 'desktop']) test(`built ${platform} cloud cli
     if (route === 'events') return packet;
     if (body.channel === 'models:state') return { providers: [], available: [], active: null, worker: null };
     if (body.channel === 'memory:state') return { path: '/memory.md' };
+    // A malformed account response must not take down the entire conversation.
+    if (body.channel === 'credentials:state') return null;
     if (body.channel === 'resources:preview') return '/v1/resources/file/content?ticket=short';
     return [];
   };
@@ -49,6 +52,7 @@ for (const platform of ['android', 'desktop']) test(`built ${platform} cloud cli
         Promise.resolve().then(async () => {
           let value;
           if (call.method === 'state') value = state;
+          else if (call.method === 'setAppearance') { appearances.push(call.args); value = null; }
           else if (call.method === 'request') value = await request(...call.args);
           else if (call.method === 'upload') value = await upload(call.args[0], call.args[1], Buffer.from(call.args[2], 'base64'));
           else if (call.method === 'saveResource') value = await saveResource(...call.args);
@@ -77,6 +81,40 @@ for (const platform of ['android', 'desktop']) test(`built ${platform} cloud cli
     const module = new SourceTextModule(readFileSync(resolve('out/renderer', script), 'utf8'), { context: dom.getInternalVMContext(), initializeImportMeta: meta => { meta.url = new URL(script, window.location.href).href; } });
     await module.link(() => { throw Error('unbundled import'); }); await module.evaluate();
     await until(() => window.document.querySelector('.chat-composer'));
+    if (platform === 'android') {
+      const surface = () => window.document.documentElement.style.getPropertyValue('--md-sys-color-surface');
+      await until(() => appearances.length > 0);
+      assert.deepEqual(appearances.at(-1), [false, surface()]);
+      window.document.querySelector('.chat-header-settings').click();
+      await until(() => window.document.querySelector('button[aria-label="外观"]'));
+      window.document.querySelector('button[aria-label="外观"]').click();
+      const themeButton = label => [...window.document.querySelectorAll('button')].find(button => button.textContent === label);
+      await until(() => themeButton('深色'));
+      themeButton('深色').click();
+      await until(() => appearances.at(-1)[0] === true);
+      assert.deepEqual(appearances.at(-1), [true, surface()]);
+      assert.equal(window.document.documentElement.style.colorScheme, 'dark');
+      themeButton('跟随系统').click();
+      await until(() => appearances.at(-1)[0] === false);
+      assert.deepEqual(appearances.at(-1), [false, surface()]);
+      window.document.querySelector('[aria-label="自定义强调色"]').click();
+      await until(() => window.document.querySelector('[aria-label="强调色十六进制值"]'));
+      assert.equal(window.document.querySelector('input[type="color"]'), null);
+      assert.equal(window.document.querySelectorAll('input[type="range"]').length, 3);
+      const hex = window.document.querySelector('[aria-label="强调色十六进制值"]');
+      const enterHex = value => {
+        Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(hex, value);
+        hex.dispatchEvent(new window.Event('input', { bubbles: true }));
+      };
+      enterHex('#12');
+      await until(() => hex.getAttribute('aria-invalid') === 'true');
+      const before = appearances.length;
+      enterHex('#6854A4');
+      await until(() => appearances.length > before);
+      assert.equal(hex.getAttribute('aria-invalid'), 'false');
+      assert.deepEqual(appearances.at(-1), [false, surface()]);
+      assert.equal(JSON.parse(window.localStorage.getItem('rally.config.v1')).accent, '#6854A4');
+    }
     const bytes = new window.Uint8Array(1024 * 1024); bytes.fill(81);
     const result = await window.rally.resources.append('file', 17, bytes);
     assert.equal(result.offset, bytes.length + 17);

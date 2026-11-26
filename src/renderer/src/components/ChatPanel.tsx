@@ -300,9 +300,9 @@ export function ChatPanel({
           {header.showCompact && <RoundButton size={34} title="整理上下文 (Ctrl+Shift+N)" onClick={onCompactChat}><ListRestart size={15} strokeWidth={1.85} /></RoundButton>}
         </div>
         <PresenceCapsule personaName={config.name} activity={header.activity ?? "idle"} tasks={tasks} rightOpen={rightOpen} onOpenWorkstation={() => openTab("workstation")} />
-        <div className="no-drag ml-auto flex items-center gap-1.5 justify-self-end">
-          <RoundButton size={34} title="搜索 (Ctrl+K)" onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }))}><Search size={15} strokeWidth={1.85} /></RoundButton>
-          <RoundButton size={34} title="设置 (Ctrl+,)" onClick={() => openSettings()}><Settings size={15} strokeWidth={1.85} /></RoundButton>
+        <div className="chat-header-tools no-drag ml-auto flex items-center gap-1.5 justify-self-end">
+          <RoundButton size={34} className="chat-header-search" title="搜索 (Ctrl+K)" onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }))}><Search size={15} strokeWidth={1.85} /></RoundButton>
+          <RoundButton size={34} className="chat-header-settings" title="设置 (Ctrl+,)" onClick={() => openSettings()}><Settings size={15} strokeWidth={1.85} /></RoundButton>
           {!rightOpen && <RoundButton size={34} className="hidden md:inline-flex bg-md-secondary-container text-md-on-secondary-container" title="展开工位栏 (Ctrl+B)" onClick={onToggleRight}><PanelRightOpen size={15} strokeWidth={1.85} /></RoundButton>}
         </div>
       </div>

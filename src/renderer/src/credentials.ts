@@ -8,7 +8,11 @@ export function useCredentials() {
 		let alive = true;
 		const refresh = async () => {
 			if (document.hidden) return;
-			try { const next = await window.rally.credentials.getState(); if (alive) { setState(next); setError(""); } }
+			try {
+				const next = await window.rally.credentials.getState();
+				if (!next || !Array.isArray(next.accounts) || !Array.isArray(next.requests)) throw new Error("账号状态响应无效，请稍后重试");
+				if (alive) { setState(next); setError(""); }
+			}
 			catch (error) { if (alive) setError(error instanceof Error ? error.message : String(error)); }
 		};
 		void refresh(); const timer = setInterval(() => void refresh(), 3000);

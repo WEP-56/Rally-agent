@@ -1,7 +1,7 @@
 import { SPRING_FAST, SPRING_PANEL } from "./md3/springs";
 import { MdSnackbar } from "./md3/components";
 import { useBrowserOverlay } from "./browser-overlays";
-import { applyMd3TokensToRoot } from "./md3/theme";
+import { useAppearance } from "./appearance";
 import { motion, MotionConfig } from "motion/react";
 import type { NotificationTarget } from "../../shared/notifications";
 import type { IdentityState } from "../../shared/identity";
@@ -104,19 +104,7 @@ export default function App() {
     });
   }, []);
 
-  const [sysDark, setSysDark] = useState(() => window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false);
-  useEffect(() => {
-    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
-    const h = (e: MediaQueryListEvent) => setSysDark(e.matches);
-    mq?.addEventListener("change", h);
-    return () => mq?.removeEventListener("change", h);
-  }, []);
-  const dark = config.theme === "dark" || (config.theme === "system" && sysDark);
-  useEffect(() => {
-    const r = document.documentElement;
-    applyMd3TokensToRoot(config.accent, dark);
-    r.style.fontSize = { sm: "14px", md: "15px", lg: "16.5px" }[config.fontSize];
-  }, [dark, config.accent, config.fontSize]);
+  const dark = useAppearance(config);
 
   /* ---------------- tabs ---------------- */
   useEffect(() => window.rally.tasks.onEvent(event => {
@@ -426,7 +414,7 @@ export default function App() {
 
   return (
     <MotionConfig reducedMotion="user"><Ctx.Provider value={ctx}>
-      <div className="relative flex h-full w-full flex-col overflow-hidden bg-app">
+      <div data-platform={window.runtime.platform} className="relative flex h-full w-full flex-col overflow-hidden bg-app">
           <div className="desktop-bar"><TitleBar menus={cloud?menus.map(m=>({...m,groups:m.groups?.map(g=>g.filter(i=>i.label!=="终端"))})):menus} onSearch={() => setPalette(true)} maximized={maximized} onMin={minimize} onMax={toggleMax} onClose={close} onDoubleClick={toggleMax} /></div>
 
           {chat.inactivity?.pausedAt !== undefined && (
@@ -442,7 +430,7 @@ export default function App() {
             </div>
           )}
             <div ref={container} className={cn("rally-panes relative min-h-0 flex-1 p-2", view === "settings" ? "hidden" : "flex")}>
-              <div className="min-w-0 flex-1 overflow-hidden rounded-[26px]">
+              <div className="rally-panel-frame min-w-0 flex-1 overflow-hidden rounded-[26px]">
                 <ChatPanel
                   notificationFocus={notificationFocus}
                   questions={visibleQuestions}
@@ -483,7 +471,7 @@ export default function App() {
                     className={cn("w-[3px] rounded-full transition-colors", dragging ? "bg-md-primary" : "bg-transparent group-hover:bg-md-outline-variant")}
                   />
                 </div>
-                <div className="min-w-0 flex-1 overflow-hidden rounded-[26px]">
+                <div className="rally-panel-frame min-w-0 flex-1 overflow-hidden rounded-[26px]">
                   <div className="h-full" style={{ minWidth: "min(330px, 100%)" }}>
                     <RightPanel
                       onCollapse={() => setRightOpen(false)}

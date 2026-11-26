@@ -51,6 +51,7 @@ function androidBridge(native: Native): ConnectionBridge {
 	}
 	return {
 		openExternal: url => call("openExternal", [url]),
+		setAppearance: (dark, background) => call("setAppearance", [dark, background]),
 		state: () => call("state", []),
 		select: (...args) => call("select", args),
 		request: (...args) => call("request", args),

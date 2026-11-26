@@ -14,7 +14,8 @@ import { ArchivedTasksSection } from "./ArchivedTasksSection";
 import type { AppInfo } from "../../../shared/ipc";
 import type { CloseBehavior, DesktopSettings } from "../../../shared/desktop";
 import { OrbitRing } from "./brand";
-import { ACCENTS, useApp } from "../store";
+import { useApp } from "../store";
+import { AccentPicker } from "./AccentPicker";
 import { cn } from "../utils/cn";
 import { Button, RallyLogo, RoundButton, Segmented, Toggle } from "./ui";
 import { IdentityForm, MemoryForm, ProvidersForm } from "./forms";
@@ -84,9 +85,9 @@ function Group({ title, children, action }: { title?: string; children: React.Re
   );
 }
 
-function Row({ title, desc, children }: { title: React.ReactNode; desc?: React.ReactNode; children?: React.ReactNode }) {
+function Row({ title, desc, children, className }: { title: React.ReactNode; desc?: React.ReactNode; children?: React.ReactNode; className?: string }) {
   return (
-    <motion.div whileHover={{ scale: 1.005, borderRadius: 24 }} transition={SPRING_LAYOUT} className="flex min-h-[58px] flex-wrap items-center gap-3 rounded-[20px] bg-md-surface-low px-4 py-3 dark:bg-md-surface-high/88">
+    <motion.div whileHover={{ scale: 1.005, borderRadius: 24 }} transition={SPRING_LAYOUT} className={cn("flex min-h-[58px] flex-wrap items-center gap-3 rounded-[20px] bg-md-surface-low px-4 py-3 dark:bg-md-surface-high/88", className)}>
       <div className="min-w-0 flex-1">
         <div className="text-[14px] font-medium">{title}</div>
         {desc && <div className="mt-0.5 text-[12.5px] leading-relaxed text-muted">{desc}</div>}
@@ -183,22 +184,10 @@ function AppearanceSection() {
         ))}
       </div>
       <Group title="个性化">
-        <Row title="强调色" desc="按钮、状态与高亮，右侧面板的光晕也会跟着变">
-          <div className="flex flex-wrap gap-2">
-            <input type="color" aria-label="自定义强调色" value={config.accent} onChange={event => setConfig({ accent: event.target.value })} className="h-7 w-7 cursor-pointer rounded-full" />
-            {ACCENTS.map((a) => (
-              <ActionButton
-                key={a.value}
-                whileHover={{ scale: 1.15, y: -1 }} whileTap={{ scale: 0.86 }}
-                title={a.name}
-                onClick={() => setConfig({ accent: a.value })}
-                className={cn("h-7 w-7 rounded-full", config.accent === a.value && "shadow-[0_0_0_2px_var(--c-panel),0_0_0_4px_var(--c-accent)]")}
-                style={{ background: a.value }}
-              />
-            ))}
-          </div>
+        <Row className="appearance-row" title="强调色" desc="按钮、状态与高亮，右侧面板的光晕也会跟着变">
+          <AccentPicker value={config.accent} onChange={accent => setConfig({ accent })} />
         </Row>
-        <Row title="界面字号" desc="缩放整个界面的文字与控件">
+        <Row className="appearance-row" title="界面字号" desc="缩放整个界面的文字与控件">
           <Segmented value={config.fontSize} onChange={(v) => setConfig({ fontSize: v })} options={[{ value: "sm", label: "小" }, { value: "md", label: "标准" }, { value: "lg", label: "大" }]} />
         </Row>
       </Group>
@@ -281,8 +270,8 @@ export function Settings({ section, setSection, onBack, tasks, autoApprove, onAu
           ))}
         </nav>
       </motion.aside>
-      <motion.main key={detail ? "detail" : "index"} initial={{ x: 24, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={SPRING_FAST} className="md3-workstation-stage relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-[28px] shadow-card ">
-        <AnimatePresence mode="wait" initial={false}><motion.div key={cur.id} initial={{ x: 24, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: -16, opacity: 0 }} transition={SPRING_FAST} className="relative z-10 h-full overflow-y-auto"><div className="mx-auto max-w-[680px] px-5 pb-20 pt-8 md:px-8">
+      <motion.main key={detail ? "detail" : "index"} initial={{ x: 24, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={SPRING_FAST} className="rally-panel-frame md3-workstation-stage relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-[28px] shadow-card ">
+        <AnimatePresence mode="wait" initial={false}><motion.div key={cur.id} initial={{ x: 24, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: -16, opacity: 0 }} transition={SPRING_FAST} className="relative z-10 h-full min-w-0 overflow-x-hidden overflow-y-auto"><div className="mx-auto min-w-0 max-w-[680px] px-5 pb-20 pt-8 md:px-8">
           <ActionButton className="mb-3 min-h-11 px-2 text-muted md:hidden" onClick={()=>setDetail(false)}>← 设置目录</ActionButton><motion.div className=" mb-7  px-1 pb-5" initial={{ opacity: 0, y: 8, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={SPRING_LAYOUT}><h1 className="font-display text-[28px] font-semibold leading-tight">{cur.label}</h1><p className="mt-1 text-[13px] text-fg/55">{cur.desc}</p></motion.div>
           <motion.div className="" initial={{ opacity: 0, y: 8, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={SPRING_LAYOUT}>
           {cur.id === "execution" && <Group title="任务批准"><Row title="自动批准常规工位任务" desc="开启后，常规任务直接开始执行；工具权限和需要单独确认的操作仍按原有规则处理。"><Toggle label="自动批准常规工位任务" checked={autoApprove} disabled={approvalSaving} onChange={async value => { setApprovalSaving(true); setApprovalError(""); try { await onAutoApprove(value); } catch (error) { setApprovalError(String(error)); } finally { setApprovalSaving(false); } }} /></Row>{approvalError && <p role="alert" className="p-3 text-sm text-danger">{approvalError}</p>}</Group>}

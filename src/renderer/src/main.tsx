@@ -5,6 +5,8 @@ import App from "./App";
 import { connect, disconnect, isConnected } from "./connection";
 import { ConnectionForm } from "./components/ConnectionForm";
 import { Button, RallyLogo } from "./components/ui";
+import { useAppearance } from "./appearance";
+import { loadConfig } from "./store";
 
 declare global {
 	interface Window {
@@ -13,6 +15,10 @@ declare global {
 }
 function Ready() {
 	useEffect(() => window.rallyStartup?.ready(), []);
+	return null;
+}
+function SetupAppearance() {
+	useAppearance(loadConfig());
 	return null;
 }
 function Connected() {
@@ -51,6 +57,7 @@ function setup(reason = "") {
 	root.render(
 		<main className="flex h-full flex-col overflow-auto bg-app">
 			<Ready />
+			<SetupAppearance />
 			{window.rallyLocal && (
 				<div className="drag flex h-10 shrink-0 justify-end">
 					<button

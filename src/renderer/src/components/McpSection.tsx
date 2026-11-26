@@ -42,15 +42,15 @@ export function McpSection() {
 	return <>
 		{changed && <p className="mb-3 text-xs text-warn">服务器 MCP 配置有更新，请刷新后查看。当前未保存的内容仍保留。</p>}
 		{window.runtime.mode === "cloud" && <p className="mb-3 text-xs text-muted">已存配置的密钥与命令参数留在服务器。JSON 中的 rallySaved 表示沿用原配置；要替换时填写完整配置。</p>}
-		<div className="mb-4 flex items-center justify-between gap-2">
+		<div className="mb-4 flex flex-wrap items-center justify-between gap-2">
 			<Segmented value={view} onChange={value => { if (!editor) setView(value); }} options={[{ value: "list", label: "列表" }, { value: "json", label: "JSON" }]} />
-			<div className="flex gap-2"><Button disabled={busy || dirty || editor !== null} onClick={() => void change(() => window.rally.mcp.getState())}><RefreshCw size={13} />刷新</Button><Button variant="primary" disabled={busy || dirty || editor !== null} onClick={() => { setView("list"); setError(""); setEditor({ name: "", json: '{\n  "command": "",\n  "args": []\n}' }); }}><Plus size={13} />添加服务器</Button></div>
+			<div className="flex flex-wrap gap-2"><Button disabled={busy || dirty || editor !== null} onClick={() => void change(() => window.rally.mcp.getState())}><RefreshCw size={13} />刷新</Button><Button variant="primary" disabled={busy || dirty || editor !== null} onClick={() => { setView("list"); setError(""); setEditor({ name: "", json: '{\n  "command": "",\n  "args": []\n}' }); }}><Plus size={13} />添加服务器</Button></div>
 		</div>
 		<p className="mb-4 text-xs leading-relaxed text-muted">之后启动或续接的任务使用这里的配置，当前任务保持原设置。搜索披露让任务先用 tool_search 查找所需工具，再加载并调用；主对话只获得能力摘要，由任务使用 MCP。</p>
 		{error && <p role="alert" className="mb-4 break-words text-xs text-red-500">{error}</p>}
 		{state?.errors.map((message) => <p key={message} role="alert" className="mb-2 break-all text-xs text-red-500">{message}</p>)}
 		{dirty && <p className="mb-3 text-xs text-muted">JSON 有未保存修改，请保存后再修改列表。</p>}
-		{editor && <fieldset disabled={busy} className="glass-strong mb-4 rounded-[24px] p-5">
+		{editor && <fieldset disabled={busy} className="glass-strong mb-4 min-w-0 rounded-[24px] p-5">
 			<div className="mb-3 text-sm font-medium">{editor.originalName === undefined ? "添加服务器" : `编辑 ${editor.originalName}`}</div>
 			<label className="text-xs text-muted">服务器名称<input aria-label="服务器名称" value={editor.name} onChange={event => setEditor({ ...editor, name: event.target.value })} className="my-2 block w-full rounded-lg bg-panel px-3 py-2 text-sm" /></label>
 			<p className="mb-2 text-xs leading-relaxed text-muted">填写单个服务器的 JSON 配置：stdio 使用 command、args，HTTP 使用 url；可选 description 简述用途。</p>
@@ -68,7 +68,7 @@ export function McpSection() {
 		<div className="mt-6 text-sm font-medium">工具风险档</div>
 		<p className="mt-1 text-xs text-muted">飞书、QQ 邮箱等连接器提供的工具，请在「连接」页对应应用的「管理」中调整权限。</p>
 		<p className="mb-3 mt-1 text-xs leading-relaxed text-muted">列表来自任务曾发现的工具及已保存的设置，不表示当前在线。默认可逆；有对外代价的调用会执行并提示、留审计；不可逆调用会等待确认。保存后从下一次调用起生效，已经发出的确认仍需处理。</p>
-		<fieldset disabled={busy || dirty || editor !== null} className="space-y-2">
+		<fieldset disabled={busy || dirty || editor !== null} className="min-w-0 space-y-2">
 			{state?.tools.map((tool) => <div key={tool.name} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-sunken px-3 py-2">
 				<span className="min-w-0 break-all font-mono text-xs text-muted">{tool.name}</span>
 				<ChoiceSelect aria-label={`${tool.name} 风险档`} value={tool.tier} onValueChange={choiceValue => void change(() => window.rally.mcp.setTier(tool.name, choiceValue as McpRiskTier))} className="rounded-md bg-panel px-2 py-1 text-xs">{RiskOptions()}</ChoiceSelect>

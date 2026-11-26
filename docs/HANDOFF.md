@@ -1,36 +1,48 @@
-# Rally 开发交接（2026-11-25）
+# Rally 开发交接（2026-11-26）
 
-入口：[发布指南](发布指南.md) · [0.4.1 发布说明](https://github.com/WEP-56/Rally-agent/releases/tag/v0.4.1) · [产品问答（不要再增量此文档了，即将抛弃）](superagent/00-问答记录.md) · [Prompt](Prompt/system-prompt.md)。
+入口：[文档索引](README.md) · [发布指南](发布指南.md) · [0.5.0 发布说明](发布说明-0.5.0.md) · [产品问答](superagent/00-问答记录.md) · [Prompt](Prompt/system-prompt.md)。
 
-## 本轮目标与状态
+## 下一会话：品牌吉祥物
 
-用户授权的包体积修复、提交推送、0.4.1 tag 和正式 Release 已完成。0.4.1 已设为 Latest，发布流水线 `45567592147` 全部成功；tag 指向 `9f3fdaf`。旧 tag、旧产物未修改。用户随后授权 VPS 直接覆盖更新，现已升级到 0.4.1，未创建备份。当前没有待继续的发布或部署操作，后续按用户实际使用反馈处理。
+用户已确认本轮 Android 适配“完美”，要求提交代码、更新交接。下一项是品牌吉祥物，用户准备的案例位于本机 `example/dynamic-md3-agent-mascot/`。本轮没有开始集成，也没有创建新会话。
 
-0.4.0 的 Windows 521,834,482 字节、Linux 757,100,150 字节；主要原因是两个 ACP adapter 的生产依赖带入 Claude/Codex 原生 CLI，Linux 还同时安装 Claude glibc 与 musl 版本。0.4.1 从根依赖移除两个 adapter 及其传递运行时，保留轻量 ACP SDK。正式 Windows 包 250,183,601 字节，Linux 包 243,720,230 字节；五件产物与 SHA256SUMS 均已核对 GitHub asset digest。
+先阅读案例的 `src/App.tsx`、`src/components/MochiMascotSvg.tsx`、`src/types/mascot.ts`、`src/components/RealWorldPreviews.tsx` 和 `src/components/IntegrationModal.tsx`。案例是 React/SVG 吉祥物，包含弹簧、视线跟随、交互，以及 idle、thinking、searching、orchestrating、coding、replying、error、completed 八种演示状态。该目录在 Git 忽略范围内，仅本机存在，不要误认为已随提交上传。
 
-外部会话从用户目录按需安装的 adapter 启动，CLI 优先复用设备现有程序。可选路径配置为 `$RALLY_CODING_AGENT_DIR/external-agents.json`；默认 adapter 目录为 `external-agents/<claude-code|codex>/node_modules/.../dist/index.js`。设置页不自动安装，错误提示引导自管理。具体字段、优先级和安装命令在 `skills/references/external-agents.md`。Windows 支持 npm shim，实际读取包的 bin 字段，兼容新版 Claude 原生安装。Linux install.sh 同步修复漏复制 skills 的问题。
+结合现有 `src/renderer/src/components/AgentAvatar.tsx`、`PresenceCapsule.tsx`、`Workstation.tsx`、`brand.tsx` 和 `md3/components.tsx` 梳理接入位置。具体替换哪些展示位置尚未确定；不要擅自覆盖用户自定义的 Agent 头像。演示状态、日志和指标不等于 Rally 的真实能力，应映射现有状态与事件，不搬入模拟任务、虚构运行信息或新的全局配色。用户重视原型还原度、弹簧动效和温暖的个人助手气质。
 
-自管理仍然只有一个 `skills/SKILL.md`，八个领域文件是 references，不能各自注册 Skill，不能放到 docs/Prompt。新增路径配置已写入总索引。Worker 不共享主 Agent 的完整上下文，说明必须明确目标主机、运行账号、配置路径和验证方法。
+## 本轮完成并获用户验收
 
-## 发布与验证
+- Android 聊天顶部改成左搜索、中央身份徽标、右设置，保证徽标真正居中。
+- 新增 `appearance.ts`，复用在主界面与连接页；通过 `ConnectionBridge.setAppearance` 同步 Android 状态栏、导航栏背景及图标明暗。原生壳保存上次外观，启动页也使用对应颜色。
+- 修复 Gecko 顶部玻璃：CSS 优化器会按声明顺序合并前缀，必须将标准 `backdrop-filter` 放在 `-webkit-backdrop-filter` 后面。构建产物回归检查覆盖标准属性保留。
+- 禁用移动端页面双指缩放；MCP 操作栏允许换行，设置页防止横向溢出；外观页窄屏采用上下布局，大字号不再将说明文字挤成竖排。
+- 用 `AccentPicker.tsx` 替代原生颜色对话框，保留预设颜色，支持 HCT 滑杆与十六进制输入，复用现有主题算法和 token。
+- 聊天、设置、右侧栏外层上下铺满，去掉桌面式留白和外层圆角；输入框、卡片自身圆角保留。规则严格限定 `[data-platform="android"]`，Windows 外层布局不受影响。
+- 账号状态响应为空或结构错误时保留上次有效状态并报告错误，防止聊天页崩溃。
 
-- 当前发布 tag `v0.4.0` 指向 `3a07bc9`；CI `45559067156` 完成三平台构建。`4d957ec` 修正了 shutdown 测试的 Electron app.getAppPath 替身。旧 tag 没有移动。
-- 0.4.1 外部执行器定向测试 11 项通过，覆盖路径发现、npm 安装、按需原生依赖、配置错误、缺失时不安装，以及真实子进程的离线 ACP 会话。角色/Skill 相关筛选通过，Skill 格式校验通过。
-- 2026-11-25：两个模型测试文件的 9 处错误已修复，根 `npm run typecheck` 全部通过。原因是测试引用了当前目录中已不存在的 Fireworks 模型；通用兼容性改为遍历当前 Messages 模型，toggle-only 分支使用已有生成器的固定上游样本。相关 79 项离线测试通过，未改模型生成物。
-- 发布检查新增 lockfile 与 Windows/Linux 实际目录验证，阻止外部 adapter、SDK 运行时与原生 CLI 重新混入基础包。真实付费模型调用和界面视觉没有作为已验收项。
-- 本地 `.artifacts/external-agent-smoke/` 用于临时安装无原生依赖的 adapter，以隔离配置验证打包后的 Electron Node 启动 adapter、复用本机 CLI；原生 Claude 2.1.332 / Codex 0.167.0 的 --version 通过，没有真实推理或读取用户认证。该临时目录清理被自动审批拒绝，只返回 `blocked by policy`，仍保留且不会进入发布包。下载的 `.artifacts/release-0.4.1/SHA256SUMS` 是核验记录。
+调试期间曾临时切到本地测试服务；因其遗漏账号状态导致 `credentials.state is null`，不是 VPS 故障。已恢复用户原有 VPS 配对并停掉测试服务及 ADB 转发。用户明确要求以后直接使用已配好的 VPS 做外观验证，不再搭建或切换本地模拟服务，也不要为视觉测试发送模型消息。
 
-## 生产与未完成验收
+## 验证与安装
 
-2026-11-25：VPS 已使用正式 Linux 包从 0.3.0 直接升级到 0.4.1，下载包 SHA256 与 Release 一致。未运行安装脚本中的备份步骤；保留原有配置、密钥和业务数据。两个 systemd 服务运行正常且没有重启循环，健康接口和运行时版本检查通过，原有 7 个任务可读取。设置接口只列出一个已启用的 `rally-self-management` Skill，无诊断错误；账号与浏览器状态接口正常。随包 Chromium 以服务账号完成离线启动检查，gh 2.105.0 可执行。旧 0.3.0 目录及下载、解包临时文件已删除，当前仅保留 0.4.1，磁盘剩余 4307 MiB。Linux 命令退出竞态修复已随本次升级部署。
+- `npm run typecheck` 通过；前期完整 `npm run build`、最终 `npx electron-vite build` 通过。
+- 定向执行 `node --experimental-vm-modules --test tests/attachments/client-bridge.test.mjs tests/cloud/renderer.test.mjs`，6 项通过；最后的贴边布局调整后再次运行 renderer 文件，4 项通过。
+- 使用 JDK 17，`node scripts/cloud/build-android.mjs --debug --offline` 完成三个 ABI 构建、内容及签名检查。
+- x86_64 调试包已覆盖安装并启动于 ADB `127.0.0.1:5555`，应用 ID `dev.rally.mobile`，VPS 配对保留。用户亲自完成视觉验收。
+- 调试包在 `release/Rally-0.5.0-android-<ABI>-debug.apk`；调试签名保存在忽略的 `.artifacts/android-debug.p12`，后续覆盖安装需保留此签名，不能卸载清除配对数据。
+- 本轮不提升版本、不打 tag、不发布；修复跟随下一版本。当前用户仅要求 Git 提交，未要求将本轮推送到远端。
 
-浏览器接管点击/拖动与额外遮挡、账密回告、询问卡片自由回答已修复并随 0.4.0 发布。真实网站登录/验证码、完整设备视觉和外部执行器实际模型任务由用户验收；QQ 登录失败不能等同于账密回告丢失，若继续排查需读取新的实际日志。
+## 已有发布与部署状态
 
-## 必须保留的边界
+0.5.0 已完成 MD3 界面与新图标发布。`v0.5.0` 指向 `9f0c4af`，发布检查修复为 `b1b5449`，流水线 `45781860358` 已成功。新品牌图标源为 `docs/icon.png`，由 `scripts/generate-icons.mjs` 生成各平台资源；保留透明圆角。README 已改为简短温暖风格，Linux DO 社区认可信息需保留。
 
-- 界面保持现有原型风格和 token，功能字段以产品问答为准。
-- 普通外链在客户端打开；Agent 浏览器在执行主机，所有 Worker 共用 profile，每任务独立窗口，上限三个。主 Agent 没有浏览器操作工具。
-- 外部 Claude/Codex Worker 不接入 Rally 浏览器、MCP 或内部工具；复用目标主机自身登录，权限提升请求拒绝，不宣称主机级隔离。
-- 用户目录中的外部工具、登录数据不随应用升级覆盖。只按用户所需执行器安装，复用已有 CLI 时使用 --omit=optional 避免重复下载原生程序。
-- 不跑全量 vitest，不触发真实模型 API；按文件运行离线测试。只 git add 明确路径，不能 force push 或清理用户工作。
-- 私有 VPS 连接信息仍只在用户指定的私有位置，不写公开文档。
+VPS 已按用户要求从 0.4.1 更新到正式 0.5.0，未创建备份，原配置与业务数据保留，两个 Rally 服务及健康检查正常。实际为受限普通账号运行的 systemd 部署，并非 Docker；用户已决定暂不调整部署方式或权限。连接信息仅在私有 `.signing/` 中，不复制到文档或日志。另有与 Rally 无关的 `mistral-proxy` 启动失败，之前已告知用户，未修改。
+
+## 保持的约定
+
+- 当前 UI 风格以 `example/rally-md3-design` 及已迁移组件为准；功能字段按产品问答，不从演示反推。新吉祥物案例作为下一项设计依据。
+- 用中文、简单易懂地沟通。视觉默认由用户验收；未明确要求时不启动浏览器、截图或 Electron 验收。本轮后半程用户已要求自己验证。
+- 修改代码后跑类型检查；不跑全量 Vitest，不触发真实模型 API。只执行必要的指定文件测试。
+- 用户要求时才提交，只暂存明确路径，不重置、不清理用户文件、不强推、不跳过 hook。
+- 主进程与 renderer 经 `src/shared/ipc.ts` 声明通道通信；Android 原生连接能力经 `src/shared/connection.ts` 的既有桥接。
+- 外部 Claude/Codex 执行器仍按需安装，用户目录中的工具与认证不随升级覆盖；不要把庞大 CLI 依赖重新打入基础包。
+- Rally 内的 Agent 没有本开发会话上下文，修改提示词、工具说明或 Skill 时必须给出完整可理解的信息。
