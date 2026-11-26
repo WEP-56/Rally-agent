@@ -25,7 +25,10 @@ async function setup(tasks = [], questions = []) {
   window.localStorage.setItem('rally.onboarded.v1', '1');
   window.HTMLCanvasElement.prototype.getContext = () => null;
   window.HTMLElement.prototype.scrollTo = window.HTMLElement.prototype.scrollIntoView = () => {};
-  window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+  window.scrollTo = () => {};
+  // JSDOM has no layout engine. Use the app's reduced-motion path and still
+  // await real DOM removal so exits cannot hide a stale attachment or mention.
+  window.matchMedia = query => ({ matches: query.includes("prefers-reduced-motion"), addEventListener() {}, removeEventListener() {} });
   window.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
   window.URL.createObjectURL = () => 'blob:https://client.test/image'; window.URL.revokeObjectURL = () => {};
   window.fetch = async () => ({ ok: true, text: async () => '<script>display as data</script>' });
@@ -133,7 +136,7 @@ test('built attachment UI pastes, retries chunks, preserves a failed send, opens
     assert.deepEqual(Array.from(calls.filter(call => call.channel === 'chat:send').at(-1).args[1]), ['resource-upload-1']);
     await until(() => !window.document.querySelector('.chat-composer').textContent.includes('paste.png'));
     const card = buttons(window, '点击预览')[0]; card.click();
-    await until(() => window.document.querySelector('h2')?.textContent === 'paste.png');
+    await until(() => [...window.document.querySelectorAll('h2')].some(item => item.textContent === 'paste.png'));
     assert.ok(window.document.querySelector('video') === null);
     card.click(); await setTimeout(20);
     assert.equal([...window.document.querySelectorAll('h2')].filter(item => item.textContent === 'paste.png').length, 1);
@@ -191,7 +194,7 @@ test('task references support menu selection, removal and retry without appendin
     const composer = window.document.querySelector('.chat-composer');
     assert.ok(composer, failures.join("\n"));
     const textarea = composer.querySelector('textarea');
-    const pick = composer.querySelector('[title="引用任务"]');
+    const pick = composer.querySelector('button[aria-haspopup="listbox"]');
     const key = (target, key) => target.dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
     const setText = (value) => {
       Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set.call(textarea, value);

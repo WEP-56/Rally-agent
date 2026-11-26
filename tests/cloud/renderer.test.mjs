@@ -15,6 +15,9 @@ test('bundled Android entry starts through its native port and shows cloud conne
   const { window } = dom;
   // xterm probes canvas at module load, but the Android connection view does not use it.
   window.HTMLCanvasElement.prototype.getContext = () => null;
+  window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+  window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  window.HTMLDialogElement.prototype.close = function () { this.open = false; };
   let reply;
   window.browser = { runtime: { connectNative: name => {
     assert.equal(name, 'rally');
@@ -80,6 +83,9 @@ for (const platform of ['android', 'desktop']) test(`${platform} warm cloud star
   window.localStorage.setItem('rally.onboarded.v1', '1');
   window.HTMLCanvasElement.prototype.getContext = () => null;
   window.HTMLElement.prototype.scrollTo = () => {};
+  window.scrollTo = () => {};
+  window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  window.HTMLDialogElement.prototype.close = function () { this.open = false; };
   window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
   window.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
   const calls = [];
@@ -110,8 +116,9 @@ for (const platform of ['android', 'desktop']) test(`${platform} warm cloud star
     await module.link(() => { throw Error('Unexpected renderer import'); });
     await module.evaluate();
     const deadline = Date.now() + 3000;
-    while (!window.document.querySelector('.chat-identity') && Date.now() < deadline) await setTimeout(10);
-    assert.match(window.document.querySelector('.chat-identity')?.textContent ?? '', /Saved identity/);
+    const identity = () => window.document.querySelector('.chat-header-overlay button[title="打开工位"]');
+    while (!identity() && Date.now() < deadline) await setTimeout(10);
+    assert.match(identity()?.textContent ?? '', /Saved identity/);
     await setTimeout(50);
     assert.equal(window.document.getElementById('startup').style.display, 'none');
     assert.match(window.document.getElementById('root').textContent, /当前显示本机缓存/);

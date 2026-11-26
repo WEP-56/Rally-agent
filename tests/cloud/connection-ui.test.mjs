@@ -15,6 +15,9 @@ async function setup(select) {
   const dom = new JSDOM(readFileSync('out/renderer/index.html', 'utf8'), { url: 'https://client.test', runScripts: 'outside-only', pretendToBeVisual: true });
   const { window } = dom;
   window.HTMLCanvasElement.prototype.getContext = () => null;
+  window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+  window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  window.HTMLDialogElement.prototype.close = function () { this.open = false; };
   window.rallyConnection = { state: async () => ({ platform: 'desktop', mode: 'choose', url: '', instance: '', profiles: ['https://saved.test'] }), select };
   const script = window.document.querySelector('script[type="module"]').getAttribute('src');
   const module = new SourceTextModule(readFileSync(resolve('out/renderer', script), 'utf8'), { context: dom.getInternalVMContext(), initializeImportMeta: meta => { meta.url = new URL(script, window.location.href).href; } });
@@ -40,7 +43,7 @@ test('desktop first launch selects local without requesting server credentials',
     button(dom.window, '使用本地模式').click();
     await until(() => calls.length === 1);
     assert.deepEqual(calls[0], ['local', '', '']);
-    assert.ok(button(dom.window, '正在进入本地').disabled);
+    await until(() => button(dom.window, '正在进入本地')?.disabled);
   } finally { dom.window.close(); }
 });
 
@@ -55,12 +58,15 @@ test('cloud switch preserves local session on cancel or connection failure, and 
     input(window, 'url', 'https://saved.test/');
     await setTimeout(20);
     assert.equal(window.document.querySelector('input[type="password"]').required, false);
-    window.confirm = () => false;
     window.document.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-    await setTimeout(20);
+    await until(() => window.document.querySelector('dialog[open]'));
+    button(window, '取消').click();
+    await until(() => !window.document.querySelector('dialog[open]'));
     assert.equal(calls.length, 0);
-    window.confirm = () => true;
+    assert.equal(window.runtime.mode, 'local');
     window.document.querySelector('form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+    await until(() => window.document.querySelector('dialog[open]'));
+    button(window, '继续切换').click();
     await until(() => window.document.querySelector('[role="alert"]'));
     assert.deepEqual(calls[0], ['cloud', 'https://saved.test', '']);
     assert.match(window.document.querySelector('[role="alert"]').textContent, /服务器不可用/);
