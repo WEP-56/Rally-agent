@@ -15,7 +15,7 @@ export interface ServiceRecord {
 	startedAt: number;
 	endedAt?: number;
 	exitCode?: number;
-	reason?: "user" | "worker" | "shutdown" | "interrupted" | "cancelled";
+	reason?: "user" | "worker" | "shutdown" | "interrupted" | "cancelled" | "inactivity";
 	error?: string;
 }
 export interface ServicesState { services: ServiceRecord[] }

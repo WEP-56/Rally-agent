@@ -61,8 +61,14 @@ it("pairs only a private text sender, routes and replies in the original Feishu 
 	await emit("群聊", { chatType: "group" });
 	await emit("图片", { rawContentType: "image" });
 	await emit("执行原话", { messageId: "om_request" });
-	expect(receive).toHaveBeenCalledExactlyOnceWith("执行原话", { platform: "feishu", appId: credentials.appId, chatId: "oc_private", messageId: "om_request" });
+	expect(receive).toHaveBeenCalledExactlyOnceWith("执行原话", { platform: "feishu", appId: credentials.appId, chatId: "oc_private", messageId: "om_request", senderId: "ou_owner" });
 	expect(channel.send).toHaveBeenLastCalledWith("oc_private", { text: "主对话回复" }, { replyTo: "om_request" });
+	const source = { platform: "feishu" as const, appId: credentials.appId, chatId: "oc_private", messageId: "om_request", senderId: "ou_owner" };
+	expect(connection.canReply(source)).toBe(true);
+	expect(connection.canReply({ ...source, senderId: "ou_other" })).toBe(false);
+	expect(connection.canReply({ ...source, appId: "cli_other" })).toBe(false);
+	await connection.reply(source, "排队后的回复");
+	expect(channel.send).toHaveBeenLastCalledWith("oc_private", { text: "排队后的回复" }, { replyTo: "om_request" });
 	expect(readFileSync(join(home, "feishu-connection.json"), "utf8")).not.toContain(credentials.appSecret);
 	const reopened = stubChannel();
 	const factory = vi.fn(() => reopened.channel);
@@ -72,6 +78,8 @@ it("pairs only a private text sender, routes and replies in the original Feishu 
 	restart.start();
 	expect(factory).toHaveBeenCalledWith(credentials, "ou_owner");
 	restart.disconnect();
+	expect(restart.canReply(source)).toBe(false);
+	await expect(restart.reply(source, "不应投递")).rejects.toThrow("尚未连接");
 	await reopened.emit("断开后不再进入主对话");
 	expect(receive).toHaveBeenCalledTimes(1);
 });

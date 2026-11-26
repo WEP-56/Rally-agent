@@ -48,6 +48,7 @@ export interface CoachOptions {
 	deliverIdea(render: (relayId: string) => string): void;
 	now?(): number;
 	random?(): number;
+	canRun?(): boolean;
 }
 
 interface Idea { title: string; evidence: string[]; why: string; question: string; prep: string | null }
@@ -90,6 +91,7 @@ export class Coach {
 
 	/** One scheduling decision. Safe to call at any time; overlapping calls share the active run. */
 	tick(): Promise<void> {
+		if (this.disposed || this.options.canRun?.() === false) return Promise.resolve();
 		if (this.running) return this.running;
 		this.interrupted = false;
 		return this.running = this.decide().catch(error => console.error("Rally coach failed", error)).finally(() => { this.running = undefined; });
@@ -191,9 +193,9 @@ export class Coach {
 		const runtime = await this.options.models.whenReady();
 		const model = this.options.models.resolve(selected.provider, selected.model);
 		if (!runtime || !model) throw new Error(`教练模型 ${selected.provider}/${selected.model} 不可用，请在设置 → 教练中重新选择`);
-		if (this.disposed || this.interrupted) throw new Error("Coach interrupted");
+		if (this.disposed || this.interrupted || this.options.canRun?.() === false) throw new Error("Coach interrupted");
 		const thinkingLevel = this.options.models.levelsFor(selected.provider, selected.model).includes(selected.thinkingLevel) ? selected.thinkingLevel : "off";
-		const { session } = await createRoleSession({ cwd, agentDir: this.options.agentDir, sessionManager: SessionManager.inMemory(cwd), modelRuntime: runtime, model, thinkingLevel, rolePrompt, tools: [], customTools });
+		const { session } = await createRoleSession({ cwd, agentDir: this.options.agentDir, sessionManager: SessionManager.inMemory(cwd), modelRuntime: runtime, model, thinkingLevel, rolePrompt, tools: [], customTools, canRun: () => !this.disposed && !this.interrupted && this.options.canRun?.() !== false });
 		this.session = session;
 		session.settingsManager.applyOverrides({ retry: { enabled: false } });
 		let limit = setTimeout(() => void session.abort(), RUN_LIMIT);

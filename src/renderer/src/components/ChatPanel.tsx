@@ -5,7 +5,7 @@ import { useAgentBrowsers } from "../agent-browser";
 import { useCredentials } from "../credentials";
 import { Critter } from "./brand";
 import { IM_SOURCE_LABELS, type ImSource } from "../../../shared/connections";
-import type { ChatActivity, ChatHeaderState } from "../../../shared/ipc";
+import type { ChatActivity, ChatHeaderState, ChatDelivery } from "../../../shared/ipc";
 import type { NotificationTarget } from "../../../shared/notifications";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Settings, Search, ArrowUp, PanelRightOpen, Paperclip, ListRestart, LoaderCircle, SquarePen, ShieldCheck, ChevronRight, Square, AtSign } from "lucide-react";
@@ -59,6 +59,20 @@ function taskSourceLabel(task: Task): string {
   return labels.size ? ` · 来自${[...labels].join("、")}` : "";
 }
 
+function DeliveryStatus({ id, delivery, act }: { id: string; delivery?: ChatDelivery; act: (operation: Promise<unknown>) => void }) {
+  if (!delivery || (delivery.status === "done" && (!delivery.reply || delivery.reply.status === "sent" || delivery.reply.status === "cancelled"))) return null;
+  const labels = { queued: "排队中", processing: "处理中", done: "已处理", failed: "处理未完成", cancelled: "已撤回" };
+  const replyFailed = delivery.status === "done" && delivery.reply?.status === "failed";
+  const text = delivery.status === "done" && delivery.reply ? ({ pending: "等待回传原聊天", sending: "正在回传原聊天", failed: "回传失败", sent: "已回传", cancelled: "已取消回传" })[delivery.reply.status] : labels[delivery.status];
+  return <div className="mt-1 flex flex-wrap items-center justify-end gap-x-2 gap-y-1 text-[11px] text-muted">
+    <span title={delivery.error ?? delivery.reply?.error}>{text}</span>
+    {(delivery.status === "queued" || delivery.status === "failed") && <button className="hover:text-fg" onClick={() => act(window.rally.chat.inbox({ action: "cancel", id }))}>撤回</button>}
+    {(delivery.status === "failed" || replyFailed) && <button className="text-accent hover:underline" onClick={() => act(window.rally.chat.inbox({ action: "retry", id }))}>{replyFailed ? "重发回复" : "重试"}</button>}
+    {delivery.status === "done" && (delivery.reply?.status === "pending" || replyFailed) && <button className="hover:text-fg" onClick={() => act(window.rally.chat.inbox({ action: "cancel", id }))}>取消回传</button>}
+    {(delivery.error || delivery.reply?.error) && <span className="w-full text-right">{delivery.error ?? delivery.reply?.error}</span>}
+  </div>;
+}
+
 function TaskCard({ task }: { task: Task }) {
   const { openTask } = useApp();
   return (
@@ -95,6 +109,8 @@ export function ChatPanel({
 	tasks,
 	questions = [],
 	busy,
+	inboxPaused,
+	modelReady,
 	onSend,
 	onStop,
 	onNewChat,
@@ -114,6 +130,8 @@ export function ChatPanel({
 	questions?: TaskQuestionView[];
 	tasks: Task[];
 	busy: boolean;
+	inboxPaused?: boolean;
+	modelReady?: boolean;
 	onSend: (t: string, attachments?: string[]) => void | Promise<void>;
 	onStop: () => void;
 	onNewChat: () => void;
@@ -141,6 +159,7 @@ export function ChatPanel({
 	const conversation = conversationItems(visibleMessages, questions, tasks, historyBefore, credentials.state.requests, browsers);
 	const latestGateId = conversation.findLast(item => item.role === "gate")?.id;
 	const activityLabel = header.activity ? ACTIVITY_LABEL[header.activity] : "待命";
+	const queuedCount = messages.filter(message => message.delivery?.status === "queued").length;
 
   const [mentions, setMentions] = useState<TaskMention[]>([]);
   const [picker, setPicker] = useState<MentionQuery | null>(null);
@@ -306,6 +325,7 @@ export function ChatPanel({
             ) : m.role === "user" ? (
               <div key={m.id} className="animate-rise">
                 <UserBubble text={m.text} source={m.source} attachments={m.attachments} tasks={tasks} />
+                <DeliveryStatus id={m.id} delivery={m.delivery} act={action} />
               </div>
             ) : (
               <div key={m.id} className="animate-rise relative ml-8 min-w-0 max-w-[88%] self-start rounded-[22px] rounded-tl-md bg-panel p-4 text-sm leading-relaxed shadow-soft">
@@ -401,12 +421,14 @@ export function ChatPanel({
               {autoApprove ? "自动批准" : "需要批准"}
             </button>
             <div className="flex-1" />
-            {busy ? (
-              <button onClick={onStop} className="flex h-8 w-8 items-center justify-center rounded-full bg-fg text-panel transition-transform active:scale-95">
+            {busy && (
+              <button title="停止回复并暂停队列" onClick={onStop} className="flex h-8 w-8 items-center justify-center rounded-full bg-fg text-panel transition-transform active:scale-95">
                 <Square size={11} fill="currentColor" />
               </button>
-            ) : (
+            )}
+            {(!busy || draft.trim() || mentions.length > 0 || attachments.items.length > 0) && (
               <button
+                title={busy ? "加入消息队列" : "发送消息"}
                 onClick={send}
                 disabled={sendPending || !attachments.ready || (!draft.trim() && !mentions.length && !attachments.items.length)}
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-accent-fg shadow-soft transition-all active:scale-95 disabled:bg-press disabled:text-faint disabled:shadow-none"
@@ -415,6 +437,10 @@ export function ChatPanel({
               </button>
             )}
           </div>
+          {(queuedCount > 0 || inboxPaused) && <div className="flex items-center justify-between gap-2 px-3 pt-1 text-[11px] text-muted" role="status">
+            <span>{inboxPaused ? "消息队列已暂停" : modelReady === false ? "等待配置主 Agent 模型" : "按顺序处理"}{queuedCount > 0 ? ` · ${queuedCount} 条待处理` : ""}</span>
+            {inboxPaused && <button className="text-accent hover:underline" onClick={() => action(window.rally.chat.inbox({ action: "resume" }))}>继续队列</button>}
+          </div>}
         </div>
       </div>
     </div>

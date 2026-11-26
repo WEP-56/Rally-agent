@@ -100,6 +100,21 @@ export class QqBotConnection {
 
 	dispose(): void { this.disposed = true; this.stop(); }
 
+	canReply(source: QqBotSource): boolean {
+		return !this.disposed && this.status === "connected" && this.saved?.appId === source.appId && this.saved.owner === source.chatId;
+	}
+
+	async reply(source: QqBotSource, text: string): Promise<void> {
+		if (!this.canReply(source) || !this.client) throw Error("原 QQ 账号尚未连接，回复保留在收件箱");
+		try {
+			await this.client.sendText({ scope: "c2c", targetId: source.chatId, msgId: source.messageId }, replyText(text));
+			this.error = undefined;
+		} catch {
+			this.error = "QQ 回复失败，可能超过平台回复时限，请在 Rally 查看结果。";
+			throw Error(this.error);
+		}
+	}
+
 	private stop(): void {
 		const client = this.client;
 		this.client = undefined;
@@ -153,7 +168,7 @@ export class QqBotConnection {
 		try {
 			const result = await this.receive(text, { platform: "qq", appId: saved.appId, chatId: message.senderId, messageId: message.messageId });
 			if (result) await reply(result);
-		} catch { await reply("Rally 未能处理这条消息，请在桌面查看主对话。"); }
+		} catch { this.seen.delete(key); await reply("Rally 未能保存这条消息，请重新发送或在桌面查看主对话。"); }
 	}
 }
 

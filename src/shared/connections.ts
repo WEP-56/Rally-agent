@@ -8,6 +8,8 @@ export interface ConnectorToolSettings {
 }
 
 interface MessageSource {
+	/** Bound sender for safe reply delivery after reconnection or restart. */
+	senderId?: string;
 	appId: string;
 	chatId: string;
 	messageId: string;

@@ -104,7 +104,8 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		const reply = supervisor.main.sendFromIm("请读取项目", source);
 		await Promise.race([started, reply.then(text => { throw new Error(`Feishu ended early: ${text}`); })]);
 		const laterDesktop = supervisor.main.send("飞书回复后再处理这条");
-		expect(supervisor.main.state().messages.some(m => m.text === "飞书回复后再处理这条")).toBe(false);
+		await laterDesktop;
+		expect(supervisor.main.state().messages.find(m => m.text === "飞书回复后再处理这条")?.delivery?.status).toBe("queued");
 		releaseReply();
 		await expect(reply).resolves.toBe("仅回飞书");
 		await laterDesktop;
@@ -170,6 +171,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		await supervisor.main.send("桌面历史");
 		await vi.waitFor(() => expect(supervisor.main.state().messages.some(m => m.text === "桌面回复" && !m.streaming) && !supervisor.main.isBusy()).toBe(true));
 		await receive("请读取项目", "request");
+		await vi.waitFor(() => expect(sent).toHaveBeenCalledTimes(2));
 		await receive("重复投递", "request");
 		const source = { platform: "qq", appId: "12345", chatId: "owner", messageId: "request" };
 		expect(sent).toHaveBeenCalledTimes(2);
@@ -178,10 +180,11 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		expect(supervisor.store.list()[0]?.quotes[0]).toMatchObject({ text: "请读取项目", source });
 
 		const inFlight = Promise.resolve(receive("另一条 QQ 消息", "pending"));
-		await Promise.race([started.promise, inFlight.then(() => { throw new Error("QQ reply finished before disconnect"); })]);
+		await inFlight;
+		await started.promise;
 		supervisor.qqBot.disconnect();
 		pending.resolve();
-		await inFlight;
+		await vi.waitFor(() => expect(supervisor.main.state().messages.some(m => m.text === "断开后的回复" && !m.streaming)).toBe(true));
 		await receive("断开后迟到的事件", "late");
 		expect(sent).toHaveBeenCalledTimes(2);
 		expect(supervisor.main.state().messages.some(m => m.text === "断开后迟到的事件")).toBe(false);
@@ -1167,7 +1170,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		}
 		await Promise.all([starting, closing]);
 		const before = restored.main.state();
-		await restored.main.send("Must not start a new model turn after shutdown");
+		await expect(restored.main.send("Must not start a new model turn after shutdown")).rejects.toThrow("正在关闭");
 		expect(restored.main.state()).toEqual(before);
 		expect(before.model).toBeNull();
 		expect(harness.faux.state.callCount).toBe(0);

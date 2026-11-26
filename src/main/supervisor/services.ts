@@ -111,7 +111,7 @@ export class ServiceManager {
 		return { status: record.status, ready: record.ready, port: record.port, url: record.url, exitCode: record.exitCode, error: record.error,
 			output: output.replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n").slice(-tail).join("\n"), logPath: this.logPath(id) };
 	}
-	stop(id: string, source: "user" | "worker", taskId?: string): Promise<{ stopped: true }> {
+	stop(id: string, source: "user" | "worker" | "inactivity", taskId?: string): Promise<{ stopped: true }> {
 		const service = this.require(id, source === "worker" ? taskId ?? "" : undefined);
 		const pending = this.stopping.get(id); if (pending) return pending;
 		if (service.status !== "running") return Promise.resolve({ stopped: true });

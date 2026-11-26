@@ -18,6 +18,7 @@ export { ensureTool } from "./utils/tools-manager.ts";
 export type { SearchExecution, SearchProcess } from "./core/tools/search-process.ts";
 export {
 	AgentSession,
+	markRuntimeStreamFunction,
 	type AgentSessionConfig,
 	type AgentSessionEvent,
 	type AgentSessionEventListener,

@@ -15,6 +15,10 @@ export class NetworkRunner {
 		void pending.finally(() => this.active.delete(pending)).catch(() => {});
 		return pending;
 	}
+	interrupt(): Promise<void> {
+		for (const controller of this.active.values()) controller.abort();
+		return Promise.allSettled(this.active.keys()).then(() => {});
+	}
 	dispose(): Promise<void> {
 		if (this.closing) return this.closing;
 		this.disposed = true;

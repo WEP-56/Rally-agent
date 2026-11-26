@@ -1,27 +1,21 @@
 import { AgentAvatar } from "./AgentAvatar";
-import { Critter, OrbitRing, Spark } from "./brand";
+import { Critter, OrbitRing } from "./brand";
 import { Pencil } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { Task, TaskStatus } from "../data";
 import { useApp } from "../store";
-import { useModels } from "../models";
 import { cn } from "../utils/cn";
 import { clock, StatusBadge, STATUS_META, timeAgo } from "./status";
 import { Segmented } from "./ui";
-import { LocalServices } from "./LocalServices";
 import { ArchiveTaskButton } from "./ArchiveTaskButton";
 import { SchedulesSection } from "./SchedulesSection";
 import { ScheduledWorkerBadge } from "./ScheduledWorkerBadge";
 
 function BusinessCard() {
- const { config, openSettings } = useApp(); const { state: models } = useModels();
- const modelName = (role: "active" | "worker") => models?.available.find(m => m.provider === models[role]?.provider && m.id === models[role]?.model)?.name ?? "未选择";
+ const { config, openSettings } = useApp();
  return <div className="flex flex-col items-center pt-1 text-center">
   <div className="relative flex h-[132px] w-full items-center justify-center"><OrbitRing size={330} /><div className="animate-float relative"><AgentAvatar size={100} glow className="rounded-[26px]" /><button title="编辑身份" onClick={() => openSettings("general")} className="glass-strong absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full text-fg/70 hover:text-fg"><Pencil size={12} /></button></div></div>
   <h1 className="font-display mt-1 text-[36px] font-semibold leading-none tracking-tight">{config.name}</h1>
-  <p className="mt-2.5 text-[13px] text-fg/55">你的个人助手 · 本地运行</p>
-  <div className="mt-4 flex max-w-full flex-wrap justify-center gap-1.5">{[["主", modelName("active")], ["任务", modelName("worker")], ["记忆", config.memoryPath]].map(([k,v]) => <span key={k} title={v} className="glass flex h-7 max-w-[280px] items-center gap-2 rounded-full px-3 text-[11.5px] text-fg/70"><span className="shrink-0 text-[10px] font-semibold text-faint">{k}</span><span className="truncate">{v}</span></span>)}</div>
-  <p className="mt-4 max-w-[380px] text-[13px] italic leading-relaxed text-fg/55">“{config.personality}”</p>
  </div>;
 }
 
@@ -37,7 +31,7 @@ const FILTERS: { v: Filter; l: string }[] = [
 ];
 
 export function Workstation({ tasks }: { tasks: Task[] }) {
-	const { openTask, openTab } = useApp();
+	const { openTask } = useApp();
   const [order, setOrder] = useState<"desc" | "asc">("desc");
   const [filter, setFilter] = useState<Filter>("all");
 
@@ -46,30 +40,10 @@ export function Workstation({ tasks }: { tasks: Task[] }) {
     return [...l].sort((a, b) => (order === "desc" ? b.createdAt - a.createdAt : a.createdAt - b.createdAt));
   }, [tasks, order, filter]);
 
-  const visible = tasks.filter(t => t.archivedAt === undefined);
-  const stat = (s: TaskStatus) => visible.filter((t) => t.status === s).length;
-
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-[620px] px-5 pb-24 pt-2">
-        <BusinessCard /><div className="glass mt-6 flex items-center gap-3 rounded-[22px] p-3.5 pl-4"><Spark size={17} className="shrink-0 text-accent" /><p className="min-w-0 flex-1 text-[13.5px] leading-relaxed">现在 {stat("running")} 件事在跑，{visible.filter(t => NEEDS_ATTENTION.includes(t.status)).length} 件等你处理。</p>{visible.some(t => NEEDS_ATTENTION.includes(t.status)) && <button onClick={() => setFilter("attention")} className="shrink-0 rounded-full bg-ink px-4 py-2 text-xs font-medium text-white dark:bg-white dark:text-ink">去处理</button>}</div>
-
-
-        <div className="mt-3 grid grid-cols-3 gap-3">
-          {[
-
-            { k: "进行中", v: stat("running"), filter: "running" as const },
-            { k: "需处理", v: visible.filter((task) => NEEDS_ATTENTION.includes(task.status)).length, filter: "attention" as const },
-            { k: "已完成", v: stat("done"), filter: "done" as const },
-          ].map((s) => (
-            <button key={s.k} onClick={() => setFilter(s.filter)} className={cn("glass rounded-[20px] px-4 py-3 text-left transition-transform hover:-translate-y-px", filter === s.filter && "ring-2 ring-accent/40")}>
-              <div className="font-display text-[30px] font-semibold tabular-nums leading-none">{s.v}</div>
-              <div className="mt-2 flex items-center gap-1.5 text-[11.5px] text-muted"><span className={cn("h-1.5 w-1.5 rounded-full", s.k === "进行中" ? "bg-accent" : s.k === "需处理" ? "bg-warn" : "bg-ok")} />{s.k}</div>
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-3"><LocalServices onOpen={url => openTab("browser", { url })} /></div>
+        <BusinessCard />
         <div className="mt-8 flex items-center justify-between">
           <div className="font-display text-[19px] font-semibold">
             任务 <span className="ml-1 font-normal text-faint">{list.length}</span>

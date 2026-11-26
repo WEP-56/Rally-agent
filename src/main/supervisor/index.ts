@@ -55,6 +55,8 @@ import { ProcessRegistry } from "./process-registry.ts";
 import { JobManager } from "./jobs.ts";
 import { ServiceManager } from "./services.ts";
 import type { ServicesState } from "../../shared/services.ts";
+import { InactivityProtection } from "./inactivity.ts";
+import { createWorldTools } from "./world-tools.ts";
 
 export interface SupervisorOptions {
 	/** Arm the application's independent shutdown deadline before startup cleanup. */
@@ -70,6 +72,7 @@ export interface SupervisorOptions {
 	watchdogNow?: () => number;
 	coachNow?: () => number;
 	coachRandom?: () => number;
+	inactivityNow?: () => number;
 	emitServices?(state: ServicesState): void;
 	emitChat(event: ChatEvent): void;
 	emitTask(event: TaskEvent): void;
@@ -111,6 +114,7 @@ export class Supervisor {
 	readonly network = new NetworkRunner();
 	readonly jobs: JobManager;
 	readonly services: ServiceManager;
+	readonly inactivity: InactivityProtection;
 
 	private readonly options: SupervisorOptions;
 	private readonly stateLock: StateDirectoryLock;
@@ -128,7 +132,13 @@ export class Supervisor {
 		let snapshot: TaskSnapshot | undefined;
 		try {
 			this.events = events = new EventLog(paths.eventsFile, options.eventSegmentBytes, () => this.stateLock.assertHeld());
+			this.inactivity = new InactivityProtection(this.events, {
+				now: options.inactivityNow,
+				pause: () => this.pauseActivities(),
+				changed: () => { if (this.main && !this.disposed) options.emitChat({ type: "snapshot", state: this.main.state() }); },
+			});
 			this.processes = new ProcessRegistry(paths.stateDir, {
+				canRun: owner => owner.kind === "config" || this.inactivity.canRun(),
 				assertWritable: () => this.events.assertWritable(),
 				onStopped: (entry, reason, result) => this.events.append("process_stopped", { ...entry, reason, result }),
 			});
@@ -137,8 +147,8 @@ export class Supervisor {
 			this.workspace = new WorkspaceStore(paths.home, paths.workspaceDir);
 			this.identity = new IdentityStore(paths.home);
 			this.roleWorkers = new RoleWorkerStore(paths.agentDir);
-			this.feishu = new FeishuConnection(paths.home, options.credentialVault, (text, source) => this.main.sendFromIm(text, source));
-			this.qqBot = new QqBotConnection(paths.home, options.credentialVault, (text, source) => this.main.sendFromIm(text, source), options.qqBotFactory);
+			this.feishu = new FeishuConnection(paths.home, options.credentialVault, (text, source) => this.main.receiveFromIm(text, source));
+			this.qqBot = new QqBotConnection(paths.home, options.credentialVault, (text, source) => this.main.receiveFromIm(text, source), options.qqBotFactory);
 			this.qqMail = new QqMailConnection(paths.home, options.credentialVault, options.qqMailTransport);
 			const catalog = new CapabilityCatalog(paths.agentDir, () => [paths.mainCwd, this.workspace.base(), ...this.workspace.state().recentProjects]);
 			const approval = this.events.ofKind("approval_mode").at(-1);
@@ -170,9 +180,14 @@ export class Supervisor {
 			this.gates = new GateService({ store: this.store, audit: this.audit, events: this.events,
 				quote: (ref) => this.main.quote(ref), requested: () => this.relay.captureSources(),
 				notice: () => this.relay.captureSources() });
-			this.schedules = new ScheduledTasks(this.events, this.store, () => this.autoApprove, () => this.scheduler.tick());
+			this.schedules = new ScheduledTasks(this.events, this.store, () => this.autoApprove, () => this.scheduler.tick(), options.inactivityNow, () => this.inactivity.canRun());
 			const capabilities = async () => (await catalog.context()) + this.roleWorkers.context() + (this.feishu.toolsEnabled() ? "\nFeishu worker MCP (rally_feishu): read shared documents and wiki nodes, search shared Bitable records. Only workers may call it." : "") + (this.qqMail.available() ? "\nQQ Mail worker tools: search/read the inbox, save attachments, and send/reply. Rally enforces per-tool permissions configured in Connections; sending requires user confirmation by default. Only workers may call them." : "");
 			this.main = new MainAgent(paths, this.events, options.emitChat, {
+				canReply: source => source.platform === "feishu" ? this.feishu.canReply(source) : this.qqBot.canReply(source),
+				reply: (source, text) => source.platform === "feishu" ? this.feishu.reply(source, text) : this.qqBot.reply(source, text),
+				canRun: () => this.inactivity.canRun(),
+				inactivity: () => this.inactivity.state(),
+				beforeUserInput: async () => { await this.inactivity.userMessage(); },
 				resources: () => this.resources,
 				models: this.models,
 				toolProviders: this.toolProviders,
@@ -181,13 +196,14 @@ export class Supervisor {
 				taskState: () => rallyState(this.store, this.workers.streamingCount(), this.scheduler.limit, this.autoApprove),
 				scheduleState: () => this.schedules.context(),
 				capabilities,
-				customTools: [createCredentialRequestTool(this.websiteAccounts, this.store), ...createScheduleTools(() => this.schedules, ref => this.main.quote(ref)), createChatSearchTool((params) => this.main.search(params)), ...createMemoryTools(this.memory, () => !this.disposed), ...createRouterReadTools(() => this.workspace.base(), this.processes, () => catalog.skillPaths), createGitInspectTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGitRunner(this.processes)), createGithubReadTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGithubRunner(this.processes)), createFetchPageTool(this.network), createWebSearchTool(this.toolProviders), ...createMainTaskTools(this.host()), ...createGateTools(this.gates, this.store)],
+				customTools: [createCredentialRequestTool(this.websiteAccounts, this.store), ...createScheduleTools(() => this.schedules, ref => this.main.quote(ref), { recentTurns: count => this.main.recentContext(count), memory: file => this.memory.read(file) }), createChatSearchTool((params) => this.main.search(params)), ...createMemoryTools(this.memory, () => !this.disposed), ...createRouterReadTools(() => this.workspace.base(), this.processes, () => catalog.skillPaths), createGitInspectTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGitRunner(this.processes)), createGithubReadTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGithubRunner(this.processes)), createFetchPageTool(this.network), ...createWorldTools(this.network), createWebSearchTool(this.toolProviders), ...createMainTaskTools(this.host()), ...createGateTools(this.gates, this.store)],
 				memory: () => this.memory.context(),
 				identity: () => this.identity.context(),
 				workspace: () => this.workspace.state(),
 				onRelayRead: (ids) => this.relay.consumed(ids),
-				onAvailable: () => this.relay?.available(),
+				onAvailable: () => { this.relay?.available(); this.scheduler?.tick(); },
 				beforeInput: async () => { await this.coach?.interrupt(); },
+				beforeUserTurn: () => this.relay.prepareUserTurn(),
 				onSettled: (aborted) => {
 					if (this.disposed) return;
 					this.gates.fallback(this.relay.takeDeliveredGates());
@@ -198,12 +214,14 @@ export class Supervisor {
 			this.relay = new Relay(this.main, this.events, this.store);
 			this.coachSettings = new CoachStore(paths.home);
 			this.coach = new Coach({
+				canRun: () => this.inactivity.canRun(),
 				settings: () => this.coachSettings.state(), models: this.models, memory: this.memory, events: this.events, audit: this.audit, processes: this.processes, agentDir: paths.agentDir,
-				messages: () => this.main.state().messages, mainBusy: () => this.main.isBusy() || !this.main.canReceiveRelay(),
+				messages: () => this.main.state().messages.filter(line => line.delivery?.status !== "queued" && line.delivery?.status !== "cancelled"), mainBusy: () => this.main.isBusy() || !this.main.canReceiveRelay(),
 				tasks: () => this.store.list(), schedules: () => this.schedules.list(), capabilities,
 				deliverIdea: render => this.relay.idea(render), now: options.coachNow, random: options.coachRandom,
 			});
 			this.workers = new WorkerManager({
+				canRun: () => this.inactivity.canRun(),
 				agentBrowser: this.agentBrowser,
 				resources: () => this.resources,
 				network: this.network,
@@ -226,6 +244,7 @@ export class Supervisor {
 				onBusyChange: () => { if (!this.disposed) this.scheduler.tick(); },
 			});
 			this.scheduler = new Scheduler({
+				canRun: () => this.inactivity.canRun(),
 				store: this.store,
 				events: this.events,
 				limit: options.limit,
@@ -256,9 +275,11 @@ export class Supervisor {
 			this.services.recover();
 			await this.main.start();
 			if (this.disposed) return;
+			this.recoverInterrupted();
+			await this.inactivity.start();
+			if (this.disposed) return;
 			if (this.events.warnings.length) this.main.addSystemLine(`事件恢复跳过 ${this.events.warnings.length} 条损坏记录，原文件已保留。${this.events.warnings.slice(0, 3).join("；")}`);
 			if (this.snapshot.warning) this.main.addSystemLine(this.snapshot.warning);
-			this.recoverInterrupted();
 			this.relay.start();
 			for (const request of this.websiteAccounts.state().requests) {
 				if (request.status !== "pending") this.relay.enqueue({ kind: "credential_result", request }, [`credential:${request.id}:${request.status}`]);
@@ -267,6 +288,7 @@ export class Supervisor {
 			this.coach.start();
 			this.feishu.start();
 			this.qqBot.start();
+			this.main.available();
 			this.scheduler.tick();
 			if (!this.events.warnings.length) {
 				this.resourceTimer = setInterval(() => void this.maintainResources(), 60 * 60 * 1000);
@@ -297,6 +319,7 @@ export class Supervisor {
 		}
 		// allSettled prevents an early rejection from releasing the lock while another session still closes.
 		const results = await Promise.allSettled([
+			this.inactivity.dispose(),
 			Promise.resolve().then(() => this.agentBrowser.dispose()),
 			pendingRequests,
 			this.resourceMaintenance,
@@ -322,6 +345,25 @@ export class Supervisor {
 		return this.resourceMaintenance ??= this.resources.sweep().catch(error => {
 			console.error("Resource maintenance failed", error);
 		}).finally(() => { this.resourceMaintenance = undefined; });
+	}
+
+	private async pauseActivities(): Promise<void> {
+		const tasks = this.store.list();
+		for (const task of tasks) this.store.setInactivityPause(task.id, this.inactivity.state().pausedAt);
+		// Set reasons before aborting the sessions so job/service cancellation remains explainable.
+		const stopping = [
+			...tasks.map(task => this.jobs.killTask(task.id, "inactivity")),
+			...this.services.state().services.filter(service => service.status === "running").map(service => this.services.stop(service.id, "inactivity")),
+			this.main.pause(),
+			this.coach.interrupt(),
+			this.workers.pause(),
+			this.network.interrupt(),
+			this.processes.interrupt(),
+		];
+		const results = await Promise.allSettled(stopping);
+		const errors = results.flatMap(result => result.status === "rejected" ? [result.reason] : []);
+		if (errors.length) throw new AggregateError(errors, "闲置保护已阻止新活动，但部分运行未能完成停止");
+		if (!this.disposed) this.options.emitChat({ type: "snapshot", state: this.main.state() });
 	}
 
 	/** The user opened or focused a client. Coaches use it to tell presence from absence. */
@@ -390,6 +432,11 @@ export class Supervisor {
 		if (this.disposed) throw new TaskErrorLike("QUESTION_STALE", "Rally 正在关闭");
 		this.store.answerAttention(taskId, questionId, option, "user", []);
 		this.deliverInput(taskId, option);
+		void this.inactivity.userMessage().then(() => {
+			if (this.disposed) return;
+			this.scheduler.tick();
+			this.relay.available();
+		}).catch(error => { if (!this.disposed) this.main.addSystemLine(`闲置保护恢复失败：${String(error)}`); });
 		return this.board();
 	}
 
@@ -415,13 +462,13 @@ export class Supervisor {
 	}
 
 	private async startRun(task: Task, run: TaskRun): Promise<void> {
-		if (this.disposed) return;
+		if (this.disposed || !this.inactivity.canRun()) return;
 		try {
 			const warnings = this.store.warnOverlaps(task.id, "start");
 			if (warnings.length) this.main.addSystemLine(`${task.id} 写范围重叠：${warnings.map((item) => `${item.withTaskId} · ${item.paths.join("、")}`).join("；")}（仍会启动）`);
 			await this.workers.start(task, run);
 		} catch (error) {
-			if (this.disposed || task.ended || run.endedAt) return;
+			if (this.disposed || !this.inactivity.canRun() || task.ended || run.endedAt) return;
 			const message = error instanceof Error ? error.message : String(error);
 			this.store.report(task.id, run.id, "failed", message);
 			this.scheduler.tick();
@@ -450,6 +497,7 @@ export class Supervisor {
 			if (task.ended) continue;
 			const open = task.runs.find((run) => !run.endedAt);
 			if (!open) continue;
+			if (open.inactivityPausedAt !== undefined) continue;
 			this.store.endRunInterrupted(task.id, "interrupted");
 			interrupted.push(this.store.get(task.id) ?? task);
 		}
@@ -463,6 +511,7 @@ export class Supervisor {
 			get workspaceDir() { return workspace.state().defaultWorkspace; },
 			autoApprove: () => this.autoApprove,
 			quote: (ref: QuoteRef) => this.main.quote(ref),
+			contextSources: { recentTurns: count => this.main.recentContext(count), memory: file => this.memory.read(file) },
 			tick: () => this.scheduler.tick(),
 			deliverSteer: (taskId: string, text: string) => {
 				return this.deliverInput(taskId, text);

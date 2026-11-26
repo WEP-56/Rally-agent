@@ -1,4 +1,4 @@
-import type { Quote, TaskDisplayStatus, TaskMode } from "./task.ts";
+import type { Quote, TaskContext, TaskDisplayStatus, TaskMode } from "./task.ts";
 
 /** Local window, start inclusive / end exclusive; weekdays belong to its opening day. */
 export interface ScheduleWindow {
@@ -19,6 +19,7 @@ export interface ScheduledTask {
 	cwd: string;
 	mode: TaskMode;
 	quotes: Quote[];
+	context?: TaskContext[];
 	timing: ScheduleTiming;
 	enabled: boolean;
 	nextAt: number;

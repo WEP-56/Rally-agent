@@ -39,6 +39,9 @@ export class MemoryStore {
 		this.changed(); return path;
 	}
 
+	/** Read a notebook file when worker dispatch explicitly enables memory sharing. */
+	read(file: MemoryFileKey): string { return this.snapshot(fileKey(file)).text; }
+
 	/** Called for each model request, including tool loops and relays; never persisted in Pi. */
 	context(): string {
 		try {

@@ -118,6 +118,21 @@ export class FeishuConnection {
 
 	toolsEnabled(): boolean { return !this.disposed && Boolean(this.saved?.tools && this.saved.owner); }
 
+	canReply(source: FeishuSource): boolean {
+		return !this.disposed && this.saved?.appId === source.appId && this.saved.owner === source.senderId && this.state().status === "connected";
+	}
+
+	async reply(source: FeishuSource, text: string): Promise<void> {
+		if (!this.canReply(source) || !this.channel) throw Error("原飞书账号尚未连接，回复保留在收件箱");
+		try {
+			await this.channel.send(source.chatId, { text }, { replyTo: source.messageId });
+			this.error = undefined;
+		} catch {
+			this.error = "飞书回复发送失败，请检查机器人发消息权限。";
+			throw Error(this.error);
+		}
+	}
+
 	openTools(close: () => Promise<void>): { credentials: FeishuCredentials; release: () => void } {
 		if (!this.toolsEnabled()) throw new Error("飞书工具未授权。");
 		const credentials = this.credentials();
@@ -185,7 +200,7 @@ export class FeishuConnection {
 		this.lastMessageAt = Date.now();
 		if (text.length > 16_000) { await reply("这条消息太长，请拆成几条发送。"); return; }
 		try {
-			const result = await this.receive(text, { platform: "feishu", appId: this.saved.appId, chatId: message.chatId, messageId: message.messageId });
+			const result = await this.receive(text, { platform: "feishu", appId: this.saved.appId, chatId: message.chatId, messageId: message.messageId, senderId: message.senderId });
 			if (result) await reply(result);
 		} catch { await reply("Rally 未能处理这条消息，请在桌面查看主对话。"); }
 	}

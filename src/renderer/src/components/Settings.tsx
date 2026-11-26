@@ -28,24 +28,41 @@ function Github({ size = 14 }: { size?: number }) {
   );
 }
 
-export const SECTIONS = [
-  { id: "website-accounts", label: "网站账号", icon: UserRound, desc: "管理 Agent 可使用的加密账号" },
-  { id:"connection", label:"运行模式", icon:Monitor, desc:"本地运行与云端连接" },
-  { id: "general", label: "身份", icon: UserRound, desc: "名称、性格与工作方式" },
-  { id: "role-workers", label: "角色 Workers", icon: Users, desc: "管理可复用的任务 worker 角色" },
-  { id: "workspace", label: "项目与工作区", icon: FolderInput, desc: "默认工作区、最近项目与项目信任" },
-  { id: "archive", label: "归档", icon: Archive, desc: "查看、撤销归档或彻底删除任务" },
-  { id: "coach", label: "教练", icon: Brain, desc: "静默整理记忆，发现值得聊的点子" },
-  { id: "memory", label: "记忆", icon: Brain, desc: "长期记忆的存储位置与管理" },
-  { id: "providers", label: "供应商", icon: Server, desc: "供应商、协议、模型与元数据（明文存于 ~/.rally）" },
-  { id: "tool-providers", label: "其它提供商", icon: Blocks, desc: "图像生成模型与网络搜索服务" },
-  { id: "mcp", label: "MCP 服务器", icon: Plug, desc: "通过 Model Context Protocol 扩展工具" },
-  { id: "skills", label: "Skills", icon: Wand2, desc: "可复用的能力包，按需加载" },
-  { id: "appearance", label: "外观", icon: Palette, desc: "主题、强调色与字号" },
-  { id: "desktop", label: "桌面行为", icon: Monitor, desc: "开机自启、关闭窗口与托盘驻留" },
-  { id: "notifications", label: "通知", icon: Bell, desc: "窗口在后台时的任务提醒" },
-  { id: "about", label: "关于", icon: Info, desc: "版本信息与更新" },
+const SETTING_GROUPS = [
+  {
+    id: "assistant", label: "个人助手", sections: [
+      { id: "general", label: "身份", icon: UserRound, desc: "名称、性格与工作方式" },
+      { id: "memory", label: "记忆", icon: Brain, desc: "长期记忆的存储位置与管理" },
+      { id: "coach", label: "教练", icon: Brain, desc: "静默整理记忆，发现值得聊的点子" },
+    ],
+  },
+  {
+    id: "capabilities", label: "模型与能力", sections: [
+      { id: "providers", label: "供应商", icon: Server, desc: "供应商、协议、模型与元数据（明文存于 ~/.rally）" },
+      { id: "tool-providers", label: "其它提供商", icon: Blocks, desc: "图像生成模型与网络搜索服务" },
+      { id: "role-workers", label: "角色 Workers", icon: Users, desc: "管理可复用的任务 worker 角色" },
+      { id: "skills", label: "Skills", icon: Wand2, desc: "可复用的能力包，按需加载" },
+      { id: "mcp", label: "MCP 服务器", icon: Plug, desc: "通过 Model Context Protocol 扩展工具" },
+    ],
+  },
+  {
+    id: "work", label: "工作与账号", sections: [
+      { id: "workspace", label: "项目与工作区", icon: FolderInput, desc: "默认工作区、最近项目与项目信任" },
+      { id: "website-accounts", label: "网站账号", icon: UserRound, desc: "管理 Agent 可使用的加密账号" },
+      { id: "archive", label: "归档", icon: Archive, desc: "查看、撤销归档或彻底删除任务" },
+    ],
+  },
+  {
+    id: "app", label: "应用", sections: [
+      { id: "appearance", label: "外观", icon: Palette, desc: "主题、强调色与字号" },
+      { id: "notifications", label: "通知", icon: Bell, desc: "窗口在后台时的任务提醒" },
+      { id: "desktop", label: "桌面行为", icon: Monitor, desc: "开机自启、关闭窗口与托盘驻留" },
+      { id: "connection", label: "运行模式", icon: Monitor, desc: "本地运行与云端连接" },
+      { id: "about", label: "关于", icon: Info, desc: "版本信息与更新" },
+    ],
+  },
 ];
+export const SECTIONS = SETTING_GROUPS.flatMap(group => group.sections);
 
 function Group({ title, children, action }: { title?: string; children: React.ReactNode; action?: React.ReactNode }) {
   return (
@@ -214,7 +231,11 @@ export function Settings({ section, setSection, onBack, tasks }: { section: stri
   const { config } = useApp();
   const [detail,setDetail]=useState(section !== "general");
   useEffect(()=>{const back=(e:Event)=>{if(detail&&matchMedia("(max-width:767px)").matches){setDetail(false);e.preventDefault();e.stopImmediatePropagation();}};window.addEventListener("rally-back",back,true);return()=>window.removeEventListener("rally-back",back,true);},[detail]);
-  const cur = SECTIONS.find((s) => s.id === (section === "trust" ? "workspace" : section)) || SECTIONS[0];
+  const groups = SETTING_GROUPS.map(group => ({
+    ...group,
+    sections: group.sections.filter(s => (window.runtime.mode !== "cloud" || s.id !== "notifications") && (window.runtime.platform !== "android" || s.id !== "desktop")),
+  })).filter(group => group.sections.length > 0);
+  const cur = groups.flatMap(group => group.sections).find(s => s.id === (section === "trust" ? "workspace" : section)) || SECTIONS[0];
   return (
     <div data-detail={detail} className="rally-settings animate-fade flex h-full w-full flex-col gap-2.5 p-2.5 pl-0 md:flex-row md:gap-0 md:pl-2.5">
       <aside className="flex min-h-0 shrink-0 flex-col md:w-[290px] md:pr-2.5">
@@ -222,22 +243,29 @@ export function Settings({ section, setSection, onBack, tasks }: { section: stri
           <RoundButton title="返回 (Esc)" aria-label="返回应用" onClick={onBack}><ArrowLeft size={17} strokeWidth={1.9} /></RoundButton>
           <div className="min-w-0"><div className="font-display text-[22px] font-semibold leading-none">设置</div><div className="mt-1 truncate text-xs text-faint">{config.name}</div></div>
         </div>
-        <nav className="no-scrollbar flex gap-1 overflow-x-auto px-2 md:flex-1 md:flex-col md:overflow-y-auto md:overflow-x-visible md:px-0">
-          {SECTIONS.filter(s => (window.runtime.mode !== "cloud" || s.id !== "notifications") && (window.runtime.platform !== "android" || s.id !== "desktop")).map((s) => (
-            <button
-              key={s.id}
-              aria-label={s.label}
-              aria-current={cur.id === s.id ? "page" : undefined}
-              onClick={() => {setSection(s.id);setDetail(true)}}
-              className={cn(
-                "group relative flex shrink-0 items-center gap-3 rounded-2xl py-2.5 pl-4 pr-3 text-left transition-all",
-                cur.id === s.id ? "bg-panel shadow-card ring-1 ring-line" : "hover:bg-fg/[0.045]",
-              )}
-            >
-              {cur.id === s.id && <span className="absolute -left-px top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-accent" />}
-              <s.icon size={17} strokeWidth={1.7} className={cn("shrink-0 transition-colors", cur.id === s.id ? "text-accent" : "text-faint group-hover:text-muted")} />
-              <span className="min-w-0 flex-1 pr-1"><span className="block whitespace-nowrap text-[14px] font-medium md:truncate">{s.label}</span><span className="hidden truncate text-[11.5px] text-faint md:block">{s.desc}</span></span>
-            </button>
+        <nav aria-label="设置分类" className="no-scrollbar min-h-0 flex-1 space-y-5 overflow-y-auto px-2 pb-4 md:px-0">
+          {groups.map(group => (
+            <section key={group.id} aria-labelledby={`settings-group-${group.id}`}>
+              <h2 id={`settings-group-${group.id}`} className="mb-1.5 px-4 text-[11px] font-medium tracking-wide text-faint">{group.label}</h2>
+              <div className="flex flex-col gap-0.5">
+                {group.sections.map(s => (
+                  <button
+                    key={s.id}
+                    aria-label={s.label}
+                    aria-current={cur.id === s.id ? "page" : undefined}
+                    onClick={() => {setSection(s.id);setDetail(true)}}
+                    className={cn(
+                      "group relative flex shrink-0 items-center gap-3 rounded-2xl py-2.5 pl-4 pr-3 text-left transition-all",
+                      cur.id === s.id ? "bg-panel shadow-card ring-1 ring-line" : "hover:bg-fg/[0.045]",
+                    )}
+                  >
+                    {cur.id === s.id && <span className="absolute -left-px top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-accent" />}
+                    <s.icon size={17} strokeWidth={1.7} className={cn("shrink-0 transition-colors", cur.id === s.id ? "text-accent" : "text-faint group-hover:text-muted")} />
+                    <span className="min-w-0 flex-1 truncate pr-1 text-[14px] font-medium">{s.label}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
           ))}
         </nav>
       </aside>

@@ -31,6 +31,7 @@ export interface CreateTaskInput {
 	schedule?: Task["schedule"];
 	title: string;
 	quotes: Quote[];
+	context?: Task["context"];
 	note?: string;
 	cwd: string;
 	scope: string[];
@@ -241,6 +242,7 @@ export class TaskStore {
 			roleId: input.roleId,
 			title: input.title,
 			quotes: input.quotes,
+			context: input.context && structuredClone(input.context),
 			note: input.note,
 			cwd: input.cwd,
 			scope: input.scope,
@@ -286,18 +288,18 @@ export class TaskStore {
 		return this.snapshot(task);
 	}
 
-	update(taskId: string, patch: Partial<Pick<Task, "title" | "note" | "cwd" | "mode" | "scope" | "dependsOn">>): Task {
+	update(taskId: string, patch: Partial<Pick<Task, "title" | "note" | "context" | "cwd" | "mode" | "scope" | "dependsOn">>): Task {
 		for (const id of patch.dependsOn ?? []) this.assertNotDeleting(id);
 		const task = this.require(taskId);
 		if (task.ended) throw new TaskError("ALREADY_ENDED", "任务已结束");
 		if (task.runs.length > 0) throw new TaskError("ALREADY_STARTED", "任务已开始，请用 task_steer");
-		Object.assign(task, patch);
+		Object.assign(task, structuredClone(patch));
 		this.commit(task, "task_updated", { changed: Object.keys(patch) });
 		return this.snapshot(task);
 	}
 
 	/** Resume an ended/interrupted task; the current global approval mode applies again. */
-	resume(taskId: string, input: { note?: string; quotes?: Quote[]; mode?: TaskMode; scope?: string[]; autoApprove?: boolean }): Task {
+	resume(taskId: string, input: { note?: string; quotes?: Quote[]; context?: Task["context"]; mode?: TaskMode; scope?: string[]; autoApprove?: boolean }): Task {
 		this.assertNotDeleting(taskId);
 		const task = this.require(taskId);
 		const last = task.runs.at(-1);
@@ -308,6 +310,7 @@ export class TaskStore {
 		this.archiveAttention(task, "run_ended");
 		if (input.mode) task.mode = input.mode;
 		if (input.scope) task.scope = input.scope;
+		if (input.context !== undefined) task.context = structuredClone(input.context);
 		task.approval = input.autoApprove
 			? { state: "approved", by: "auto", basis: (input.quotes ?? []).map((quote) => quote.messageId), at: Date.now() }
 			: { state: "pending" };
@@ -503,6 +506,14 @@ export class TaskStore {
 		const run = task?.runs.find((item) => !item.endedAt);
 		if (!task || !run) return;
 		this.endRun(task, run, reason);
+	}
+
+	setInactivityPause(taskId: string, at: number | undefined): void {
+		const task = this.require(taskId);
+		const run = task.runs.find(item => !item.endedAt);
+		if (!run || task.ended || run.inactivityPausedAt === at) return;
+		run.inactivityPausedAt = at;
+		this.commit(task, "task_updated", { runId: run.id, inactivityPausedAt: at });
 	}
 
 	recordStallRetry(taskId: string, runId: string): boolean {

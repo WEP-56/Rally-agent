@@ -130,6 +130,7 @@ export function businessHandlers(
 		[IpcChannel.chatState]: () => chat.state(),
 		[IpcChannel.chatSend]: (text: unknown, attachments?: string[]) => chat.send(typeof text === "string" ? text : "", attachments),
 		[IpcChannel.chatAbort]: () => chat.abort(),
+		[IpcChannel.chatInbox]: (input: unknown) => chat.updateInbox(input),
 		[IpcChannel.chatReset]: () => chat.reset(),
 		[IpcChannel.chatNewConversation]: () => chat.newConversation(),
 		[IpcChannel.workspaceState]: () => supervisor.workspace.state(),

@@ -35,18 +35,19 @@ The private credential request has finished. Continue the related work using thi
 - 提示词原文：
 
 ```text
-Search complete main-chat history, including before compaction. Literal case-insensitive query, exclusive before/after Unix-millisecond timestamps, newest first, limit 1–100 (default 20). aroundId returns neighbours. Previews are 200 characters; id alone returns exact full text. Continue with cursor=next and identical filters. Only user/assistant messages; only user IDs can authorize actions.
+Search main-chat history when you need an older fact or original user authorization. Choose one mode: {id:"#123"} reads one full message and must be used alone; {query:"keyword",limit:20} searches; {aroundId:"#123",limit:10} reads neighbours. Never combine id with query, aroundId, times or cursor. Search is literal and case-insensitive; before/after are exclusive Unix-millisecond bounds. Results are newest first, with 200-character previews, limit 1–100. Continue with cursor=next and identical filters. Queued and withdrawn user messages are excluded. Only user IDs authorize actions. Worker background needs no search: use task_dispatch context:0–30 and memory:0/1.
 ```
 - 参数：
 
 ```ts
 ChatSearchSchema = Type.Object({
 	query: Type.Optional(Type.String({ minLength: 1, maxLength: 1000 })),
-	id: Type.Optional(messageId), aroundId: Type.Optional(messageId),
+	id: Type.Optional(Type.String({ ...messageId, description: 'Exact lookup: pass only {id:"#123"}. Do not add query, aroundId, times or cursor.' })),
+	aroundId: Type.Optional(Type.String({ ...messageId, description: "Neighbourhood lookup; do not combine with id." })),
 	before: Type.Optional(Type.Integer({ minimum: 0 })), after: Type.Optional(Type.Integer({ minimum: 0 })),
 	limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
 	cursor: Type.Optional(Type.String({ maxLength: 4096 })),
-}, { additionalProperties: false })
+}, { additionalProperties: false });
 ```
 
 ## memory_add

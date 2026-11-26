@@ -6,6 +6,7 @@
 | --- | --- |
 | [任务与定时](tasks.md) | `task_dispatch`、`task_approve`、`task_update`、`task_steer`、`task_answer`、`task_resume`、`task_cancel`、`task_read`、`task_report`、`gate_decide`、`escalate`、`schedule_create`、`schedule_list`、`schedule_update` |
 | [对话与记忆](conversation.md) | `chat_search`、`memory_add`、`memory_edit`、`credential_request` |
+| [世界感知](world.md) | `world_time`、`world_location`、`world_weather` |
 | [Worker 浏览器](browser.md) | `browser_open`、`browser_snapshot`、`browser_screenshot`、`browser_navigate`、`browser_action`、`browser_login`、`browser_file` |
 | [文件与目录](files.md) | `read`、`grep`、`find`、`ls`、`write`、`edit`、`file_delete` |
 | [命令、作业与服务](execution.md) | `bash`、`powershell`、`job_output`、`job_kill`、`service_start`、`service_status`、`service_stop` |

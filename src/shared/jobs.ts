@@ -11,6 +11,6 @@ export interface JobRecord {
 	backgroundedAt?: number;
 	endedAt?: number;
 	exitCode?: number;
-	reason?: "timeout" | "cancelled" | "task_ended" | "shutdown" | "interrupted";
+	reason?: "timeout" | "cancelled" | "task_ended" | "shutdown" | "interrupted" | "inactivity";
 	error?: string;
 }

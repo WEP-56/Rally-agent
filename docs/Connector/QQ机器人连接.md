@@ -16,3 +16,7 @@ Rally 使用腾讯官方 QQ 机器人 Node.js SDK 建立 WebSocket 长连接，�
 - 配对之后，用另一个有平台体验资格的 QQ 账号发私聊，确认不会进入 Rally。断开连接以后再发给机器人，确认也不进入主对话。
 
 实现依据：[腾讯官方 QQ 机器人 Node.js SDK](https://github.com/tencent-connect/qqbot-nodejs) 的长连接、C2C 事件和消息回复接口；私聊访问控制参考[腾讯 DeepSeek Harness 插件](https://github.com/tencent-connect/dsh-qqbot)。
+
+## 消息排队与恢复
+
+忙时收到的私聊先保存，按顺序处理，不再回复“稍后再发送”。每条结果仍回到原消息。断线时保留待回传文字，原账号重连后发送；平台拒绝或发送结果不明时，可在 Rally 的原消息下查看、重发或取消回传。重发回复不重复调用模型。未开始的消息重启后恢复，进行中被中断的消息需用户明确重试；详见[用户消息收件箱](../用户消息收件箱.md)。

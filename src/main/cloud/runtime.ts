@@ -106,7 +106,8 @@ const server = createServer(async (req, res) => {
 		const call = Promise.resolve().then(() =>
 			channel === IpcChannel.chatSend
 				? requests.run(body.device, body.requestId, args, () =>
-							supervisor.main.send(typeof args[0] === "string" ? args[0] : "", args[1] as string[] | undefined, String(body.device)),
+							supervisor.main.send(typeof args[0] === "string" ? args[0] : "", args[1] as string[] | undefined, String(body.device), String(body.requestId)),
+						true,
 					)
 					: AGENT_BROWSER_COMMANDS.has(channel) ? browserCommand(supervisor.agentBrowser, String(body.device ?? ""), channel, args)
 					: RESOURCE_COMMANDS.has(channel) ? resourceCommand(supervisor.resources, String(body.device ?? ""), channel, args)

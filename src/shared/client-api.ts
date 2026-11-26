@@ -174,6 +174,7 @@ export function createApi(ipcRenderer: ClientTransport): RallyApi {
 			getState: () => ipcRenderer.invoke(IpcChannel.chatState),
 			send: (text, attachments) => ipcRenderer.invoke(IpcChannel.chatSend, text, attachments),
 			abort: () => ipcRenderer.invoke(IpcChannel.chatAbort),
+			inbox: input => ipcRenderer.invoke(IpcChannel.chatInbox, input),
 			reset: () => ipcRenderer.invoke(IpcChannel.chatReset),
 			newConversation: () => ipcRenderer.invoke(IpcChannel.chatNewConversation),
 			onEvent: (listener) => {

@@ -15,7 +15,8 @@ export class ScheduledTasks {
 	private records = new Map<string, ScheduledTask>();
 	private timer?: ReturnType<typeof setInterval>;
 	private closed = false;
-	constructor(privateEvents: EventLog, privateStore: TaskStore, approval: () => boolean, tick: () => void, now: () => number = Date.now) {
+	constructor(privateEvents: EventLog, privateStore: TaskStore, approval: () => boolean, tick: () => void, now: () => number = Date.now, canRun?: () => boolean) {
+		this.canRun = canRun;
 		this.events = privateEvents; this.store = privateStore; this.approval = approval; this.tick = tick; this.now = now;
 		for (const event of privateEvents.ofKind("schedule_changed")) {
 			if (event.data.deleted) this.records.delete(String(event.data.id));
@@ -27,6 +28,7 @@ export class ScheduledTasks {
 	private readonly approval: () => boolean;
 	private readonly tick: () => void;
 	private readonly now: () => number;
+	private readonly canRun?: () => boolean;
 	list(): ScheduledTask[] {
 		return structuredClone([...this.records.values()]).map(item => {
 			const task = item.lastTaskId ? this.store.get(item.lastTaskId) : undefined;
@@ -51,7 +53,7 @@ export class ScheduledTasks {
 		this.events.append("schedule_changed", { schedule: item, source });
 		this.records.set(item.id, structuredClone(item));
 	}
-	create(input: Pick<ScheduledTask, "title" | "cwd" | "mode" | "timing">, quotes: Quote[]): ScheduledTask {
+	create(input: Pick<ScheduledTask, "title" | "cwd" | "mode" | "timing" | "context">, quotes: Quote[]): ScheduledTask {
 		if (this.closed) throw new Error("定时任务服务已关闭");
 		if (!input.title?.trim() || [...input.title].length > 40 || !quotes.length) throw new Error("需要标题（最多40字）与用户原话");
 		if (input.mode !== "write" && input.mode !== "readonly") throw new Error("无效任务模式");
@@ -59,9 +61,9 @@ export class ScheduledTasks {
 		const title = input.title.trim();
 		const timing = normalizeTiming(input.timing);
 		const sameTiming = (other: ScheduleTiming) => JSON.stringify(normalizeTiming(other)) === JSON.stringify(timing);
-		const duplicate = this.list().find(item => item.title === title && item.cwd === input.cwd && item.mode === input.mode && sameTiming(item.timing) && JSON.stringify(item.quotes) === JSON.stringify(quotes));
+		const duplicate = this.list().find(item => item.title === title && item.cwd === input.cwd && item.mode === input.mode && sameTiming(item.timing) && JSON.stringify(item.quotes) === JSON.stringify(quotes) && JSON.stringify(item.context ?? []) === JSON.stringify(input.context ?? []));
 		if (duplicate) return duplicate;
-		const item: ScheduledTask = { title, cwd: input.cwd, mode: input.mode, timing, quotes, id: `S-${randomUUID()}`, enabled: true, nextAt: nextOccurrence(timing, this.now()) };
+		const item: ScheduledTask = { title, cwd: input.cwd, mode: input.mode, timing, quotes, context: input.context && structuredClone(input.context), id: `S-${randomUUID()}`, enabled: true, nextAt: nextOccurrence(timing, this.now()) };
 		this.save(item, { actor: "main", quotes }); return structuredClone(item);
 	}
 	update(id: string, enabled: boolean | null | undefined, source: ScheduleSource = { actor: "user" }, replacementTiming?: ScheduleTiming): ScheduledTask[] {
@@ -93,7 +95,7 @@ export class ScheduledTasks {
 	dispose(): void { this.closed = true; clearInterval(this.timer); }
 	/** Missed repetitions coalesce to one; an unfinished previous task blocks overlap. */
 	poll(): void {
-		if (this.closed) return;
+		if (this.closed || this.canRun?.() === false) return;
 		for (const current of [...this.records.values()]) {
 			if (!current.enabled || current.nextAt > this.now()) continue;
 			if (current.lastTaskId && !this.store.get(current.lastTaskId)?.ended && !this.store.isDeleted(current.lastTaskId)) continue;
@@ -106,7 +108,7 @@ export class ScheduledTasks {
 						continue;
 					}
 					if (!statSync(current.cwd).isDirectory()) throw new Error("工作目录不存在");
-					task = this.store.create({ title: current.title, cwd: current.cwd, mode: current.mode, quotes: current.quotes, note: "This is one due occurrence of a local schedule. Perform the requested work once; the host manages future repetitions.", scope: [], dependsOn: [], autoApprove: this.approval(), dispatchKey: key, schedule: { id: current.id, dueAt: current.nextAt, timing: current.timing } }).task;
+					task = this.store.create({ title: current.title, cwd: current.cwd, mode: current.mode, quotes: current.quotes, context: current.context, note: "This is one due occurrence of a local schedule. Perform the requested work once; the host manages future repetitions.", scope: [], dependsOn: [], autoApprove: this.approval(), dispatchKey: key, schedule: { id: current.id, dueAt: current.nextAt, timing: current.timing } }).task;
 				}
 				ensureDir(task.outputDir);
 				const now = this.now();

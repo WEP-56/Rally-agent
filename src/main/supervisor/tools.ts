@@ -9,6 +9,7 @@ import type { Quote, QuoteRef, ReportState, TaskBoard } from "../../shared/task.
 import { taskView } from "../../shared/task.ts";
 import { ensureDir, normalizePath, resolveScope, TaskError, type TaskStore } from "./task-store.ts";
 import { page, readTask, TaskReadSchema, type TaskReadParams } from "./task-read.ts";
+import { freezeTaskContext, taskContextSummary, TaskContextTurnsSchema, TaskMemorySchema, type TaskContextSources } from "./task-context.ts";
 
 /** What task tools may ask the supervisor to do. Keeps the tools free of Pi/Electron imports. */
 export interface TaskToolHost {
@@ -16,6 +17,7 @@ export interface TaskToolHost {
 	readonly workspaceDir: string;
 	autoApprove(): boolean;
 	quote(ref: QuoteRef): Quote | null;
+	contextSources?: TaskContextSources;
 	tick(): void;
 	deliverSteer(taskId: string, text: string): InputDelivery;
 	deliverAnswer(taskId: string, text: string): InputDelivery;
@@ -28,7 +30,7 @@ export interface TaskToolHost {
 export type InputDelivery = "queued_with_first_message" | "steered" | "woke_worker" | "queued_for_worker";
 
 function dispatchState(task: Parameters<typeof taskView>[0]) {
-	return { taskId: task.id, status: taskView(task).status, approval: task.approval.state, queuedReason: task.queue?.reason, outputDir: task.outputDir };
+	return { taskId: task.id, status: taskView(task).status, approval: task.approval.state, queuedReason: task.queue?.reason, outputDir: task.outputDir, context: taskContextSummary(task.context) };
 }
 
 export function createMainTaskTools(host: TaskToolHost): ToolDefinition[] {
@@ -69,7 +71,7 @@ const QuoteRefSchema = Type.Object({
 	),
 });
 
-const NoteSchema = Type.String({ description: "The worker cannot see the main conversation. Use <= 30 words to resolve references (e.g. what ‘it’ means) and add the minimum grounded context needed to understand the quoted request, such as the agent, project/path, or prior decision. No guesses, new requirements, plans, steps, or acceptance criteria." });
+const NoteSchema = Type.String({ description: "Use <= 30 words to clarify references in the quoted request, such as the agent, project/path or prior decision. Background is copied separately through context/memory; do not paste it here. No guesses, new requirements, plans, steps or acceptance criteria." });
 
 function checkNote(note?: string): void {
 	if (countWords(note ?? "") > 30) throw new TaskError("NOTE_TOO_LONG", "备注超过 30 个词");
@@ -80,6 +82,8 @@ function dispatchTool(host: TaskToolHost): ToolDefinition {
 		title: Type.String({ description: "short task title, <= 40 chars" }),
 		quotes: Type.Array(QuoteRefSchema, { minItems: 1 }),
 		note: Type.Optional(NoteSchema),
+		context: Type.Optional(TaskContextTurnsSchema),
+		memory: Type.Optional(TaskMemorySchema),
 		cwd: Type.String({ description: "Explicit absolute worker working directory chosen by the router from the user's request and current directory context." }),
 		mode: Type.Union([Type.Literal("write"), Type.Literal("readonly")]),
 		scope: Type.Optional(
@@ -92,18 +96,22 @@ function dispatchTool(host: TaskToolHost): ToolDefinition {
 	return {
 		name: "task_dispatch",
 		label: "派发任务",
-		description: "Create a task for a worker. quotes are the user message IDs that state the work; the host copies their text verbatim as the requirements. The worker cannot see the main conversation: quote needed clarifications, and use note (<= 30 words) to resolve references like ‘it’ and add the minimum grounded context (agent, project/path, prior decision). Do not guess or add requirements, plans, steps, or acceptance criteria. title is at most 40 characters. cwd is an explicit absolute directory. mode is readonly or write; scope lists the paths a write task will change, and overlap with a running task returns a warning without blocking. dependsOn makes the task wait for other tasks. When useful, set roleId to one of the profiles in the latest rally-capabilities snapshot; otherwise omit it. Repeating the same title, role, and quoted messages within 60 seconds returns the existing task. The result is a creation receipt with the approval and queue state, not proof that work ran.",
+		description: "Create a task for a worker. quotes copy the user's original requirements. For background, set context:0–30 recent conversation rounds and memory:0/1 (full current notebook); both default to 0. Example: context:3, memory:0. Rally copies them automatically: no message lookup, excerpts or memory selection needed. A round is a user message and its following replies before the current request, excluding tool logs and thinking. Fewer rounds are returned if unavailable; long chat text is marked truncated. Background never grants authorization. note (<=30 words) only clarifies references; do not add requirements, plans or acceptance criteria. title <=40 characters; cwd must be an absolute directory. mode is readonly or write; scope declares write paths, with overlap warnings. dependsOn waits for upstream tasks. Optional roleId comes from rally-capabilities. Repeating the same title, role, quotes and background within 60 seconds reuses the task. The receipt reports approval, queue state and copied background counts, not execution success.",
 		parameters: schema,
 		async execute(_toolCallId: string, params: Params) {
 			try {
 				const quotes = freezeQuotes(host, params.quotes);
+				const context = freezeTaskContext(params, host.contextSources);
 				const title = params.title.trim();
 				if (!title) return fail("TITLE_REQUIRED: 标题不能为空");
 				if ([...title].length > 40) return fail("TITLE_TOO_LONG: 标题超过 40 字");
 				if (countWords(params.note ?? "") > 30) return fail("NOTE_TOO_LONG: 备注超过 30 个词");
 				const roleId = params.roleId?.trim() || undefined;
 				if (roleId && !host.roleWorker(roleId)) return fail(`ROLE_NOT_FOUND: ${roleId}`);
-				const dispatchKey = JSON.stringify(roleId ? [[...new Set(quotes.map((quote) => quote.messageId))].sort(), title, roleId] : [[...new Set(quotes.map((quote) => quote.messageId))].sort(), title]);
+				const dispatchParts: unknown[] = [[...new Set(quotes.map(quote => quote.messageId))].sort(), title];
+				if (roleId) dispatchParts.push(roleId);
+				if (context?.length) dispatchParts.push({ context });
+				const dispatchKey = JSON.stringify(dispatchParts);
 				const duplicate = host.store.list().find((task) => task.dispatchKey === dispatchKey && Date.now() - task.createdAt >= 0 && Date.now() - task.createdAt < 60000);
 				if (duplicate) return result(JSON.stringify({ ...dispatchState(duplicate), reused: true }), { taskId: duplicate.id, reused: true });
 				if (!params.cwd || !isAbsolute(params.cwd)) return fail("CWD_REQUIRED: router 必须明确指定 worker 的绝对工作目录");
@@ -121,6 +129,7 @@ function dispatchTool(host: TaskToolHost): ToolDefinition {
 					roleId,
 					title,
 					quotes,
+					context,
 					note: params.note?.trim(),
 					cwd,
 					scope,
@@ -189,6 +198,8 @@ function updateTool(host: TaskToolHost): ToolDefinition {
 		quotes: Type.Array(QuoteRefSchema, { minItems: 1 }),
 		title: Type.Optional(Type.String()),
 		note: Type.Optional(NoteSchema),
+		context: Type.Optional(TaskContextTurnsSchema),
+		memory: Type.Optional(TaskMemorySchema),
 		cwd: Type.Optional(Type.String()),
 		mode: Type.Optional(Type.Union([Type.Literal("write"), Type.Literal("readonly")])),
 		scope: Type.Optional(Type.Array(Type.String())),
@@ -198,7 +209,7 @@ function updateTool(host: TaskToolHost): ToolDefinition {
 	return {
 		name: "task_update",
 		label: "修改任务",
-		description: "Edit a task that has not started. Quotes are required as the basis.",
+		description: "Edit a task that has not started. Quotes are required. context:0–30 replaces recent conversation background; memory:0/1 clears or copies the full current notebook. Each omitted field keeps its existing snapshot; 0 clears that part. No background IDs, excerpts or search needed. Background never authorizes new work.",
 		parameters: schema,
 		async execute(_toolCallId: string, params: Params) {
 			try {
@@ -207,6 +218,7 @@ function updateTool(host: TaskToolHost): ToolDefinition {
 				freezeQuotes(host, params.quotes);
 				checkNote(params.note);
 				const patch: Parameters<TaskStore["update"]>[1] = {};
+				if (params.context !== undefined || params.memory !== undefined) patch.context = freezeTaskContext(params, host.contextSources, task.context);
 				if (params.title !== undefined) {
 					if (!params.title.trim() || [...params.title.trim()].length > 40) return fail("TITLE_INVALID: 标题须为 1–40 字");
 					patch.title = params.title.trim();
@@ -229,7 +241,7 @@ function updateTool(host: TaskToolHost): ToolDefinition {
 				const updated = host.store.update(params.taskId, patch);
 				const warnings = host.store.warnOverlaps(params.taskId, "update");
 				return result(
-					JSON.stringify({ taskId: params.taskId, title: updated.title, status: taskView(updated).status, warnings }),
+					JSON.stringify({ taskId: params.taskId, title: updated.title, status: taskView(updated).status, context: taskContextSummary(updated.context), warnings }),
 				);
 			} catch (error) {
 				return fail(messageOf(error));
@@ -310,6 +322,8 @@ function resumeTool(host: TaskToolHost): ToolDefinition {
 		taskId: Type.String(),
 		quotes: Type.Array(QuoteRefSchema, { minItems: 1 }),
 		note: Type.Optional(NoteSchema),
+		context: Type.Optional(TaskContextTurnsSchema),
+		memory: Type.Optional(TaskMemorySchema),
 		mode: Type.Optional(Type.Union([Type.Literal("write"), Type.Literal("readonly")])),
 		scope: Type.Optional(Type.Array(Type.String())),
 	});
@@ -317,7 +331,7 @@ function resumeTool(host: TaskToolHost): ToolDefinition {
 	return {
 		name: "task_resume",
 		label: "续接任务",
-		description: "Continue an ended, interrupted or blocked task in the same session as a new run, subject to global approval.",
+		description: "Continue an ended, interrupted or blocked task as a new run, subject to global approval. context:0–30 replaces recent conversation background; memory:0/1 clears or copies the full current notebook. Each omitted field keeps its existing snapshot; 0 clears that part. No background IDs, excerpts or search needed. Previous session history remains even when background is cleared. Background never authorizes new work.",
 		parameters: schema,
 		async execute(_toolCallId: string, params: Params) {
 			try {
@@ -327,10 +341,11 @@ function resumeTool(host: TaskToolHost): ToolDefinition {
 				checkNote(params.note);
 				const scope = params.scope ? resolveScope(params.scope, task.cwd) : undefined;
 				const nextRun = task.runs.length + 1;
-				host.store.resume(params.taskId, { note: params.note, quotes, mode: params.mode, scope, autoApprove: host.autoApprove() });
+				const context = freezeTaskContext(params, host.contextSources, task.context);
+				host.store.resume(params.taskId, { note: params.note, quotes, context, mode: params.mode, scope, autoApprove: host.autoApprove() });
 				const warnings = host.store.warnOverlaps(params.taskId, "resume");
 				host.tick();
-				return result(JSON.stringify({ taskId: params.taskId, runN: nextRun, status: taskView(task).status, approval: task.approval.state, warnings }));
+				return result(JSON.stringify({ taskId: params.taskId, runN: nextRun, status: taskView(task).status, approval: task.approval.state, context: taskContextSummary(task.context), warnings }));
 			} catch (error) {
 				return fail(messageOf(error));
 			}
@@ -373,7 +388,7 @@ function readTool(host: TaskToolHost): ToolDefinition {
 	return {
 		name: "task_read",
 		label: "读取任务",
-		description: "Read board/card/report/runs/files/timeline. Defaults to board without taskId, otherwise card. Use board before dispatching to see open tasks and their write scopes. offset/limit page lists (20 by default, max 100). Never returns worker transcripts. Files includes observed file-tool access and shell cwd/command; shell effects remain unknown; see coverage for gaps.",
+		description: "Read board/card/report/runs/files/timeline. Defaults to board without taskId, otherwise card. Use board before dispatching to see open tasks and their write scopes. card also returns the task's frozen selected context; board omits that background. offset/limit page lists (20 by default, max 100). Never returns worker transcripts. Files includes observed file-tool access and shell cwd/command; shell effects remain unknown; see coverage for gaps.",
 		parameters: TaskReadSchema,
 		async execute(_toolCallId: string, params: TaskReadParams) {
 			try {
@@ -448,7 +463,7 @@ export function createWorkerTools(host: WorkerToolHost): ToolDefinition[] {
 	const read: ToolDefinition = {
 		name: "task_read",
 		label: "读取任务",
-		description: "Read card/report/runs/files/timeline for your task (default) or direct upstream tasks, with offset/limit paging. The services view is only for your own task, including services from previous runs. Board and unrelated tasks are not visible. Files records observed access; shell effects and other gaps are explicit in coverage.",
+		description: "Read card/report/runs/files/timeline for your task (default) or direct upstream tasks, with offset/limit paging. card includes selected background for your own task only; upstream background is not shared. The services view is only for your own task, including services from previous runs. Board and unrelated tasks are not visible. Files records observed access; shell effects and other gaps are explicit in coverage.",
 		parameters: TaskReadSchema,
 		async execute(_toolCallId: string, params: TaskReadParams) {
 			try {
@@ -460,7 +475,7 @@ export function createWorkerTools(host: WorkerToolHost): ToolDefinition[] {
 				}
 				const task = host.store.get(target);
 				if (!task) return fail(`TASK_NOT_FOUND: ${target}`);
-				return result(JSON.stringify(readTask(host.store, target === host.taskId ? task : { ...task, services: undefined }, params)));
+				return result(JSON.stringify(readTask(host.store, target === host.taskId ? task : { ...task, services: undefined, context: undefined }, params)));
 			} catch (error) {
 				return fail(messageOf(error));
 			}

@@ -17,6 +17,8 @@ const EMPTY: ChatState = {
 };
 
 export interface ChatController {
+	inboxPaused?: boolean;
+	inactivity?: ChatState["inactivity"];
 	messages: ChatLine[];
 	header: ChatState["header"];
 	conversation?: ChatState["conversation"];

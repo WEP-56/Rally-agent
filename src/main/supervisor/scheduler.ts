@@ -11,6 +11,7 @@ export interface SchedulerOptions {
 	events: EventLog;
 	limit?: number;
 	now?(): number;
+	canRun?(): boolean;
 	/** Slots already occupied by streaming workers (docs 04 §3.2). */
 	activeIds(): string[];
 	/** Idle sessions with undelivered input; the scheduler owns admission and ordering. */
@@ -39,7 +40,7 @@ export class Scheduler {
 
 	/** Re-evaluate every open task. Safe to call from anywhere; overlapping calls collapse. */
 	tick(): void {
-		if (this.disposed) return;
+		if (this.disposed || this.options.canRun?.() === false) return;
 		if (this.ticking) {
 			this.rerun = true;
 			return;
@@ -73,10 +74,26 @@ export class Scheduler {
 			.filter(([, run]) => !run.endedAt).map(([id]) => id)]);
 		const pending = new Set(this.options.pendingIds());
 		for (const task of open) {
+			if (this.options.canRun?.() === false) return;
 			const lastRun = task.runs[task.runs.length - 1];
 			const interruptedAt = lastRun?.endReason === "interrupted" ? lastRun.endedAt : undefined;
 			// An interrupted run waits for the user's decision: resume or cancel (docs 01 §4.9).
 			if (interruptedAt && !task.inputs.some((input) => input.kind === "resume" && !input.deliveredAt && input.at >= interruptedAt)) continue;
+			if (lastRun?.inactivityPausedAt !== undefined && !lastRun.endedAt) {
+				if (active.has(task.id)) continue;
+				const inputs = task.inputs.filter(input => !input.deliveredAt);
+				if (task.attention && !inputs.some(input => isUserInput(input.kind))) continue;
+				if (lastRun.lastReport?.state === "blocked" && !inputs.length) continue;
+				if (active.size >= this.limit + (priority(task) === 0 ? 1 : 0)) { this.setQueue(task, "capacity"); continue; }
+				this.setQueue(task, null);
+				this.reserved.set(task.id, lastRun);
+				active.add(task.id);
+				void this.options.start(task, lastRun).finally(() => {
+					if (this.reserved.get(task.id) === lastRun) this.reserved.delete(task.id);
+					this.tick();
+				});
+				continue;
+			}
 			if (task.runs.some((run) => !run.endedAt)) {
 				if (!pending.has(task.id)) { this.setQueue(task, null); continue; }
 				if (!active.has(task.id) && active.size >= this.limit + (priority(task) === 0 ? 1 : 0)) { this.setQueue(task, "capacity"); continue; }

@@ -7,8 +7,10 @@ import { createHash } from "node:crypto";
 
 /** Event kinds the supervisor can append (docs 01 §7). Payloads stay loose; task snapshots ride along. */
 export type EventKind =
+	| "inactivity_changed"
 	| "schedule_changed"
 	| "chat_message"
+	| "chat_queue_paused"
 	| "chat_reset"
 	| "chat_compacted"
 	| "segment_rotated"

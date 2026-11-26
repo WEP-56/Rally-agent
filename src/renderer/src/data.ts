@@ -1,4 +1,5 @@
 import type { ImSource } from "../../shared/connections";
+import type { ChatDelivery } from "../../shared/ipc";
 import type { ResourceRef } from "../../shared/resources";
 import type { Quote } from "../../shared/task";
 export type StepKind = "cmd" | "read" | "write" | "edit" | "delete" | "search" | "web" | "memory" | "think" | "task" | "tool";
@@ -18,6 +19,8 @@ export interface ToolStep {
 }
 
 export interface ChatMsg {
+	delivery?: ChatDelivery;
+	replyTo?: string;
 	attachments?: ResourceRef[];
 	source?: ImSource;
 	runId?: string;

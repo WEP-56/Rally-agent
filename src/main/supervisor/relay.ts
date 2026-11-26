@@ -18,7 +18,7 @@ export type RelayInput =
 	| { kind: "interrupted"; tasks: Task[] };
 
 export interface RelayMessage { id: string; text: string; attachments?: ResourceRef[] }
-export type RelayMode = "turn" | "steer" | "notice";
+export type RelayMode = "turn" | "steer" | "notice" | "nextTurn";
 export interface RelayTransport {
 	isBusy(): boolean;
 	canReceiveRelay(): boolean;
@@ -188,6 +188,14 @@ export class Relay {
 		else this.schedule(2000);
 	}
 
+	/** Stage unread facts before a desktop user turn without starting an extra model request. */
+	async prepareUserTurn(): Promise<void> {
+		if (!this.started || this.disposed) return;
+		this.captureSources();
+		await this.flush("notice");
+		await this.flush("nextTurn");
+	}
+
 	dispose(): void {
 		this.disposed = true;
 		if (this.timer) clearTimeout(this.timer);
@@ -209,7 +217,7 @@ export class Relay {
 		this.timer.unref();
 	}
 
-	private flush(mode: RelayMode): void {
+	private flush(mode: RelayMode): void | Promise<void> {
 		if (this.disposed || !this.main.canReceiveRelay()) return;
 		const items: RelayRecord[] = [];
 		for (const item of this.pending.values()) {
@@ -226,7 +234,7 @@ export class Relay {
 		}
 		if (!items.length) return;
 		for (const item of items) this.submitted.set(item.id, mode);
-		void this.main.sendRelay(items.map(({ id, text }) => ({ id, text })), mode).catch((error: unknown) => {
+		return this.main.sendRelay(items.map(({ id, text }) => ({ id, text })), mode).catch((error: unknown) => {
 			if (this.disposed) return;
 			const remaining = items.filter((item) => this.pending.has(item.id));
 			if (!remaining.length) return;

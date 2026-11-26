@@ -7,10 +7,10 @@ import {
 	SessionManager,
 	type ToolDefinition,
 } from "@rally/coding-agent";
-import type { ChatActivity, ChatHeaderState, ChatEvent, ChatLine, ChatRole, ChatState, RallyPaths } from "../../shared/ipc.ts";
+import type { ChatActivity, ChatHeaderState, ChatDelivery, ChatEvent, ChatLine, ChatRole, ChatState, RallyPaths } from "../../shared/ipc.ts";
 import type { ImSource } from "../../shared/connections.ts";
 import type { SelectModelInput, ThinkingLevelName } from "../../shared/models.ts";
-import type { Quote, QuoteRef } from "../../shared/task.ts";
+import type { Quote, QuoteRef, TaskContext } from "../../shared/task.ts";
 import type { WorkspaceState } from "../../shared/workspace.ts";
 import { toolInput, toolOutput } from "../../shared/tools.ts";
 import { assistantContent } from "../../shared/conversation.ts";
@@ -25,10 +25,12 @@ import { existsSync, statSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import type { ResourceStore } from "../resource-store.ts";
 import type { ResourceRef } from "../../shared/resources.ts";
-import { AttachmentQueue, attachmentMessage, resolveAttachments } from "./attachments.ts";
+import { attachmentMessage, resolveAttachments } from "./attachments.ts";
 import { resourceTools } from "./resource-tools.ts";
 import { createMainImageTool } from "./provider-tools.ts";
 import type { ToolProviderStore } from "../tool-provider-store.ts";
+import { INACTIVITY_MESSAGE } from "./inactivity.ts";
+import { recentChatContext } from "./task-context.ts";
 
 /** Tools the main agent may call: read-only file access only (docs 02 section 2). */
 const MAIN_TOOLS = ["read", "grep", "find", "ls"];
@@ -49,9 +51,15 @@ export interface MainAgentOptions {
 	segmentBytes?: number;
 	segmentCompactions?: number;
 	beforeInput?(): Promise<void>;
+	beforeUserTurn?(): Promise<void>;
+	beforeUserInput?(): Promise<void>;
+	canRun?(): boolean;
+	inactivity?(): ChatState["inactivity"];
 	onSettled?(aborted: boolean): void;
 	onRelayRead?(ids: string[]): void;
 	onAvailable?(): void;
+	canReply?(source: ImSource): boolean;
+	reply?(source: ImSource, text: string): Promise<void>;
 }
 
 export class MainAgent {
@@ -59,18 +67,27 @@ export class MainAgent {
 	private unsubscribe: (() => void) | null = null;
 	private starting: Promise<void> | null = null;
 	private replacing?: Promise<void>;
+	private pausing?: Promise<void>;
 	private conversation?: ChatState["conversation"];
 	private disposed = false;
 	private disposal?: Promise<void>;
 	private readonly messages: ChatLine[] = [];
+	private contextBefore?: string;
 	private streaming: { line: ChatLine } | null = null;
 	private nextLine = 1;
 	private busy = false;
 	private compactions = 0;
 	private header: ChatHeaderState = { activity: null, showCompact: false, showNewConversation: false };
 	private localSubmissions = 0;
-	private submissions?: AttachmentQueue;
-	private remoteTurn?: Promise<string | null>;
+	private inboxTurn?: Promise<void>;
+	private activeInput?: ChatLine;
+	private inboxPaused = false;
+	private preparingInput = false;
+	private inputError?: string;
+	private readonly receivedSubmissions = new Set<string>();
+	private readonly imWaiters = new Map<string, (text: string | null) => void>();
+	private replying = false;
+	private inboxTimer?: NodeJS.Timeout;
 	private readonly receivedIm = new Set<string>();
 	private model: string | null = null;
 	private thinkingLevel: string | null = null;
@@ -96,7 +113,13 @@ export class MainAgent {
 	private readonly onRelayRead?: (ids: string[]) => void;
 	private readonly onAvailable?: () => void;
 	private readonly beforeInput?: () => Promise<void>;
+	private readonly beforeUserTurn?: () => Promise<void>;
+	private readonly beforeUserInput?: () => Promise<void>;
+	private readonly canRun: () => boolean;
+	private readonly inactivity?: () => ChatState["inactivity"];
 	private readonly queuedRelays = new Set<string>();
+	private readonly canReply?: MainAgentOptions["canReply"];
+	private readonly reply?: MainAgentOptions["reply"];
 	private readonly toolLines = new Map<string, ChatLine>();
 
 	constructor(paths: RallyPaths, events: EventLog, emit: (event: ChatEvent) => void, options: MainAgentOptions) {
@@ -106,7 +129,7 @@ export class MainAgent {
 		this.customTools = [...(options.customTools ?? [])];
 		if (options.resources && options.toolProviders) this.customTools.push(createMainImageTool({
 			providers: options.toolProviders, store: options.resources, owner: "main",
-			active: () => !this.disposed, publish: (id, refs) => this.publish(id, refs),
+			active: () => !this.disposed && this.canRun(), publish: (id, refs) => this.publish(id, refs),
 		}, (message, id, request) => this.claimImageRequest(message, id, request)));
 		this.models = options.models;
 		this.resources = options.resources;
@@ -122,27 +145,40 @@ export class MainAgent {
 		this.onRelayRead = options.onRelayRead;
 		this.onAvailable = options.onAvailable;
 		this.beforeInput = options.beforeInput;
+		this.beforeUserTurn = options.beforeUserTurn;
+		this.beforeUserInput = options.beforeUserInput;
+		this.canRun = options.canRun ?? (() => true);
+		this.inactivity = options.inactivity;
+		this.canReply = options.canReply;
+		this.reply = options.reply;
 		this.replay();
+		this.recoverInbox();
 	}
 
 	isBusy(): boolean {
 		return this.busy || Boolean(this.session?.isStreaming);
 	}
 
-	canReceiveRelay(): boolean { return !this.disposed && !this.replacing && !this.remoteTurn && Boolean(this.session && this.model); }
+	canReceiveRelay(): boolean {
+		return !this.disposed && !this.replacing && !this.pausing && !this.activeInput?.source && !this.inboxPaused &&
+			this.canRun() && Boolean(this.session && this.model) &&
+			(this.preparingInput || this.isBusy() || !this.messages.some(line => line.delivery?.status === "queued"));
+	}
 
-	search(params: ChatSearchParams) { return searchChat(this.messages, params); }
+	search(params: ChatSearchParams) { return searchChat(this.messages.filter(line => line.delivery?.status !== "queued" && line.delivery?.status !== "cancelled"), params); }
+
+	recentContext(count: number): TaskContext[] { return recentChatContext(this.messages, count, this.contextBefore); }
 
 	/** Freeze a user message (and optionally the confirmed proposal before it) into a Quote. */
 	quote(ref: QuoteRef): Quote | null {
 		const index = this.messages.findIndex((line) => line.id === ref.id);
 		if (index === -1) return null;
 		const line = this.messages[index];
-		if (line.role !== "user") return null;
+		if (line.role !== "user" || line.delivery?.status === "queued" || line.delivery?.status === "cancelled") return null;
 		let text = line.text;
 		let kind: Quote["kind"] = "user";
 		if (ref.withProposal) {
-			const proposal = this.messages[index - 1];
+			const proposal = this.messages.slice(0, index).findLast(item => item.role !== "user" || !item.delivery || item.delivery.status === "done" || item.delivery.status === "processing");
 			if (proposal?.role === "assistant" && proposal.text.trim()) {
 				text = `${proposal.text}\n\n${line.text}`;
 				kind = "proposal";
@@ -153,6 +189,7 @@ export class MainAgent {
 
 	/** Durable relay metadata deduplicates an ambiguous send after restart. */
 	async sendRelay(items: RelayMessage[], mode: RelayMode): Promise<void> {
+		if (this.preparingInput && mode !== "notice") mode = "nextTurn";
 		await this.beforeInput?.();
 		const session = this.session;
 		if (!session || !this.canReceiveRelay()) throw new Error("主会话未就绪，中继保留待送");
@@ -170,12 +207,13 @@ export class MainAgent {
 		this.localSubmissions++;
 		try {
 			const payload = await attachmentMessage(this.resources?.(), content, items.flatMap(item => item.attachments ?? []), session.model);
+			if (!this.canReceiveRelay() || session !== this.session) throw new Error(INACTIVITY_MESSAGE);
 			await session.sendCustomMessage({ customType: "rally-relay", content: payload, display: false, details: { relayIds: ids } },
-				mode === "notice" ? { triggerTurn: false, deliverAs: "nextTurn" } : { triggerTurn: true, deliverAs: "steer" });
+				mode === "notice" || mode === "nextTurn" ? { triggerTurn: false, deliverAs: "nextTurn" } : { triggerTurn: true, deliverAs: "steer" });
 		} catch (error) {
 			for (const item of fresh) this.queuedRelays.delete(item.id);
 			throw error;
-		} finally { this.localSubmissions--; }
+		} finally { this.localSubmissions--; this.available(); }
 	}
 
 	/** Surface a supervisor fact in the conversation (system line, docs 01 §6). */
@@ -186,6 +224,7 @@ export class MainAgent {
 
 	/** Lazily create the Pi session. Safe to call repeatedly. */
 	async start(): Promise<void> {
+		await this.pausing;
 		if (this.disposed || this.session) return;
 		if (!this.starting) {
 			this.starting = this.create().finally(() => {
@@ -195,8 +234,19 @@ export class MainAgent {
 		return this.starting;
 	}
 
+	/** Called after host startup/resume. A timer only checks local queue/connection state. */
+	available(): void {
+		if (this.disposed) return;
+		this.inboxTimer ??= setInterval(() => this.available(), 15_000);
+		this.inboxTimer.unref();
+		this.drainInbox();
+		void this.flushReplies().catch(error => console.error("Inbox reply persistence failed", error));
+	}
+
 	state(): ChatState {
 		return {
+			inboxPaused: this.inboxPaused,
+			inactivity: this.inactivity?.(),
 			messages: this.messages.map(clone),
 			header: { ...this.header },
 			conversation: this.conversation && { ...this.conversation },
@@ -235,84 +285,209 @@ export class MainAgent {
 		} catch (error) {
 			this.fail(error);
 			throw error;
-		} finally { this.localSubmissions--; }
+		} finally { this.localSubmissions--; this.available(); }
 	}
 
-	/** An IM turn runs on the same Pi session. Do not mix desktop prompts or relays into its reply. */
+	/** Connector callbacks acknowledge durable acceptance, not the eventual model reply. */
+	async receiveFromIm(text: string, source: ImSource): Promise<string | null> {
+		if (this.disposed) throw Error("Rally 正在关闭，消息未接收");
+		if (!text.trim() || this.receivedIm.has(imKey(source))) return null;
+		const line = this.enqueue(text, [], source);
+		await this.wakeInbox(line);
+		return null;
+	}
+
+	/** Await one reply for callers that need it; connectors use receiveFromIm. */
 	async sendFromIm(text: string, source: ImSource): Promise<string | null> {
-		await this.beforeInput?.();
-		await this.start();
-		const key = imKey(source);
-		if (this.disposed || this.receivedIm.has(key)) return null;
-		if (!this.session || !this.model) return "请先在 Rally 桌面应用选择主 Agent 的模型。";
-		if (this.replacing || this.remoteTurn || this.localSubmissions || this.isBusy() || !this.session.isIdle) return "Rally 正在回复上一条消息，请稍后再发送。";
-		const session = this.session;
-		const turn = Promise.resolve().then(async () => {
-			if (this.disposed) return null;
-			const start = this.messages.length;
-			const line = this.addLine("user", text, false, undefined, source);
-			this.receivedIm.add(key);
-			try {
-				await session.sendUserMessage(`[User message ${line.id}]\n${text}`);
-				const reply = this.messages.slice(start + 1).findLast(item => item.role === "assistant" && !item.streaming && item.text.trim());
-				return reply?.text.trim() || "这轮没有生成文字回复，请在 Rally 桌面查看对话和任务。";
-			} catch (error) {
-				this.fail(error);
-				return "Rally 未能处理这条消息，请在桌面查看主对话。";
-			}
-		});
-		this.remoteTurn = turn;
-		try { return await turn; }
-		finally { this.remoteTurn = undefined; if (!this.disposed) this.onAvailable?.(); }
+		if (this.disposed) throw Error("Rally 正在关闭，消息未接收");
+		if (!text.trim() || this.receivedIm.has(imKey(source))) return null;
+		const line = this.enqueue(text, [], source);
+		const result = new Promise<string | null>(resolve => this.imWaiters.set(line.id, resolve));
+		await this.wakeInbox(line);
+		return result;
 	}
 
-	/** Steer a busy desktop turn, or wait for an IM turn to finish. */
-	async send(text: string, attachmentIds: string[] = [], actor = "desktop"): Promise<void> {
-		const trimmed = text.trim();
-		if (!trimmed && !attachmentIds.length) return;
-		await this.beforeInput?.();
+	async send(text: string, attachmentIds: string[] = [], actor = "desktop", requestId?: string): Promise<void> {
+		if (this.disposed) throw Error("Rally 正在关闭，消息未接收");
+		if (!text.trim() && !attachmentIds.length) return;
+		const submissionId = requestId ? `${actor}:${requestId}` : undefined;
+		if (submissionId && this.receivedSubmissions.has(submissionId)) return;
 		const resources = this.resources?.();
 		if (attachmentIds.length && !resources) throw Error("附件资源库不可用");
 		const attachments = resources ? resolveAttachments(resources, attachmentIds, actor) : [];
+		const line = this.enqueue(text, attachments, undefined, submissionId);
+		await this.wakeInbox(line);
+	}
+
+	private enqueue(text: string, attachments: ResourceRef[], source?: ImSource, submissionId?: string): ChatLine {
+		const line: ChatLine = { id: `#${this.nextLine++}`, role: "user", text, at: Date.now(), streaming: false,
+			delivery: { status: "queued" }, source, submissionId, ...(attachments.length ? { attachments } : {}) };
+		if (attachments.length) this.resources?.().retain(`message:${line.id}`, attachments.map(ref => ref.id));
+		// The message and its queued state are one append: no crash gap between acceptance and intake.
+		this.logLine(line);
+		this.messages.push(line);
+		if (source) this.receivedIm.add(imKey(source));
+		if (submissionId) this.receivedSubmissions.add(submissionId);
+		this.emit({ type: "message", message: clone(line) });
+		return line;
+	}
+
+	private async wakeInbox(line: ChatLine): Promise<void> {
+		try {
+			await this.beforeUserInput?.();
+			await this.beforeInput?.();
+			await this.start();
+			if (this.disposed) return;
+			this.setInboxPaused(false);
+			this.available();
+			this.onAvailable?.();
+		} catch (error) {
+			this.setDelivery(line, { status: "failed", error: String(error) });
+			this.imWaiters.get(line.id)?.("消息已保存，但处理失败，请在 Rally 中重试。");
+			this.imWaiters.delete(line.id);
+		}
+	}
+
+	async updateInbox(input: unknown): Promise<void> {
+		if (!input || typeof input !== "object" || !("action" in input) || this.disposed) throw Error("无效的收件箱操作");
+		if (input.action === "resume") {
+			if (!this.canRun()) throw Error(INACTIVITY_MESSAGE);
+			this.setInboxPaused(false);
+			await this.start();
+			this.available();
+			this.onAvailable?.();
+			return;
+		}
+		if (!("id" in input) || typeof input.id !== "string") throw Error("缺少消息编号");
+		const line = this.messages.find(item => item.id === input.id && item.role === "user");
+		if (!line?.delivery) throw Error("找不到收件箱消息");
+		if (input.action === "cancel") {
+			if (line.delivery.reply && ["pending", "failed"].includes(line.delivery.reply.status) && line.delivery.status === "done") {
+				this.setDelivery(line, { ...line.delivery, reply: { ...line.delivery.reply, status: "cancelled", error: undefined } });
+				return;
+			}
+			if (!["queued", "failed"].includes(line.delivery.status)) throw Error("消息已开始处理，无法撤回；可停止当前回复");
+			this.setDelivery(line, { status: "cancelled" });
+			this.imWaiters.get(line.id)?.(null);
+			this.imWaiters.delete(line.id);
+			this.available();
+			this.onAvailable?.();
+			return;
+		}
+		if (input.action !== "retry") throw Error("无效的收件箱操作");
+		if (!this.canRun()) throw Error(INACTIVITY_MESSAGE);
+		if (line.delivery.status === "done" && line.delivery.reply?.status === "failed") {
+			this.setDelivery(line, { ...line.delivery, reply: { ...line.delivery.reply, status: "pending", error: undefined } });
+		} else {
+			if (line.delivery.status !== "failed") throw Error("只能重试失败的消息");
+			this.setDelivery(line, { status: "queued", retried: true });
+		}
+		this.setInboxPaused(false);
 		await this.start();
-		while (this.replacing || this.remoteTurn) await (this.replacing ?? this.remoteTurn)?.catch(() => {});
-		if (this.disposed) return;
-		const line = this.addLine("user", text, false, undefined, undefined, attachments);
+		this.available();
+	}
+
+	private setInboxPaused(paused: boolean): void {
+		if (this.inboxPaused === paused) return;
+		this.events.append("chat_queue_paused", { paused });
+		this.inboxPaused = paused;
+		this.emit({ type: "snapshot", state: this.state() });
+	}
+
+	private setDelivery(line: ChatLine, delivery: ChatDelivery): void {
+		if (line.delivery?.retried) delivery.retried = true;
+		this.logLine({ ...line, delivery });
+		line.delivery = delivery;
+		this.emit({ type: "message", message: clone(line) });
+	}
+
+	private drainInbox(): void {
+		if (this.disposed || this.pausing || this.replacing || this.inboxTurn || this.inboxPaused || this.localSubmissions ||
+			!this.canRun() || this.isBusy() || !this.session?.isIdle || !this.model) return;
+		const line = this.messages.find(item => item.delivery?.status === "queued");
+		if (!line) return;
 		const session = this.session;
-		if (!session) {
-			this.addLine("system", "主会话没有启动成功，消息未送达。");
-			return;
-		}
-		if (!this.model) {
-			this.addLine("system", "尚未配置模型。请先在设置中接入一个 provider 并选择模型。");
-			return;
-		}
-		this.localSubmissions++;
-		this.onAvailable?.();
-		// Do not await the whole turn; preserve order through image preparation and Pi admission.
-		void this.submissions!.send(() => attachmentMessage(resources, `[User message ${line.id}]\n${text}`, attachments, session.model), () => !this.disposed)
-			.catch((error: unknown) => { if (!this.disposed) this.fail(error); })
-			.finally(() => { this.localSubmissions--; if (!this.disposed) this.onAvailable?.(); });
+		this.activeInput = line;
+		this.inputError = undefined;
+		this.inboxTurn = Promise.resolve().then(async () => {
+			try {
+				await this.beforeInput?.();
+				if (this.disposed || this.pausing || this.inboxPaused || !this.canRun() || line.delivery?.status !== "queued") return;
+				if (!line.source) {
+					this.preparingInput = true;
+					try { await this.beforeUserTurn?.(); }
+					finally { this.preparingInput = false; }
+				}
+				const retry = line.delivery?.retried ? "\n\n<rally-retry>Host notice: the user explicitly retried this interrupted message. Some work may already be complete. Check conversation history and task_read before taking action; continue existing tasks and do not repeat completed actions.</rally-retry>" : "";
+				const content = await attachmentMessage(this.resources?.(), `[User message ${line.id}]\n${line.text}${retry}`, line.attachments ?? [], session.model);
+				if (this.disposed || this.pausing || this.inboxPaused || !this.canRun() || line.delivery?.status !== "queued") return;
+				this.setDelivery(line, { status: "processing" });
+				await session.sendUserMessage(content);
+				if (this.disposed || this.pausing || !this.canRun()) return;
+				if (this.inputError) throw Error(this.inputError);
+				const reply = this.messages.findLast(item => item.role === "assistant" && item.replyTo === line.id && !item.streaming && item.text.trim())?.text.trim()
+					|| "这轮没有生成文字回复，请在 Rally 查看对话和任务。";
+				const awaited = this.imWaiters.has(line.id);
+				this.setDelivery(line, { status: "done", ...(line.source && !awaited ? { reply: { status: "pending" as const, text: reply } } : {}) });
+				this.imWaiters.get(line.id)?.(reply);
+			} catch (error) {
+				if (!this.disposed && !this.pausing && this.canRun()) {
+					this.setDelivery(line, { status: "failed", error: error instanceof Error ? error.message : String(error),
+						...(line.source ? { reply: { status: "pending" as const, text: "这条消息处理未完成，已保留在 Rally 收件箱。请检查已有进展后重试，后续消息暂时排队。" } } : {}) });
+					this.setInboxPaused(true);
+					this.imWaiters.get(line.id)?.("消息处理失败，请在 Rally 查看并重试。");
+				}
+			} finally {
+				this.imWaiters.get(line.id)?.(null);
+				this.imWaiters.delete(line.id);
+			}
+		}).catch(error => {
+			// A broken log must not turn an unchanged queued item into a tight retry loop.
+			this.inboxPaused = true;
+			console.error("Inbox persistence failed", error);
+		}).finally(() => {
+			this.inboxTurn = undefined;
+			this.activeInput = undefined;
+			if (!this.disposed && !this.pausing) { this.available(); this.onAvailable?.(); }
+		});
+	}
+
+	private async flushReplies(): Promise<void> {
+		if (this.replying || !this.reply || this.disposed || !this.canRun()) return;
+		this.replying = true;
+		try {
+			for (const line of this.messages) {
+				const reply = line.delivery?.reply;
+				if (this.disposed || !this.canRun()) break;
+				if (reply?.status !== "pending" || !line.source || !this.canReply?.(line.source)) continue;
+				this.setDelivery(line, { ...line.delivery!, reply: { ...reply, status: "sending" } });
+				try {
+					await this.reply(line.source, reply.text);
+					if (!this.disposed) this.setDelivery(line, { ...line.delivery!, reply: { ...reply, status: "sent" } });
+				} catch (error) {
+					if (!this.disposed) this.setDelivery(line, { ...line.delivery!, reply: { ...reply, status: "failed", error: String(error) } });
+				}
+			}
+		} finally { this.replying = false; }
 	}
 
 	async abort(): Promise<void> {
-		this.submissions?.cancel();
+		this.setInboxPaused(true);
+		this.inputError = "已停止处理；如需继续，请重试这条消息。";
 		const session = this.session;
 		if (!session) return;
-		try {
-			await session.abort();
-		} catch (error) {
-			this.fail(error);
-		}
+		try { await session.abort(); }
+		catch (error) { this.fail(error); }
 	}
 
 	/**
 	 * Compact model context in place. UI history and quote IDs remain intact.
 	 */
 	async reset(): Promise<boolean> {
+		if (!this.canRun()) { this.addSystemLine(INACTIVITY_MESSAGE); return false; }
 		await this.start();
 		if (!this.session || !this.model) { this.addSystemLine("请先选择主 agent 模型再整理上下文。"); return false; }
-		if (this.replacing || this.remoteTurn || this.localSubmissions || this.isBusy() || !this.session.isIdle) { this.addSystemLine("请等待当前回复结束后再整理上下文。"); return false; }
+		if (this.replacing || this.inboxTurn || this.localSubmissions || this.isBusy() || !this.session.isIdle) { this.addSystemLine("请等待当前回复结束后再整理上下文。"); return false; }
 		this.setBusy(true);
 		try {
 			await this.session.compact("Preserve user goals, quoted message IDs, task IDs, decisions and unresolved questions. Never invent user quotes.");
@@ -324,34 +499,68 @@ export class MainAgent {
 			return false;
 		} finally {
 			this.setBusy(false);
+			this.available();
 		}
 	}
 
 	async newConversation(): Promise<void> {
 		await this.start();
 		if (this.disposed || !this.session) throw new Error("主会话未就绪，请稍后再试。");
-		if (this.replacing || this.remoteTurn || this.localSubmissions || this.isBusy() || !this.session.isIdle) {
+		if (this.replacing || this.inboxTurn || this.localSubmissions || this.isBusy() || !this.session.isIdle) {
 			throw new Error("请等待当前回复或整理结束后再新建会话。");
+		}
+		if (this.hasPendingInbox()) {
+			throw new Error("请先处理或撤回收件箱中的待处理消息，再新建会话。");
 		}
 		const operation = this.create(randomUUID());
 		this.replacing = operation;
 		try { await operation; }
 		finally {
 			this.replacing = undefined;
-			if (!this.disposed) this.onAvailable?.();
+			if (!this.disposed) { this.available(); this.onAvailable?.(); }
 		}
+	}
+
+	private hasPendingInbox(): boolean {
+		return this.messages.some(line => line.delivery?.status === "queued" || line.delivery?.status === "failed" ||
+			line.delivery?.reply && ["pending", "sending", "failed"].includes(line.delivery.reply.status));
+	}
+
+	/** Close inference, compaction, cache warming and transports without clearing history. */
+	pause(): Promise<void> {
+		if (this.pausing) return this.pausing;
+		const current = this.session;
+		const closing = current ? closeRoleSession(current) : undefined;
+		this.pausing = (async () => {
+			const results = await Promise.allSettled([closing, this.starting, this.replacing, this.inboxTurn]);
+			const session = this.session;
+			if (session && session !== current) await closeRoleSession(session);
+			this.unsubscribe?.();
+			this.unsubscribe = null;
+			this.session = null;
+			this.queuedRelays.clear();
+			this.finishStreaming();
+			this.recoverInbox();
+			this.setBusy(false);
+			const errors = results.flatMap(result => result.status === "rejected" ? [result.reason] : []);
+			if (errors.length) throw new AggregateError(errors, "Main session pause failed");
+		})().finally(() => { this.pausing = undefined; });
+		return this.pausing;
 	}
 
 	dispose(): Promise<void> {
 		if (this.disposal) return this.disposal;
 		this.disposed = true;
-		this.submissions?.cancel();
+		clearInterval(this.inboxTimer);
+		for (const resolve of this.imWaiters.values()) resolve(null);
+		this.imWaiters.clear();
 		this.unsubscribe?.();
 		this.unsubscribe = null;
 		const session = this.session;
 		this.session = null;
 		this.disposal = Promise.allSettled([
-			this.submissions?.idle(),
+			this.pausing,
+			this.inboxTurn,
 			this.starting,
 			this.replacing,
 			session ? closeRoleSession(session) : undefined,
@@ -374,6 +583,7 @@ export class MainAgent {
 			const compactions = newId ? 0 : countCompactions(sessionManager);
 			if (!newId) this.rotateSession(sessionManager);
 			const { session, modelFallbackMessage } = await createRoleSession({
+				canRun: () => !this.disposed && this.canRun(),
 				cwd: this.paths.mainCwd,
 				agentDir: this.paths.agentDir,
 				modelRuntime: runtime ?? undefined,
@@ -384,23 +594,28 @@ export class MainAgent {
 				tools: MAIN_TOOLS,
 				customTools: this.customTools,
 				...(this.resources ? { extensions: [resourceTools({ store: this.resources, owner: "main", cwd: () => this.workspace?.().defaultWorkspace ?? this.paths.mainCwd,
-					roots: () => [this.workspace?.().defaultWorkspace ?? this.paths.mainCwd], active: () => !this.disposed,
+					roots: () => [this.workspace?.().defaultWorkspace ?? this.paths.mainCwd], active: () => !this.disposed && this.canRun(),
 					publish: (id, refs) => this.publish(id, refs) })], extensionTools: ["resource_publish"] } : {}),
 			});
 			candidate = session;
 			if (this.disposed) { await closeRoleSession(session); return; }
 			const previous = this.session;
 			if (newId) {
+				// A message may have arrived while the replacement session was loading.
+				if (this.hasPendingInbox()) {
+					throw Error("新消息已进入收件箱，请先处理或撤回后再新建会话。");
+				}
 				const event = this.events.append("chat_reset", { conversationId: newId });
 				this.conversation = { id: newId, at: event.at };
 				this.unsubscribe?.();
 				this.messages.length = 0;
+				this.contextBefore = undefined;
 				this.streaming = null;
 				this.toolLines.clear();
 				this.queuedRelays.clear();
+				this.setInboxPaused(false);
 			}
 			this.session = session;
-			this.submissions = new AttachmentQueue(session);
 			this.compactions = compactions;
 			candidate = undefined;
 			const transform = session.agent.transformContext;
@@ -487,7 +702,7 @@ export class MainAgent {
 			this.refreshModelState();
 		} catch (error) {
 			this.fail(error);
-		} finally { this.localSubmissions--; }
+		} finally { this.localSubmissions--; this.available(); }
 	}
 
 	/** Re-read model + thinking facts from the live session and push a snapshot. */
@@ -501,6 +716,7 @@ export class MainAgent {
 		this.refreshHeader();
 		this.emit({ type: "snapshot", state: this.state() });
 		this.onAvailable?.();
+		this.available();
 	}
 
 	private handle(event: AgentSessionEvent): void {
@@ -525,6 +741,8 @@ export class MainAgent {
 				this.finishStreaming();
 				return;
 			case "agent_settled":
+				if (event.aborted && this.activeInput) this.inputError ??= "处理被中断，请检查已有进展后重试。";
+				this.contextBefore = undefined;
 				if (this.session) this.rotateSession(this.session.sessionManager);
 				this.queuedRelays.clear();
 				for (const line of new Set(this.toolLines.values())) {
@@ -535,6 +753,7 @@ export class MainAgent {
 				this.refreshHeader();
 				this.setBusy(false);
 				this.onSettled?.(event.aborted);
+				queueMicrotask(() => this.available());
 				return;
 			case "tool_execution_start": {
 				const last = this.messages.at(-1);
@@ -561,6 +780,12 @@ export class MainAgent {
 				return;
 			}
 			case "message_start":
+				if (event.message.role === "user") {
+					// Anchor to input admitted by Pi; newer queued UI messages are not this request.
+					const content = event.message.content;
+					const text = typeof content === "string" ? content : content.filter(part => part.type === "text").map(part => part.text).join("\n");
+					this.contextBefore = /^\[User message (#[1-9]\d*)\]/.exec(text)?.[1] ?? this.messages.findLast(line => line.role === "user")?.id;
+				}
 				if (event.message.role === "assistant") {
 					if (!this.toolLines.size && this.header.activity !== "compacting") this.setActivity("thinking");
 					this.startStreaming();
@@ -576,8 +801,13 @@ export class MainAgent {
 				if (event.message.role !== "assistant") return;
 				this.updateStreaming(event.message);
 				this.finishStreaming();
-				if (event.message.stopReason === "error" && event.message.errorMessage) {
-					this.addSystemLine(`模型调用失败：${event.message.errorMessage}`);
+				if (this.activeInput && !this.inboxPaused && event.message.stopReason !== "error" && event.message.stopReason !== "aborted") this.inputError = undefined;
+				if (event.message.stopReason === "error") {
+					const error = event.message.errorMessage || "模型未能完成这条消息。";
+					if (this.activeInput) this.inputError = error;
+					this.addSystemLine(`模型调用失败：${error}`);
+				} else if (event.message.stopReason === "aborted" && this.activeInput) {
+					this.inputError ??= "处理被中断，请检查已有进展后重试。";
 				}
 		}
 	}
@@ -597,7 +827,7 @@ export class MainAgent {
 
 	private startStreaming(): void {
 		this.finishStreaming();
-		this.streaming = { line: { id: `#${this.nextLine++}`, role: "assistant", text: "", at: Date.now(), streaming: true } };
+		this.streaming = { line: { id: `#${this.nextLine++}`, role: "assistant", text: "", at: Date.now(), streaming: true, replyTo: this.activeInput?.id } };
 	}
 
 	private updateStreaming(message: unknown): void {
@@ -631,7 +861,7 @@ export class MainAgent {
 	}
 
 	private claimImageRequest(messageId: string, toolCallId: string, request: string): (parametersRejected: boolean) => void {
-		const index = this.messages.findLastIndex(message => message.role === "user");
+		const index = this.messages.findLastIndex(message => message.role === "user" && (this.activeInput ? message.id === this.activeInput.id : message.delivery?.status !== "queued" && message.delivery?.status !== "cancelled"));
 		if (index < 0 || this.messages[index].id !== messageId) throw Error("主对话生图需要引用最近一条明确授权的用户消息");
 		const preceding = this.messages.slice(index + 1).flatMap(line => line.toolCalls ?? []).filter(call => call.name === "image_gen" && call.id !== toolCallId);
 		const previous = this.imageAttempt?.messageId === messageId ? this.imageAttempt : undefined;
@@ -669,6 +899,9 @@ export class MainAgent {
 			relayId: line.relayId,
 			source: line.source,
 			attachments: line.attachments,
+			delivery: line.delivery,
+			replyTo: line.replyTo,
+			submissionId: line.submissionId,
 		});
 	}
 
@@ -708,6 +941,7 @@ export class MainAgent {
 
 	private replay(): void {
 		for (const event of this.events.all()) {
+			if (event.kind === "chat_queue_paused") this.inboxPaused = event.data.paused === true;
 			if (event.kind === "chat_reset") {
 				const id = event.data.conversationId;
 				if (typeof id === "string" && /^[0-9a-f-]{36}$/.test(id)) this.conversation = { id, at: event.at };
@@ -726,11 +960,26 @@ export class MainAgent {
 			const source = event.data.source as ImSource | undefined;
 			if (source?.platform === "feishu" || source?.platform === "qq") this.receivedIm.add(imKey(source));
 			const attachments = event.data.attachments as ResourceRef[] | undefined;
-			const line = { id: `#${n}`, role, text, at, streaming: false, toolCalls, blocks, relayId, source, attachments };
+			const delivery = event.data.delivery as ChatDelivery | undefined;
+			const replyTo = typeof event.data.replyTo === "string" ? event.data.replyTo : undefined;
+			const submissionId = typeof event.data.submissionId === "string" ? event.data.submissionId : undefined;
+			if (submissionId) this.receivedSubmissions.add(submissionId);
+			const line = { id: `#${n}`, role, text, at, streaming: false, toolCalls, blocks, relayId, source, attachments, delivery, replyTo, submissionId };
 			const index = this.messages.findIndex((item) => item.id === line.id);
 			if (index === -1) this.messages.push(line);
 			else this.messages[index] = line;
 			this.nextLine = Math.max(this.nextLine, n + 1);
+		}
+	}
+
+	private recoverInbox(): void {
+		for (const line of this.messages) {
+			if (line.delivery?.status === "processing") {
+				this.setDelivery(line, { status: "failed", error: "上次处理被中断，可能已有部分操作完成。请检查进展后重试。" });
+				this.setInboxPaused(true);
+			} else if (line.delivery?.reply?.status === "sending") {
+				this.setDelivery(line, { ...line.delivery, reply: { ...line.delivery.reply, status: "failed", error: "上次发送结果不明，请先检查原聊天；重发可能重复。" } });
+			}
 		}
 	}
 }
@@ -763,7 +1012,7 @@ function imKey(source: ImSource): string {
 }
 
 function clone(line: ChatLine): ChatLine {
-	return { ...line, attachments: line.attachments?.map(ref => ({ ...ref })), blocks: line.blocks?.map((block) => ({ ...block })), toolCalls: line.toolCalls?.map((call) => ({ ...call })) };
+	return { ...line, delivery: line.delivery && structuredClone(line.delivery), attachments: line.attachments?.map(ref => ({ ...ref })), blocks: line.blocks?.map((block) => ({ ...block })), toolCalls: line.toolCalls?.map((call) => ({ ...call })) };
 }
 
 function relayIds(details: unknown): string[] {

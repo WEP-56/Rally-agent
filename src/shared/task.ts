@@ -8,6 +8,7 @@ import type { TaskGate } from "./gate.ts";
 import type { JobRecord } from "./jobs.ts";
 import type { ServiceRecord } from "./services.ts";
 import type { ScheduleTiming } from "./schedules.ts";
+import type { MemoryFileKey } from "./memory.ts";
 
 export type TaskMode = "write" | "readonly";
 export type ReportState = "progress" | "ready" | "blocked" | "failed" | "dropped";
@@ -30,6 +31,11 @@ export interface QuoteRef {
 	withProposal?: boolean;
 }
 
+/** Host-copied, frozen background. Older excerpt records remain readable. */
+export type TaskContext =
+	| { source: "chat"; id: string; role: "user" | "assistant"; at: number; text: string; turnId?: string; truncated?: boolean }
+	| { source: "memory"; file: MemoryFileKey; text: string };
+
 export interface TaskRun {
 	id: string;
 	n: number;
@@ -38,6 +44,8 @@ export interface TaskRun {
 	startedAt: number;
 	endedAt?: number;
 	endReason?: "ready" | "failed" | "dropped" | "cancelled" | "interrupted" | "stalled" | "blocked";
+	/** The run and its pending questions survive host inactivity protection. */
+	inactivityPausedAt?: number;
 	lastReport?: { state: ReportState; summary: string; at: number; attachments?: ResourceRef[] };
 	/** One automatic inactivity retry per run, preserved in task facts. */
 	stallRetries?: number;
@@ -107,6 +115,7 @@ export interface Task {
 	roleId?: string;
 	title: string;
 	quotes: Quote[];
+	context?: TaskContext[];
 	note?: string;
 	cwd: string;
 	/** Declared write paths (04 §2.2). Overlap only warns; it never queues or blocks. */
@@ -284,6 +293,7 @@ function derive(
 		if (after === 0) return { status: "blocked", statusText: "受阻" };
 	}
 	if (task.approval.state === "pending") return { status: "pending_approval", statusText: "待批准" };
+	if (lastRun?.inactivityPausedAt !== undefined && !lastRun.endedAt) return { status: "queued", statusText: "闲置保护暂停 · 等待继续" };
 	if (task.queue) {
 		const reason =
 			task.queue.reason === "dependency_failed"

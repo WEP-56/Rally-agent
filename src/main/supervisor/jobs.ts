@@ -130,10 +130,10 @@ export class JobManager {
 		return { killed: true };
 	}
 
-	killTask(taskId: string): Promise<number> {
+	killTask(taskId: string, reason: "task_ended" | "inactivity" = "task_ended"): Promise<number> {
 		const pending = this.taskStops.get(taskId); if (pending) return pending;
 		const jobs = [...this.running.values()].filter(job => job.record.taskId === taskId && job.record.status === "running");
-		for (const job of jobs) this.stop(job, "task_ended");
+		for (const job of jobs) this.stop(job, reason);
 		const stopped = Promise.allSettled(jobs.map(job => job.done)).then(results => {
 			const errors = results.flatMap(result => result.status === "rejected" ? [result.reason] : []);
 			if (errors.length) throw new AggregateError(errors, "JOB_STOP_FAILED");

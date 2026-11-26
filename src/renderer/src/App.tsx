@@ -406,6 +406,13 @@ export default function App() {
           <div className="pointer-events-none absolute -left-40 top-[calc(2.5rem-160px)] h-[520px] w-[520px] rounded-full bg-accent/[0.07] blur-3xl" />
           <div className="desktop-bar"><TitleBar menus={cloud?menus.map(m=>({...m,groups:m.groups?.map(g=>g.filter(i=>i.label!=="终端"))})):menus} onSearch={() => setPalette(true)} maximized={maximized} onMin={minimize} onMax={toggleMax} onClose={close} onDoubleClick={toggleMax} /></div>
 
+          {chat.inactivity?.pausedAt !== undefined && (
+            <div role="status" className="relative flex shrink-0 items-center gap-2 border-b border-line bg-accent/10 px-4 py-2 text-sm text-fg">
+              <Moon size={15} className="shrink-0 text-accent" />
+              <span>已连续 3 天未发言，闲置保护已暂停 Agent 活动。发送一条消息即可恢复。</span>
+            </div>
+          )}
+
           {view === "settings" && (
             <div className="min-h-0 flex-1">
               <Settings section={section} setSection={setSection} onBack={() => setView("main")} tasks={tasks} />
@@ -423,6 +430,8 @@ export default function App() {
                   conversationId={chat.conversation?.id}
                   tasks={tasks}
                   busy={chat.busy}
+                  inboxPaused={chat.inboxPaused}
+                  modelReady={Boolean(chat.model)}
                   onSend={chat.send}
                   onStop={stop}
                   onNewChat={newChat}

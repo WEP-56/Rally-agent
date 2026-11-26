@@ -22,6 +22,7 @@ export interface ProcessRunOptions {
 export interface ProcessInput { write(data: string | Uint8Array): Promise<void>; end(): void }
 export interface ManagedProcess { ready: Promise<ProcessInput>; exited: Promise<number>; close(): void }
 export interface ProcessRegistryOptions {
+	canRun?(owner: ProcessOwner): boolean;
 	assertWritable(): void;
 	onStopped?(entry: OwnedProcess, reason: "recovery" | "completed" | "cancelled" | "error", result: ProcessStopResult): void;
 	/** Test injection only; normal cancellation always gives the tree five seconds. */
@@ -66,6 +67,7 @@ export class ProcessRegistry {
 	}
 
 	run(command: ProcessCommand, owner: ProcessOwner, options: ProcessRunOptions): Promise<number> {
+		if (this.options.canRun?.(owner) === false) return Promise.reject(new Error("PROCESS_PAUSED: 闲置保护已暂停活动"));
 		if (this.disposed) return Promise.reject(new Error("PROCESS_REGISTRY_CLOSED"));
 		if (this.failures.length) return Promise.reject(new Error("PROCESS_REGISTRY_FAILED: 上次进程清理失败，不能继续启动命令"));
 		const controller = new AbortController();
@@ -88,6 +90,12 @@ export class ProcessRegistry {
 		return { ready, exited, close: () => controller.abort() };
 	}
 
+	async interrupt(): Promise<void> {
+		for (const controller of this.running.values()) controller.abort();
+		await Promise.allSettled(this.running.keys());
+		if (this.failures.length) throw new AggregateError(this.failures, "PROCESS_PAUSE_FAILED");
+	}
+
 	dispose(): Promise<void> {
 		if (this.disposal) return this.disposal;
 		this.disposed = true;
@@ -102,6 +110,7 @@ export class ProcessRegistry {
 
 	private async execute(command: ProcessCommand, owner: ProcessOwner, options: ProcessRunOptions, signal: AbortSignal): Promise<number> {
 		await this.recover(); signal.throwIfAborted(); this.options.assertWritable();
+		if (this.options.canRun?.(owner) === false) throw new Error("PROCESS_PAUSED: 闲置保护已暂停活动");
 		const hostPath = this.options.hostPath ?? fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./process-host.ts" : "./process-host.js", import.meta.url));
 		// The helper only needs the runtime/system environment. Credentials go to the command via IPC.
 		const env = Object.fromEntries(["SystemRoot", "SystemDrive", "PATH", "PATHEXT", "COMSPEC", "TEMP", "TMP"].flatMap(key => process.env[key] ? [[key, process.env[key]!]] : []));

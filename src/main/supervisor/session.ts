@@ -1,12 +1,18 @@
 // Both roles use this path so loader initialization and tool allowlists cannot drift apart.
-import { type AgentSession, createAgentSession, DefaultResourceLoader, type ExtensionFactory } from "@rally/coding-agent";
+import { type AgentSession, createAgentSession, DefaultResourceLoader, type ExtensionFactory, markRuntimeStreamFunction } from "@rally/coding-agent";
+import { INACTIVITY_MESSAGE } from "./inactivity.ts";
 import { SkillStore } from "../skill-store.ts";
 import { projectSettings } from "../project-trust.ts";
 
 type SessionOptions = NonNullable<Parameters<typeof createAgentSession>[0]>;
 
-export async function createRoleSession(options: SessionOptions & { rolePrompt: string; loadProjectContext?: boolean; loadProjectSkills?: boolean; extensions?: ExtensionFactory[]; extensionTools?: string[]; startupSignal?: AbortSignal; onSessionCreated?(session: AgentSession): void }) {
-	const { rolePrompt, loadProjectContext = false, loadProjectSkills = false, extensions, extensionTools = [], startupSignal, onSessionCreated, ...sessionOptions } = options;
+export async function createRoleSession(options: SessionOptions & { rolePrompt: string; loadProjectContext?: boolean; loadProjectSkills?: boolean; extensions?: ExtensionFactory[]; extensionTools?: string[]; startupSignal?: AbortSignal; canRun?(): boolean; onSessionCreated?(session: AgentSession): void }) {
+	const { rolePrompt, loadProjectContext = false, loadProjectSkills = false, extensions = [], extensionTools = [], startupSignal, canRun, onSessionCreated, ...sessionOptions } = options;
+	const guardedExtensions = [...extensions];
+	if (canRun) guardedExtensions.push(api => {
+		api.on("cache_warming_decision", () => canRun() ? undefined : { action: "stop" });
+		api.on("tool_call", () => canRun() ? undefined : { block: true, reason: INACTIVITY_MESSAGE });
+	});
 	startupSignal?.throwIfAborted();
 	if (!options.cwd || !options.agentDir) throw new Error("Rally 会话必须显式指定 cwd 和 agentDir");
 	const settingsManager = projectSettings(options.cwd, options.agentDir, loadProjectContext);
@@ -16,7 +22,7 @@ export async function createRoleSession(options: SessionOptions & { rolePrompt: 
 		agentDir: options.agentDir,
 		noContextFiles: !loadProjectContext,
 		noExtensions: true,
-		extensionFactories: extensions,
+		extensionFactories: guardedExtensions,
 		noSkills: !loadProjectSkills,
 		...(loadProjectSkills ? new SkillStore(options.agentDir).loaderOptions() : {}),
 		noPromptTemplates: true,
@@ -31,9 +37,18 @@ export async function createRoleSession(options: SessionOptions & { rolePrompt: 
 	const tools = [...new Set([...(options.tools ?? []), ...(options.customTools ?? []).map((tool) => tool.name)])];
 	const result = await createAgentSession({ ...sessionOptions, settingsManager, tools: [...tools, ...extensionTools], resourceLoader: loader });
 	try {
+		if (canRun) {
+			const agent = result.session.agent;
+			const stream = agent.streamFunction;
+			agent.streamFunction = (model, context, request) => {
+				if (!canRun()) throw new Error(INACTIVITY_MESSAGE);
+				return stream(model, context, request);
+			};
+			markRuntimeStreamFunction(agent.streamFunction, result.session.modelRuntime);
+		}
 		onSessionCreated?.(result.session);
 		startupSignal?.throwIfAborted();
-		if (extensions?.length) await result.session.bindExtensions({});
+		if (guardedExtensions.length) await result.session.bindExtensions({});
 		startupSignal?.throwIfAborted();
 	} catch (error) {
 		await closeRoleSession(result.session);

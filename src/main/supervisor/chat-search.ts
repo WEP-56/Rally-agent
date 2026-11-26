@@ -5,7 +5,8 @@ import type { ChatLine } from "../../shared/ipc.ts";
 const messageId = Type.String({ pattern: "^#[1-9][0-9]*$" });
 export const ChatSearchSchema = Type.Object({
 	query: Type.Optional(Type.String({ minLength: 1, maxLength: 1000 })),
-	id: Type.Optional(messageId), aroundId: Type.Optional(messageId),
+	id: Type.Optional(Type.String({ ...messageId, description: 'Exact lookup: pass only {id:"#123"}. Do not add query, aroundId, times or cursor.' })),
+	aroundId: Type.Optional(Type.String({ ...messageId, description: "Neighbourhood lookup; do not combine with id." })),
 	before: Type.Optional(Type.Integer({ minimum: 0 })), after: Type.Optional(Type.Integer({ minimum: 0 })),
 	limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
 	cursor: Type.Optional(Type.String({ maxLength: 4096 })),
@@ -21,7 +22,7 @@ export function searchChat(history: readonly ChatLine[], params: ChatSearchParam
 		[id, aroundId].some(value => value !== undefined && !/^#[1-9]\d*$/.test(value)) ||
 		(query !== undefined && (typeof query !== "string" || !query.trim() || query.length > 1000)) ||
 		(id !== undefined && [query, aroundId, before, after, cursor].some(value => value !== undefined)))
-		throw new Error("CHAT_SEARCH_INVALID: 检查查询、消息 ID、时间范围及分页参数；id 查询不可混用过滤条件");
+		throw new Error("CHAT_SEARCH_INVALID: 按 ID 读取只传 {id:\"#123\"}；关键词用 {query:\"关键词\"}；邻近消息用 {aroundId:\"#123\"}。三种用途不要混用 id；时间须为毫秒，limit 为 1–100。派发背景直接用 context 轮数，无需先检索");
 	const source = history.filter(line => (line.role === "user" || line.role === "assistant") && !line.streaming && !line.relayId);
 	if (id) return { messages: source.filter(line => line.id === id).map(line => pick(line, true)) };
 	const anchor = aroundId ? source.find(line => line.id === aroundId) : undefined;
@@ -61,6 +62,6 @@ function pick(line: ChatLine, full: boolean) {
 
 export function createChatSearchTool(search: (params: ChatSearchParams) => ReturnType<typeof searchChat>): ToolDefinition {
 	return { name: "chat_search", label: "搜索主对话", parameters: ChatSearchSchema,
-		description: "Search complete main-chat history, including before compaction. Literal case-insensitive query, exclusive before/after Unix-millisecond timestamps, newest first, limit 1–100 (default 20). aroundId returns neighbours. Previews are 200 characters; id alone returns exact full text. Continue with cursor=next and identical filters. Only user/assistant messages; only user IDs can authorize actions.",
+		description: "Search main-chat history when you need an older fact or original user authorization. Choose one mode: {id:\"#123\"} reads one full message and must be used alone; {query:\"keyword\",limit:20} searches; {aroundId:\"#123\",limit:10} reads neighbours. Never combine id with query, aroundId, times or cursor. Search is literal and case-insensitive; before/after are exclusive Unix-millisecond bounds. Results are newest first, with 200-character previews, limit 1–100. Continue with cursor=next and identical filters. Queued and withdrawn user messages are excluded. Only user IDs authorize actions. Worker background needs no search: use task_dispatch context:0–30 and memory:0/1.",
 		execute: async (_id, params: ChatSearchParams, signal) => { signal?.throwIfAborted(); const details = search(params); return { content: [{ type: "text", text: JSON.stringify(details) }], details }; } };
 }

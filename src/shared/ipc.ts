@@ -152,6 +152,7 @@ export const IpcChannel = {
 	chatState: "chat:state",
 	chatSend: "chat:send",
 	chatAbort: "chat:abort",
+	chatInbox: "chat:inbox",
 	chatReset: "chat:reset",
 	chatNewConversation: "chat:newConversation",
 	tasksState: "tasks:state",
@@ -217,6 +218,11 @@ export interface WindowApi {
 export type ChatRole = "user" | "assistant" | "system";
 
 export interface ChatLine {
+	/** Durable cloud retry key; not part of model input. */
+	submissionId?: string;
+	delivery?: ChatDelivery;
+	/** User message this assistant output answers; independent of arrival order. */
+	replyTo?: string;
 	attachments?: ResourceRef[];
 	source?: ImSource;
 	relayId?: string;
@@ -229,6 +235,15 @@ export interface ChatLine {
 	streaming: boolean;
 }
 
+export interface ChatDelivery {
+	status: "queued" | "processing" | "done" | "failed" | "cancelled";
+	retried?: boolean;
+	error?: string;
+	reply?: { status: "pending" | "sending" | "sent" | "failed" | "cancelled"; text: string; error?: string };
+}
+
+export type InboxAction = { action: "resume" } | { action: "cancel" | "retry"; id: string };
+
 export type ChatActivity = "thinking" | "replying" | "querying" | "planning" | "orchestrating" | "compacting";
 
 export interface ChatHeaderState {
@@ -237,8 +252,16 @@ export interface ChatHeaderState {
 	showNewConversation: boolean;
 }
 
+/** Persistent host protection; opening a client does not reset its clock. */
+export interface InactivityState {
+	lastUserAt: number;
+	pausedAt?: number;
+}
+
 /** Snapshot of the main conversation; sent on subscribe and after resets. */
 export interface ChatState {
+	inboxPaused?: boolean;
+	inactivity?: InactivityState;
 	messages: ChatLine[];
 	header: ChatHeaderState;
 	conversation?: { id: string; at: number };
@@ -265,6 +288,7 @@ export interface ChatApi {
 	getState(): Promise<ChatState>;
 	send(text: string, attachments?: string[]): Promise<void>;
 	abort(): Promise<void>;
+	inbox(input: InboxAction): Promise<void>;
 	/** Compact context without clearing the conversation. */
 	reset(): Promise<boolean>;
 	newConversation(): Promise<void>;

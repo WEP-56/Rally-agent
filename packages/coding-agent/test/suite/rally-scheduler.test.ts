@@ -65,4 +65,22 @@ describe("Rally slot priority and one user overflow slot", () => {
 		expect(item.runs).toHaveLength(1);
 		t.scheduler.dispose(); for (const release of t.releases) release();
 	});
+	it("keeps a paused question waiting through system input and resumes its run after a user steer", async () => {
+		const { task, store, scheduler, order, releases } = await setup();
+		const waiting = task();
+		const run = store.startRun(waiting.id, "dispatch", "faux");
+		store.report(waiting.id, run.id, "blocked", "Need an answer", "Which option?", ["A", "B"]);
+		store.escalateAttention(waiting.id, waiting.attention!.id);
+		store.setInactivityPause(waiting.id, Date.now());
+		store.nudge(waiting.id, "system input");
+		scheduler.tick();
+		expect(order).toEqual([]);
+		expect(taskView(waiting).status).toBe("needs_answer");
+		store.steer(waiting.id, [], "Continue with option A");
+		scheduler.tick();
+		expect(order).toEqual([waiting.id]);
+		expect(waiting.runs).toEqual([run]);
+		scheduler.dispose();
+		for (const release of releases) release();
+	});
 });

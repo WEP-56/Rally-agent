@@ -24,7 +24,7 @@ export function readTask(store: TaskStore, task: Task, params: TaskReadParams): 
 	// Validate even scalar views: direct callers must obey the same contract as schema-validated calls.
 	page([], params);
 	switch (params.view ?? "card") {
-		case "card": return { card: { ...taskView(task), gates: task.gates?.map(modelGate) }, outputDir: task.outputDir };
+		case "card": return { card: { ...taskView(task), gates: task.gates?.map(modelGate) }, context: structuredClone(task.context ?? []), outputDir: task.outputDir };
 		case "report": return { report: task.runs.findLast((run) => run.lastReport)?.lastReport ?? null, attention: task.attention?.answer ? null : task.attention ?? null, gates: task.gates?.filter((gate) => !gate.decision).map(modelGate) ?? [], changedFiles: task.changedFiles ?? [] };
 		case "runs": {
 			const { items, ...paging } = page([...task.runs].reverse(), params);
@@ -42,7 +42,7 @@ export function readTask(store: TaskStore, task: Task, params: TaskReadParams): 
 		case "files": {
 			const { items, ...paging } = page(store.access(task.id), params);
 			return { accesses: items, changedFiles: task.changedFiles ?? [], outputDir: task.outputDir,
-				coverage: { writes: "successful write/edit only", reads: "successful read/grep/find/ls only", git: "attempted repository command scope; not exact changed files", shell: "unknown", network: "fetch_page/http_request explicit hosts, methods and redirect hops; git resolved remote hosts and github repository hosts; attempts, not confirmed traffic; gh discovery, proxy traffic, MCP and arbitrary shell effects not tracked", deletes: "successful file_delete entries only", jobs: "background shell job IDs; process effects unknown", services: "registered service IDs; process effects unknown", history: "legacy accesses not backfilled" }, ...paging };
+				coverage: { writes: "successful write/edit only", reads: "successful read/grep/find/ls only", git: "attempted repository command scope; not exact changed files", shell: "unknown", network: "fetch_page/http_request/world_location/world_weather explicit hosts, methods and redirect hops; git resolved remote hosts and github repository hosts; attempts, not confirmed traffic; gh discovery, proxy traffic, MCP and arbitrary shell effects not tracked", deletes: "successful file_delete entries only", jobs: "background shell job IDs; process effects unknown", services: "registered service IDs; process effects unknown", history: "legacy accesses not backfilled" }, ...paging };
 		}
 		default: throw new TaskError("VIEW_INVALID", "该任务视图不可用");
 	}
