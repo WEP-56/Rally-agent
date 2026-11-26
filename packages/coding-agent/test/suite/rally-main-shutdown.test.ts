@@ -14,7 +14,7 @@ const state = vi.hoisted(() => {
 });
 vi.mock("../../../../src/main/connection-host.ts", () => ({ connectionHost: () => ({mode:"local", close: async () => { state.order.push("connection"); }}) }));
 vi.mock("electron", () => ({
-	app: { isPackaged: false, getAppPath: () => process.cwd(), requestSingleInstanceLock: () => true, whenReady: () => state.whenReady, on: (name: string, callback: (...args: unknown[]) => void) => state.listeners.set(name, callback), exit: state.exit },
+	app: { isPackaged: false, getAppPath: () => process.cwd(), setAppUserModelId: vi.fn(), requestSingleInstanceLock: () => true, whenReady: () => state.whenReady, on: (name: string, callback: (...args: unknown[]) => void) => state.listeners.set(name, callback), exit: state.exit },
 	BrowserWindow: state.windows, nativeTheme: { shouldUseDarkColors: false }, dialog: {}, shell: {},
 }));
 vi.mock("../../../../src/main/paths.ts", () => ({ ensureRallyDirs: () => {}, resolveRallyPaths: () => ({ home: "fixture", agentDir: "fixture" }) }));

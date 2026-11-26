@@ -182,6 +182,8 @@ describe("Rally IPC shutdown boundary (no Electron UI)", () => {
 	});
 	it("lists real services and directly stops one through declared IPC without changing its task", async () => {
 		const { paths, supervisor } = await setup(); mkdirSync(paths.workspaceDir, { recursive: true });
+		// This IPC-only fixture starts no model session; start the real host admission guard.
+		await supervisor.inactivity.start();
 		const stop = registerIpc(paths, supervisor); stops.push(stop);
 		const task = supervisor.store.create({ title: "IPC service", quotes: [], cwd: paths.workspaceDir, scope: [], mode: "write", dependsOn: [], autoApprove: false }).task;
 		const run = supervisor.store.startRun(task.id, "dispatch", "fixture");
