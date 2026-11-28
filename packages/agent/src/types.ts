@@ -242,6 +242,8 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * ```
 	 */
 	transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
+	/** Final input check after dynamic transforms and conversion, against the routed model. */
+	prepareModelMessages?: (messages: Message[], model: Model<Api>, signal?: AbortSignal) => Promise<Message[]>;
 
 	/**
 	 * Resolves an API key dynamically for each LLM call.

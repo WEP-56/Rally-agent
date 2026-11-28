@@ -11,6 +11,7 @@ import { ensureDir, normalizePath, resolveScope, TaskError, type TaskStore } fro
 import { modelTaskCard, page, readTask, TaskReadSchema, type TaskReadParams } from "./task-read.ts";
 import { freezeTaskContext, taskContextSummary, TaskContextTurnsSchema, TaskMemorySchema, type TaskContextSources } from "./task-context.ts";
 import { checkTaskNote, TaskNoteSchema } from "./task-note.ts";
+import { boundedJson } from "./payload-budget.ts";
 import { freezeQuotes, QuoteRefSchema } from "./task-quotes.ts";
 
 /** What task tools may ask the supervisor to do. Keeps the tools free of Pi/Electron imports. */
@@ -368,7 +369,7 @@ function readTool(host: TaskToolHost): ToolDefinition {
 	return {
 		name: "task_read",
 		label: "读取任务",
-		description: "Read task state and on-demand details. Defaults to board without taskId, otherwise card. board/card return compact current facts, pending question ID/gate count, job/service counts and detail counts; no historical commands, inputs, quoted text, background or report prose. Use board before dispatching to see tasks and their write scopes. With taskId choose report for the latest full report, pending questions/gates and changed files; jobs/services for full command records; inputs for delivered/queued instructions and background-job notifications; requirements for original quotes and routing note; context for frozen chat/memory background; questions/gates for their history; runs/files/timeline for run, access or tool records. offset/limit page lists (20 by default, max 100); histories are newest first, requirements/context/files retain source order. Never returns worker transcripts. Shell effects remain unknown; see files.coverage.",
+		description: "Read task state and on-demand details. Defaults to board without taskId, otherwise card. board/card return compact current facts, pending question ID/gate count, job/service counts and detail counts; no historical commands, inputs, quoted text, background or report prose. Use board before dispatching to see tasks and their write scopes. With taskId choose report for the latest full report, pending questions/gates and changed files; jobs/services for full command records; inputs for delivered/queued instructions and background-job notifications; requirements for original quotes and routing note; context for frozen chat/memory background; questions/gates for their history; runs/files/timeline for run, access or tool records. offset/limit page lists (20 by default, max 100); histories are newest first, requirements/context/files retain source order. Never returns worker transcripts. Changed files in report are limited examples with a count; files pages include changedFilesPaging with its own nextOffset (use the same offset/limit). Large individual records or pages return an incomplete preview and detailsFile; read/grep it in bounded sections. Full scope is in requirements. Shell effects remain unknown; see files.coverage.",
 		parameters: TaskReadSchema,
 		async execute(_toolCallId: string, params: TaskReadParams) {
 			try {
@@ -381,7 +382,7 @@ function readTool(host: TaskToolHost): ToolDefinition {
 						if (!task) throw new TaskError("TASK_NOT_FOUND", card.id);
 						return modelTaskCard(task);
 					});
-					return result(JSON.stringify({ tasks, active: board.active, limit: board.limit, ...paging }));
+					return result(JSON.stringify(boundedJson({ tasks, active: board.active, limit: board.limit, ...paging }, host.store.detailsDirectory())));
 				}
 				if (!params.taskId) return fail("TASK_NOT_FOUND: 该视图需要 taskId");
 				const task = host.store.get(params.taskId);
@@ -416,8 +417,8 @@ export function createWorkerTools(host: WorkerToolHost): ToolDefinition[] {
 			Type.Literal("failed"),
 			Type.Literal("dropped"),
 		]),
-		summary: Type.String({ description: "outcome or progress in a few sentences; quote numbers and paths" }),
-		question: Type.Optional(Type.Union([Type.String({ minLength: 1 }), Type.Null()])),
+		summary: Type.String({ maxLength: 6000, description: "outcome or progress in a few sentences; put detailed logs/materials in an output file and include its path" }),
+		question: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 2000 }), Type.Null()])),
 		options: Type.Optional(Type.Array(Type.String({ maxLength: 40 }), { minItems: 2, maxItems: 4 })),
 	});
 	type ReportParams = Static<typeof reportSchema>;
@@ -425,7 +426,7 @@ export function createWorkerTools(host: WorkerToolHost): ToolDefinition[] {
 		name: "task_report",
 		label: "汇报",
 		description:
-			"Report to the supervisor. ready/failed/dropped end the task; blocked asks the user; progress keeps working.",
+			"Report to the supervisor. ready/failed/dropped end the task; blocked asks the user; progress keeps working. summary <=6000 characters, question <=2000. Store longer material in an output file and include its path.",
 		parameters: reportSchema,
 		async execute(_toolCallId: string, params: ReportParams) {
 			try {
@@ -448,7 +449,7 @@ export function createWorkerTools(host: WorkerToolHost): ToolDefinition[] {
 	const read: ToolDefinition = {
 		name: "task_read",
 		label: "读取任务",
-		description: "Read compact task state (default card) or on-demand details for your task or direct upstream tasks. card returns current facts and counts, without historical commands, inputs, quoted text, background or report prose. report returns the latest full report, pending questions/gates and changed files. jobs/services return command records; inputs returns instructions and background-job notifications; requirements returns original quotes and routing note; context returns frozen chat/memory background; questions/gates return history; runs/files/timeline return run, access or tool records. context and services are only for your own task, including previous runs. Board and unrelated tasks are not visible. offset/limit page lists (20 by default, max 100); histories are newest first, requirements/context/files retain source order. Never returns worker transcripts. Shell effects and other gaps are explicit in files.coverage.",
+		description: "Read compact task state (default card) or on-demand details for your task or direct upstream tasks. card returns current facts and counts, without historical commands, inputs, quoted text, background or report prose. report returns the latest full report, pending questions/gates and changed files. jobs/services return command records; inputs returns instructions and background-job notifications; requirements returns original quotes and routing note; context returns frozen chat/memory background; questions/gates return history; runs/files/timeline return run, access or tool records. context and services are only for your own task, including previous runs. Board and unrelated tasks are not visible. offset/limit page lists (20 by default, max 100); histories are newest first, requirements/context/files retain source order. Never returns worker transcripts. Changed files in report are limited examples with a count; files pages include changedFilesPaging with its own nextOffset (use the same offset/limit). Large individual records or pages return an incomplete preview and detailsFile; read/grep it in bounded sections. Full scope is in requirements. Shell effects and other gaps are explicit in files.coverage.",
 		parameters: TaskReadSchema,
 		async execute(_toolCallId: string, params: TaskReadParams) {
 			try {

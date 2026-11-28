@@ -20,6 +20,8 @@ export function GateCard({ taskId, gate, openTask, decide }: { taskId: string; g
 		? gate.arguments[field].filter((path): path is string => typeof path === "string") : [];
 	const uncommitted = deletePaths("uncommitted");
 	const outsideCwd = deletePaths("outsideCwd");
+	const uncommittedCount = typeof gate.arguments.uncommittedCount === "number" ? gate.arguments.uncommittedCount : uncommitted.length;
+	const outsideCwdCount = typeof gate.arguments.outsideCwdCount === "number" ? gate.arguments.outsideCwdCount : outsideCwd.length;
 	const mailBody = gate.tool === "qqmail_send" && typeof gate.arguments.text === "string" ? gate.arguments.text : null;
 	async function submit(value: "allow" | "deny") {
 		setBusy(true); setError("");
@@ -33,8 +35,9 @@ export function GateCard({ taskId, gate, openTask, decide }: { taskId: string; g
 			<div className="whitespace-pre-wrap break-words font-medium leading-snug">{gate.action}</div>
 			<div className="mt-1 break-all font-mono text-[11.5px] text-muted">{gate.tool} · {gate.cwd}</div>
 			<div className="mt-2 whitespace-pre-wrap break-words rounded-[16px] bg-md-surface-lowest/75 px-3 py-2 text-xs leading-relaxed text-muted">影响范围：{gate.scope.join("\n")}<br />可替代做法：{gate.alternative}</div>
-			{uncommitted.length > 0 && <div className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-[14px] bg-md-surface-lowest/60 px-3 py-2 text-xs text-muted">未提交改动：{uncommitted.join("\n")}</div>}
-			{outsideCwd.length > 0 && <div className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-[14px] bg-md-surface-lowest/60 px-3 py-2 text-xs text-muted">cwd 外目标：{outsideCwd.join("\n")}</div>}
+			{uncommitted.length > 0 && <div className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-[14px] bg-md-surface-lowest/60 px-3 py-2 text-xs text-muted">未提交改动（共 {uncommittedCount} 项{uncommittedCount > uncommitted.length ? `，显示前 ${uncommitted.length} 项` : ""}）：{uncommitted.join("\n")}</div>}
+			{outsideCwd.length > 0 && <div className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-[14px] bg-md-surface-lowest/60 px-3 py-2 text-xs text-muted">cwd 外目标（共 {outsideCwdCount} 项{outsideCwdCount > outsideCwd.length ? `，显示前 ${outsideCwd.length} 项` : ""}）：{outsideCwd.join("\n")}</div>}
+			{gate.detailsFile && <div className="mt-2 break-all text-xs text-muted">完整审批证据保存在运行主机：{gate.detailsFile.path}{gate.arguments.fullArgumentsInDetailsFile === true && <p className="mt-1">上方仅为摘要，请先查看文件中的完整动作、范围与参数，再决定是否允许。</p>}</div>}
 			{mailBody !== null && <div className="mt-2.5 text-xs text-muted"><span className="font-medium">邮件正文</span><pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-md-surface-lowest/80 p-2.5 font-sans text-fg">{mailBody}</pre></div>}
 			<Disclosure className="mt-2 text-xs text-muted"><summary className="cursor-pointer">原始参数</summary><pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(gate.arguments, null, 2)}</pre></Disclosure>
 			<div className="mt-3 flex justify-end gap-2"><Button size="sm" className="bg-md-surface-lowest/85 text-fg" disabled={busy || seconds === 0} onClick={() => void submit("deny")}>拒绝</Button><Button size="sm" variant="primary" disabled={busy || seconds === 0} onClick={() => void submit("allow")}>{mailBody !== null ? "确认发送" : "允许"}</Button></div>

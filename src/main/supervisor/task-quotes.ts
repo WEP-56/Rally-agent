@@ -15,7 +15,7 @@ export function freezeQuotes(host: { quote(ref: QuoteRef): Quote | null; recentQ
 		if (!quote) {
 			const recent = host.recentQuoteIds?.() ?? [];
 			const hint = recent.length ? ` 最近可引用的用户消息 ID：${recent.join("、")}（请先核对原文是否覆盖本次需求）。` : "";
-			throw new TaskError("QUOTE_INVALID", `quotes[${index}].id=${JSON.stringify(ref.id)} 无法引用：消息不存在、不是已受理的用户消息，或 withProposal 找不到紧邻的助手提议。${hint} 用 chat_search 的 {id:\"#消息ID\"} 核对原文，或 {query:\"需求关键词\"} 查找更早消息；不要猜测 ID。`);
+			throw new TaskError("QUOTE_INVALID", `quotes[${index}].id=${JSON.stringify(ref.id)} 无法引用：消息不在当前会话、不是已受理的用户消息，或 withProposal 找不到紧邻的助手提议。${hint} 用 chat_search 的 {id:\"#消息ID\"} 核对原文，或查找 quotable=true 的结果；旧会话结果仅供参考，需用户在当前会话重新授权。不要猜测 ID。`);
 		}
 		return quote;
 	});

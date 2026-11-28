@@ -105,9 +105,10 @@ function retain(records: Map<string, LoggedEvent>, key: string, event: LoggedEve
 function projectionKey(event: LoggedEvent): string | undefined {
 	const { data, kind } = event;
 	if (kind === "task_deleted" && typeof data.taskId === "string") return JSON.stringify(["task", data.taskId]);
+	if (kind === "task_files_changed" && typeof data.taskId === "string") return JSON.stringify(["files", data.taskId, event.seq]);
 	if (kind === "access_recorded" && typeof data.taskId === "string" && data.access) {
-		const access = data.access as { toolCallId: string; kind: string; target: string };
-		return JSON.stringify(["access", data.taskId, access.toolCallId, access.kind, access.target]);
+		const access = data.access as { toolCallId: string; kind: string; target: string; requestIndex?: number };
+		return JSON.stringify(["access", data.taskId, access.toolCallId, access.kind, access.target, access.requestIndex]);
 	}
 	if (kind === "assistant_message" && typeof data.taskId === "string" && data.message) return JSON.stringify(["message", data.taskId, (data.message as { id: string }).id]);
 	if (kind === "tool_activity" && typeof data.taskId === "string" && data.call) return JSON.stringify(["tool", data.taskId, (data.call as { id: string }).id]);

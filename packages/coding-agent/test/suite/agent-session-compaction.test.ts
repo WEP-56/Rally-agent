@@ -441,7 +441,7 @@ describe("AgentSession compaction characterization", () => {
 
 	it("compacts and resumes after a length stop below the desired output limit", async () => {
 		const harness = await createHarness({
-			models: [{ id: "faux-1", contextWindow: 1000, maxTokens: 100 }],
+			models: [{ id: "faux-1", contextWindow: 8192, maxTokens: 100 }],
 			settings: { compaction: { keepRecentTokens: 1, reserveTokens: 0 } },
 			extensionFactories: [
 				(pi) => {
@@ -462,7 +462,7 @@ describe("AgentSession compaction characterization", () => {
 			fauxAssistantMessage("completed response"),
 		]);
 
-		await harness.session.prompt("x".repeat(5000));
+		await harness.session.prompt("x".repeat(3000));
 
 		expect(harness.faux.state.callCount).toBe(2);
 		expect(harness.eventsOfType("compaction_end").at(-1)).toMatchObject({
@@ -831,7 +831,7 @@ describe("AgentSession compaction characterization", () => {
 	it("compacts successful overflow responses without retrying", async () => {
 		const harness = await createHarness({
 			settings: { compaction: { enabled: true, keepRecentTokens: 1, reserveTokens: 0 } },
-			models: [{ id: "faux-1", contextWindow: 1, maxTokens: 100 }],
+			models: [{ id: "faux-1", contextWindow: 8192, maxTokens: 100 }],
 			extensionFactories: [
 				(pi) => {
 					pi.on("session_before_compact", async (event) => ({
@@ -846,7 +846,17 @@ describe("AgentSession compaction characterization", () => {
 			],
 		});
 		harnesses.push(harness);
+		// Simulate provider accounting larger than the preflight estimate, while keeping
+		// the actual fixture small enough to pass the new preflight.
 		harness.setResponses([fauxAssistantMessage("completed answer")]);
+		const streamFunction = harness.session.agent.streamFunction;
+		harness.session.agent.streamFunction = async (model, context, options) => {
+			const response = await streamFunction(model, context, options);
+			const message = { ...await response.result(), usage: createUsage(9000) };
+			const stream = createAssistantMessageEventStream();
+			queueMicrotask(() => { stream.push({ type: "done", reason: "stop", message }); stream.end(message); });
+			return stream;
+		};
 
 		await expect(harness.session.prompt("hello")).resolves.toBeUndefined();
 

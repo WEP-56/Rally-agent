@@ -21,6 +21,7 @@ import { COACH_IDEA_PROMPT, COACH_MEMORY_PROMPT } from "../prompts.ts";
 import type { EventLog } from "./event-log.ts";
 import { canonicalTarget, containsPath, resolveToolPath } from "./file-paths.ts";
 import { closeRoleSession, createRoleSession } from "./session.ts";
+import { clipText } from "./payload-budget.ts";
 
 const MINUTE = 60_000, HOUR = 60 * MINUTE, DAY = 24 * HOUR;
 const LOOKBACK = 72 * HOUR;
@@ -136,11 +137,15 @@ export class Coach {
 			const input = [
 				clock(now),
 				`Notebook directory: ${memory.dir}\nByte budgets: ${MEMORY_FILE_KEYS.map(key => `${MEMORY_FILES[key].name} ${MEMORY_FILES[key].budget} (leave at or below ${Math.floor(MEMORY_FILES[key].budget * UPKEEP_SHARE)})`).join(", ")}`,
-				notebook(memory.dir),
+				memory.context(),
 				`## Conversation since the last pass\n${transcript(lines, since)}`,
 				`## Tasks in this period\n${taskDigest(this.options.tasks().filter(task => task.createdAt > since || (task.ended?.at ?? 0) > since))}`,
 				`## Scheduled plans\n${scheduleDigest(this.options.schedules())}`,
-				`## Schedule changes\n${JSON.stringify(events.ofKind("schedule_changed").filter(event => event.at > since).map(event => event.data))}`,
+				`## Schedule changes (bounded summaries)\n${clipText(JSON.stringify(events.ofKind("schedule_changed").filter(event => event.at > since).slice(-50).map(event => {
+					const plan = event.data.schedule as ScheduledTask | undefined;
+					return { at: event.at, id: plan?.id ?? event.data.id, deleted: event.data.deleted, revision: plan?.revision,
+						title: plan?.title, timing: plan?.timing, enabled: plan?.enabled };
+				})), 8000)}`,
 			].join("\n\n");
 			const summary = await this.run(COACH_MEMORY_PROMPT, input, memory.dir, memoryTools(memory.dir, this.options));
 			if (this.interrupted) throw new Error("Coach interrupted");
@@ -161,7 +166,7 @@ export class Coach {
 		try {
 			const input = [
 				clock(now),
-				notebook(memory.dir),
+				memory.context(),
 				`## Recent conversation\n${transcript(lines, now - LOOKBACK)}`,
 				`## Tasks (open, and finished in the last three days)\n${taskDigest(tasks.filter(task => !task.ended || task.ended.at > now - LOOKBACK))}`,
 				`## Scheduled plans\n${scheduleDigest(this.options.schedules())}`,
@@ -171,9 +176,9 @@ export class Coach {
 			].join("\n\n");
 			const reply = await this.run(COACH_IDEA_PROMPT, input, this.options.agentDir, []);
 			if (this.interrupted || this.disposed || !this.options.settings().enabled) throw new Error("Coach interrupted");
-			const { idea, recap } = parseIdeas(reply, new Set(lines.map(line => line.id)), new Set(tasks.map(task => task.id)), Object.fromEntries(MEMORY_FILE_KEYS.map(key => [key, memory.state().files.find(file => file.key === key)?.exists ? readFileSync(join(memory.dir, MEMORY_FILES[key].name), "utf8") : ""])), new Set(this.options.schedules().map(plan => plan.id)));
+			const { idea, recap } = parseIdeas(reply, new Set(lines.map(line => line.id)), new Set(tasks.map(task => task.id)), Object.fromEntries(MEMORY_FILE_KEYS.map(key => [key, memory.read(key)])), new Set(this.options.schedules().map(plan => plan.id)));
 			if (idea) {
-				const evidence = idea.evidence.map(id => ({ id, text: lines.find(line => line.id === id)?.text }));
+				const evidence = idea.evidence.map(id => ({ id, preview: clipText(lines.find(line => line.id === id)?.text ?? "", 1000) }));
 				this.options.deliverIdea(relayId => ideaMessage(relayId, { ...idea, evidence }));
 				events.append("idea_raised", { title: idea.title, question: idea.question, evidence: idea.evidence });
 			} else if (recap) {
@@ -245,11 +250,11 @@ function memoryTools(dir: string, options: CoachOptions): ToolDefinition[] {
 export function parseIdeas(reply: string, messageIds: ReadonlySet<string>, taskIds: ReadonlySet<string>, memories: Record<string, string> = {}, planIds: ReadonlySet<string> = new Set()): { idea?: Idea; recap?: string } {
 	const parsed: unknown = JSON.parse(reply);
 	if (!parsed || typeof parsed !== "object" || !("ideas" in parsed) || !Array.isArray(parsed.ideas)) throw new Error("COACH_OUTPUT_INVALID: missing ideas array");
-	const text = (value: unknown): value is string => typeof value === "string" && Boolean(value.trim());
+	const text = (value: unknown): value is string => typeof value === "string" && Boolean(value.trim()) && value.length <= 2000;
 	const idea = parsed.ideas.find((item: unknown): item is Idea => {
 		if (!item || typeof item !== "object") return false;
 		const { title, evidence, why, question, prep } = item as Record<string, unknown>;
-		return text(title) && text(why) && text(question) && (prep === null || typeof prep === "string") && Array.isArray(evidence) && evidence.length > 0 &&
+		return text(title) && text(why) && text(question) && (prep === null || text(prep)) && Array.isArray(evidence) && evidence.length > 0 && evidence.length <= 10 &&
 			evidence.every(entry => {
 				if (!text(entry)) return false;
 				if (entry.startsWith("#")) return messageIds.has(entry);
@@ -284,29 +289,22 @@ function windowStart(now: number, start: string): number {
 function stamp(at: number): string { return new Date(at).toLocaleString("sv-SE", { hour12: false }).slice(0, 16); }
 function clock(now: number): string { return `Current time: ${stamp(now)} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`; }
 
-function notebook(dir: string): string {
-	return MEMORY_FILE_KEYS.map(key => {
-		const path = join(dir, MEMORY_FILES[key].name);
-		return `## ${MEMORY_FILES[key].name}\n${existsSync(path) ? readFileSync(path, "utf8") || "(empty)" : "(not created yet)"}`;
-	}).join("\n\n");
-}
-
-/** User words stay whole; long assistant replies are shortened, then the oldest lines are dropped. */
+/** Bound every line, including the last user message; previews never grant authorization. */
 function transcript(lines: ChatLine[], since: number): string {
 	const rows = lines.filter(line => line.at > since && (line.role === "user" || line.role === "assistant") && line.text.trim())
-		.map(line => `[${line.id} ${stamp(line.at)} ${line.role}${line.source ? ` via ${line.source.platform}` : ""}] ${line.role === "assistant" && line.text.length > 1500 ? `${line.text.slice(0, 1500)}…` : line.text}`);
+		.map(line => `[${line.id} ${stamp(line.at)} ${line.role}${line.source ? ` via ${line.source.platform}` : ""}] ${clipText(line.text, line.role === "assistant" ? 1500 : 4000)}`);
 	let size = rows.reduce((total, row) => total + row.length, 0);
 	while (size > TRANSCRIPT_CHARS && rows.length > 1) size -= rows.shift()!.length;
 	return rows.join("\n") || "(nothing)";
 }
 
 function taskDigest(tasks: Task[]): string {
-	return tasks.map(task => {
+	return clipText(tasks.map(task => {
 		const report = task.runs.at(-1)?.lastReport;
 		return `${task.id} "${task.title}" [${task.ended ? task.ended.outcome : task.approval.state === "pending" ? "waiting for approval" : task.attention ? "waiting for an answer" : "open"}, ${task.mode}, created ${stamp(task.createdAt)}${task.schedule ? ", from a schedule" : ""}] quotes ${task.quotes.map(quote => quote.messageId).join(" ")}${report ? `\n  ${report.state}: ${report.summary.slice(0, 600)}` : ""}`;
-	}).join("\n") || "(none)";
+	}).join("\n") || "(none)", 8000);
 }
 
 function scheduleDigest(plans: ScheduledTask[]): string {
-	return plans.map(plan => `${plan.id} "${plan.title}" ${JSON.stringify(plan.timing)} ${plan.enabled ? "enabled" : "paused"}, next ${stamp(plan.nextAt)}${plan.lastAt ? `, last ran ${stamp(plan.lastAt)}` : ""}${plan.lastTaskId ? ` as ${plan.lastTaskId}` : ""}${plan.error ? `, error: ${plan.error.slice(0, 200)}` : ""}`).join("\n") || "(none)";
+	return clipText(plans.map(plan => `${plan.id} "${plan.title}" ${JSON.stringify(plan.timing)} ${plan.enabled ? "enabled" : "paused"}, next ${stamp(plan.nextAt)}${plan.lastAt ? `, last ran ${stamp(plan.lastAt)}` : ""}${plan.lastTaskId ? ` as ${plan.lastTaskId}` : ""}${plan.error ? `, error: ${plan.error.slice(0, 200)}` : ""}`).join("\n") || "(none)", 8000);
 }

@@ -846,6 +846,31 @@ export class AgentSession {
 	}
 
 	private _installAgentRequestProjection(): void {
+		const previousPrepareModelMessages = this.agent.prepareModelMessages;
+		this.agent.prepareModelMessages = async (messages, model, signal) => {
+			let prepared = await previousPrepareModelMessages?.(messages, model, signal) ?? messages;
+			if (model.contextWindow <= 0) return prepared;
+			const settings = this.settingsManager.getCompactionSettings(model);
+			const reserve = Math.min(settings.reserveTokens, model.maxTokens || settings.reserveTokens, Math.floor(model.contextWindow / 2));
+			const budget = model.contextWindow - reserve;
+			const estimate = () => {
+				const system = getCurrentSystemMessage(prepared);
+				return (system ? estimateTokens(system) : 0) + prepared.reduce((sum, message) => sum + (message.role === "system" ? 0 : estimateTokens(message)), 0);
+			};
+			if (estimate() <= budget) return prepared;
+			if (settings.enabled) {
+				await this._runAutoCompaction("threshold", false);
+				signal?.throwIfAborted();
+				const projection = this.sessionManager.buildSessionProjection();
+				const transformed = await this.agent.transformContext?.(projection.messages, signal) ?? projection.messages;
+				prepared = await this.agent.convertToLlm(transformed);
+				prepared = await previousPrepareModelMessages?.(prepared, model, signal) ?? prepared;
+			}
+			if (estimate() > budget) {
+				throw new Error(`CONTEXT_BUDGET_EXCEEDED: 实际请求（含动态快照）估算 ${estimate()} tokens，输入预算 ${budget}。已停止发送；请缩小工具结果或动态快照，或切换更大上下文模型。历史记录未删除。`);
+			}
+			return prepared;
+		};
 		const previousPrepareRequest = this.agent.prepareRequest;
 		this.agent.prepareRequest = async (request, signal) => {
 			const failed = this._failedResponse;

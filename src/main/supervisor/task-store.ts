@@ -1,7 +1,7 @@
 // Task store: facts in, display state out (docs 01 section 2 / 3). No locks; write scope is only a signal.
 
 import { existsSync, mkdirSync } from "node:fs";
-import { basename, isAbsolute, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type {
 	QueueReason,
 	Quote,
@@ -58,6 +58,8 @@ export class TaskStore {
 	private readonly activities = new Map<string, ToolCall[]>();
 	private readonly conversations = new Map<string, AssistantMessageView[]>();
 	private readonly accesses = new Map<string, TaskAccess[]>();
+	private readonly accessKeys = new Map<string, Set<string>>();
+	private readonly changedFileSets = new Map<string, Set<string>>();
 	private readonly deleting = new Set<string>();
 	private readonly deleted = new Set<string>();
 	private deletedJobSequence = 0;
@@ -69,6 +71,8 @@ export class TaskStore {
 		this.workspaceDir = workspaceDir;
 		this.onChange = onChange;
 		this.replay(recovery ?? events.all());
+		for (const [id, entries] of this.accesses) this.accessKeys.set(id, new Set(entries.map(accessKey)));
+		for (const task of this.tasks.values()) this.changedFileSets.set(task.id, new Set(task.changedFiles ?? []));
 	}
 
 	/** Persisted tasks, newest first. */
@@ -87,6 +91,7 @@ export class TaskStore {
 	get(id: string): Task | undefined {
 		return this.tasks.get(id);
 	}
+	detailsDirectory(): string { return join(dirname(this.events.activeFile()), "task-details"); }
 	isDeleted(id: string): boolean { return this.deleted.has(id); }
 	deletedResourceSequence(kind: "job" | "service"): number { return kind === "job" ? this.deletedJobSequence : this.deletedServiceSequence; }
 
@@ -117,9 +122,17 @@ export class TaskStore {
 	private erase(taskId: string): void {
 		this.deleted.add(taskId); this.deleting.delete(taskId);
 		this.tasks.delete(taskId); this.activities.delete(taskId); this.conversations.delete(taskId); this.accesses.delete(taskId);
+		this.accessKeys.delete(taskId); this.changedFileSets.delete(taskId);
 	}
 	private assertNotDeleting(taskId: string): void {
 		if (this.deleting.has(taskId)) throw new TaskError("TASK_DELETING", "任务正在删除，请稍后操作");
+	}
+
+	/** Migrate payload storage without changing or re-announcing approval decisions. */
+	updateGatePayloads(taskId: string, gates: TaskGate[]): void {
+		const task = this.require(taskId);
+		task.gates = gates;
+		this.commit(task, "task_updated", { reason: "gate_payload_compacted" });
 	}
 
 	recordGate(taskId: string, gate: TaskGate, kind: "gate_requested" | "gate_escalated" | "gate_decided"): void {
@@ -226,12 +239,24 @@ export class TaskStore {
 	recordAccess(taskId: string, access: TaskAccess): void {
 		const task = this.require(taskId);
 		const entries = this.accesses.get(taskId) ?? [];
-		if (entries.some((item) => item.toolCallId === access.toolCallId && item.kind === access.kind && item.target === access.target && item.requestIndex === access.requestIndex)) return;
+		const keys = this.accessKeys.get(taskId) ?? new Set<string>();
+		const key = accessKey(access);
+		if (keys.has(key)) return;
 		this.events.append("access_recorded", { taskId, access });
+		keys.add(key);
+		this.accessKeys.set(taskId, keys);
 		entries.push({ ...access });
 		this.accesses.set(taskId, entries);
-		if ((access.kind === "fs_write" || access.kind === "fs_delete") && access.coverage !== "command_scope") this.recordChangedFiles(taskId, [access.target]);
-		else this.onChange(task, "access_recorded");
+		// access_recorded is already durable and replay reconstructs changedFiles from it.
+		// Do not write an ever-growing full task for every file in a recursive deletion.
+		if ((access.kind === "fs_write" || access.kind === "fs_delete") && access.coverage !== "command_scope") {
+			const files = task.changedFiles ??= [];
+			const known = this.changedFileSets.get(taskId) ?? new Set(files);
+			if (!known.has(access.target)) { files.push(access.target); known.add(access.target); }
+			this.changedFileSets.set(taskId, known);
+		}
+		task.updatedAt = access.at;
+		this.onChange(task, "access_recorded");
 	}
 
 	warnOverlaps(taskId: string, phase: "update" | "resume" | "start"): ScopeWarning[] {
@@ -475,6 +500,10 @@ export class TaskStore {
 		options?: string[],
 		attachments?: ResourceRef[],
 	): { task: Task; attention?: TaskAttention; attentionOpened: boolean; ended: boolean } {
+		if (summary.length > 6000 || (question?.length ?? 0) > 2000 ||
+			(options !== undefined && (options.length < 2 || options.length > 4 || options.some(option => option.length > 40)))) {
+			throw new TaskError("REPORT_TOO_LARGE", "summary 最多 6000 字符，question 最多 2000 字符，options 为 2–4 项且每项最多 40 字符。将详细日志或材料写入产出文件，在汇报中给出路径。");
+		}
 		const task = this.require(taskId);
 		const run = task.runs.find((item) => item.id === runId);
 		if (!run) throw new TaskError("RUN_NOT_FOUND", "运行不存在");
@@ -571,10 +600,16 @@ export class TaskStore {
 	recordChangedFiles(taskId: string, files: string[]): void {
 		const task = this.tasks.get(taskId);
 		if (!task || files.length === 0) return;
-		const merged = new Set(task.changedFiles ?? []);
-		for (const file of files) merged.add(file);
+		const merged = this.changedFileSets.get(taskId) ?? new Set(task.changedFiles ?? []);
+		const added = [...new Set(files)].filter(file => !merged.has(file));
+		if (!added.length) return;
+		const updatedAt = Date.now();
+		this.events.append("task_files_changed", { taskId, files: added, updatedAt });
+		for (const file of added) merged.add(file);
+		this.changedFileSets.set(taskId, merged);
 		task.changedFiles = [...merged];
-		this.commit(task, "task_files_changed", { files: task.changedFiles });
+		task.updatedAt = updatedAt;
+		this.onChange(task, "task_files_changed");
 	}
 
 	recordUsage(taskId: string, usage: TaskUsage): void {
@@ -660,6 +695,8 @@ export class TaskStore {
 	}
 
 	private replay(records: readonly LoggedEvent[]): void {
+		const changedFiles = new Map<string, Set<string>>();
+		const updated = new Map<string, number>();
 		// Tombstones win even over late shutdown facts or cached pre-delete snapshots.
 		for (const event of records) if (event.kind === "task_deleted" && typeof event.data.taskId === "string") {
 			this.deleted.add(event.data.taskId);
@@ -672,10 +709,23 @@ export class TaskStore {
 		for (const event of records) {
 			const taskId = typeof event.data.taskId === "string" ? event.data.taskId : (event.data.task as Task | undefined)?.id;
 			if (taskId && this.deleted.has(taskId)) continue;
+			if (event.kind === "task_files_changed" && taskId && Array.isArray(event.data.files)) {
+				const files = changedFiles.get(taskId) ?? new Set<string>();
+				for (const file of event.data.files) if (typeof file === "string") files.add(file);
+				changedFiles.set(taskId, files);
+				updated.set(taskId, Number(event.data.updatedAt) || event.at);
+			}
 			if (event.kind === "access_recorded" && typeof event.data.taskId === "string" && event.data.access) {
 				const entries = this.accesses.get(event.data.taskId) ?? [];
-				entries.push(structuredClone(event.data.access as TaskAccess));
+				const access = event.data.access as TaskAccess;
+				entries.push(structuredClone(access));
 				this.accesses.set(event.data.taskId, entries);
+				updated.set(event.data.taskId, access.at);
+				if ((access.kind === "fs_write" || access.kind === "fs_delete") && access.coverage !== "command_scope") {
+					const files = changedFiles.get(event.data.taskId) ?? new Set<string>();
+					files.add(access.target);
+					changedFiles.set(event.data.taskId, files);
+				}
 				continue;
 			}
 			if (event.kind === "assistant_message" && typeof event.data.taskId === "string" && event.data.message) {
@@ -689,6 +739,7 @@ export class TaskStore {
 			const candidate = event.data.task as Task | undefined;
 			if (!candidate || typeof candidate.id !== "string" || !Array.isArray(candidate.runs)) continue;
 			this.tasks.set(candidate.id, structuredClone(candidate));
+			updated.set(candidate.id, candidate.updatedAt);
 			const numeric = Number(candidate.id.slice(2));
 			if (Number.isFinite(numeric)) this.nextTask = Math.max(this.nextTask, numeric + 1);
 			for (const attention of [...(candidate.attentionHistory ?? []), ...(candidate.attention ? [candidate.attention] : [])]) {
@@ -696,12 +747,13 @@ export class TaskStore {
 				if (Number.isFinite(n)) this.nextAttention = Math.max(this.nextAttention, n + 1);
 			}
 		}
-		// A crash may occur between access_recorded and the following task snapshot.
-		for (const [taskId, entries] of this.accesses) {
+		for (const [taskId, files] of changedFiles) {
 			const task = this.tasks.get(taskId);
-			if (!task) continue;
-			const writes = entries.filter((entry) => (entry.kind === "fs_write" || entry.kind === "fs_delete") && entry.coverage !== "command_scope").map((entry) => entry.target);
-			if (writes.length) task.changedFiles = [...new Set([...(task.changedFiles ?? []), ...writes])];
+			if (task) task.changedFiles = [...new Set([...(task.changedFiles ?? []), ...files])];
+		}
+		for (const [taskId, at] of updated) {
+			const task = this.tasks.get(taskId);
+			if (task) task.updatedAt = at;
 		}
 	}
 }
@@ -712,6 +764,10 @@ export class TaskError extends Error {
 		super(message);
 		this.code = code;
 	}
+}
+
+function accessKey(access: TaskAccess): string {
+	return JSON.stringify([access.toolCallId, access.kind, access.target, access.requestIndex]);
 }
 
 /** Normalize a path for display and comparison (04 §2.4). No realpath here: it may not exist yet. */

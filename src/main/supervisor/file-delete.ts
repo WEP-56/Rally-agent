@@ -9,6 +9,7 @@ import type { GateService } from "./gates.ts";
 import type { TaskStore } from "./task-store.ts";
 import { FileVersions, type FileVersion } from "./file-versions.ts";
 import { canonicalTarget, containsPath, resolveToolPath } from "./file-paths.ts";
+import { boundedJson, saveDetails } from "./payload-budget.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -48,7 +49,7 @@ interface DeleteHost {
 	isActive(): boolean;
 }
 
-export function createFileDeleteTool(host: DeleteHost): ToolDefinition<typeof schema, DeletePreview | DeleteResult> {
+export function createFileDeleteTool(host: DeleteHost): ToolDefinition<typeof schema, Record<string, unknown>> {
 	return {
 		name: "file_delete", label: "删除文件", parameters: schema,
 		description: "Preview file/directory deletion (default dryRun=true), including bytes, uncommitted files and paths outside cwd. Real deletion checks read versions and waits for an irreversible-action gate except for task output or verified task-created files. Never bypass a refusal with shell.",
@@ -73,7 +74,7 @@ export function createFileDeleteTool(host: DeleteHost): ToolDefinition<typeof sc
 					outsideCwd: plan.nodes.filter((node) => !containsPath(cwd, node.path)).map((node) => node.path),
 				};
 				assertActive(host, signal);
-				if (input.dryRun !== false) return outputResult(preview);
+				if (input.dryRun !== false) return outputResult(preview, host.store.detailsDirectory());
 				await assertReadVersions(plan, requested, host.versions, signal);
 				const created = host.store.access(host.task.id).filter((entry) => entry.kind === "fs_write" && entry.created);
 				const exempt = plan.nodes.every((node) => containsPath(output, node.path)) || plan.nodes.every((node) =>
@@ -116,18 +117,23 @@ export function createFileDeleteTool(host: DeleteHost): ToolDefinition<typeof sc
 						break;
 					}
 				}
-				return outputResult(result);
+				return outputResult(result, host.store.detailsDirectory());
 			} catch (error) {
 				if (input.dryRun !== false) throw error;
 				result.failed.push(...requested.map((path) => ({ path, error: errorText(error) })));
-				return outputResult(result);
+				return outputResult(result, host.store.detailsDirectory());
 			}
 		},
 	};
 }
 
-function outputResult(data: DeletePreview | DeleteResult) {
-	return { content: [{ type: "text" as const, text: JSON.stringify(data) }], details: data,
+function outputResult(data: DeletePreview | DeleteResult, directory: string) {
+	const shortened = "failed" in data ? data.failed.length > 50 : data.uncommitted.length > 50 || data.outsideCwd.length > 50;
+	const summary = "failed" in data
+		? { ...data, failed: data.failed.slice(0, 50), failedCount: data.failed.length }
+		: { ...data, uncommitted: data.uncommitted.slice(0, 50), outsideCwd: data.outsideCwd.slice(0, 50), uncommittedCount: data.uncommitted.length, outsideCwdCount: data.outsideCwd.length };
+	const details = boundedJson({ ...summary, ...(shortened ? { truncated: true, detailsFile: saveDetails(directory, JSON.stringify(data, null, 2)) } : {}) }, directory);
+	return { content: [{ type: "text" as const, text: JSON.stringify(details) }], details,
 		...("failed" in data && data.failed.length ? { isError: true } : {}) };
 }
 

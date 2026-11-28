@@ -38,3 +38,7 @@ When you are done, reply with a few lines listing what you added, changed, moved
 
 - 参数：工作目录：~/.rally/memory；工具 read/write/edit/ls/grep，仅限记忆目录（备份目录由宿主管理）。每次运行前备份，保留 7 份；超预算或无效 UTF-8 回滚。10 分钟无事件中止，不重试。
 - 共同配置：`coach.json`，默认关闭、未选模型、静默 02:00–08:00、每天一次点子。按运行机器本地时间；每分钟判断，用户 30 分钟无消息且主 Agent 空闲后运行。一次性内存会话，不创建任务、不占 Worker 名额。
+
+## 输入体积边界（0.5.6）
+
+源码：`src/main/supervisor/coach.ts`、`src/main/memory-store.ts`。记忆读取同样执行单文件字节预算，超限文件保留原文并标记 unavailable。聊天用户消息最多 4000 字符、助手消息最多 1500 字符，截短明确标记；任务与计划摘要各最多 8000 字符。计划变更仅取最近 50 个摘要，不重复冻结背景；点子出处只附最多 1000 字符的 preview，消息 ID 保留供检索。点子各文本字段最多 2000 字符、出处最多 10 个；摘要不授予操作权限。

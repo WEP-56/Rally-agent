@@ -130,6 +130,8 @@ editSchema = Type.Object(
 
 ## file_delete
 
+大型删除审批超过 64 KiB 时，完整 scope 与 manifest 保存到运行主机 `state/gate-manifests/`，审批以根路径、总数、前 50 项风险示例和 `detailsFile` 路径/摘要展示。主助手可用 read/grep 按需查看清单。审批放行前检查清单摘要，执行前仍逐项重验原冻结计划；不因摘要显示而扩大授权。旧审批在恢复时转换，旧主会话通过追加 context_edit 使用摘要，原始记录保留。
+
 - 源码路径：`src/main/supervisor/file-delete.ts`（可用角色：Worker）
 - 提示词原文：
 
@@ -145,3 +147,5 @@ schema = Type.Object({
 	dryRun: Type.Optional(Type.Boolean({ description: "Preview only by default. false requests deletion; Rally obtains approval when required." })),
 })
 ```
+
+0.5.6：dryRun 的 uncommitted/outsideCwd、执行结果 failed 最多显示 50 项，并提供准确的 *Count。超出部分连同完整结果写入 detailsFile；返回值整体最多 24 KiB，极长路径也走明确不完整的 preview。逐文件成功记录继续持久化，失败后的未执行条目可在完整结果中核查。

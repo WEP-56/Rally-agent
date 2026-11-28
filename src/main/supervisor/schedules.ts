@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { isAbsolute } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { statSync } from "node:fs";
 import type { ScheduledTask, ScheduleTiming } from "../../shared/schedules.ts";
 import { taskView, type Quote } from "../../shared/task.ts";
@@ -38,6 +38,7 @@ export class ScheduledTasks {
 	private readonly tick: () => void;
 	private readonly now: () => number;
 	private readonly canRun?: () => boolean;
+	detailsDirectory(): string { return join(dirname(this.events.activeFile()), "schedule-details"); }
 	list(): ScheduledTask[] {
 		return structuredClone([...this.records.values()]).map(item => {
 			const task = item.lastTaskId ? this.store.get(item.lastTaskId) : undefined;

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ExtensionToolContext, ToolDefinition } from "../../src/index.ts";
@@ -80,7 +81,9 @@ describe("compact model task views", () => {
 			["services", "services", task.services], ["inputs", "inputs", task.inputs], ["context", "context", task.context],
 			["requirements", "quotes", task.quotes], ["questions", "questions", task.attentionHistory], ["gates", "gates", task.gates],
 		] as const) {
-			const result = JSON.parse(getMessageText(await call(main, { taskId: task.id, view, limit: 1 })));
+			const response = JSON.parse(getMessageText(await call(main, { taskId: task.id, view, limit: 1 })));
+			const result = response.truncated ? JSON.parse(readFileSync(response.detailsFile.path, "utf8")) : response;
+			if (view === "inputs") expect(response.truncated).toBe(true);
 			expect(result[field]).toEqual(expected); expect(result).toMatchObject({ offset: 0, total: 1, nextOffset: null });
 			expect((await call(main, { taskId: task.id, view, offset: -1 })).isError).toBe(true);
 		}

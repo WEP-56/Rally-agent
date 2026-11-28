@@ -117,8 +117,9 @@ describe("Rally gates (isolated state, no provider calls)", () => {
 		gates.decide(original.id, "deny", "main", [], "停止"); await waiting;
 		// Reproduce a persisted request with no decided event at process loss.
 		store.recordGate(task.id, { ...original, id: "G-42" }, "gate_requested");
-		const restoredStore = new TaskStore(new EventLog(paths.eventsFile), paths.workspaceDir, () => {});
-		const restored = new GateService({ ...options, store: restoredStore }); services.push(restored);
+		const restoredEvents = new EventLog(paths.eventsFile);
+		const restoredStore = new TaskStore(restoredEvents, paths.workspaceDir, () => {});
+		const restored = new GateService({ ...options, store: restoredStore, events: restoredEvents, audit: new AuditLog(paths.auditFile, restoredEvents) }); services.push(restored);
 		expect(restoredStore.get(task.id)?.gates?.at(-1)?.decision).toMatchObject({ value: "deny", actor: "system", reason: expect.stringContaining("restarted") });
 		expect(() => restored.decide("G-42", "allow", "user", [], "late")).toThrow("已决定");
 	});

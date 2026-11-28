@@ -9,6 +9,8 @@ export interface TaskGate {
 	scope: string[];
 	alternative: string;
 	arguments: Record<string, unknown>;
+	/** Full frozen approval evidence, kept outside repeatedly serialized task state. */
+	detailsFile?: { path: string; sha256: string };
 	requestedAt: number;
 	expiresAt: number;
 	escalatedAt?: number;

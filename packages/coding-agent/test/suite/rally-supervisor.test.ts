@@ -481,7 +481,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 			},
 			(context) => {
 				const result = JSON.parse(getMessageText(context.messages.findLast(m => m.role === "toolResult")));
-				expect(result.messages).toEqual([{ id: sourceId, role: "user", at: expect.any(Number), text: original }]);
+				expect(result.messages).toEqual([{ id: sourceId, role: "user", at: expect.any(Number), text: original, quotable: true }]);
 				return fauxAssistantMessage(fauxToolCall("chat_search", { id: sourceId }), { stopReason: "toolUse" });
 			},
 			(context) => {
@@ -562,10 +562,10 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 			fauxAssistantMessage("当前轮前缀摘要"),
 		]);
 		expect(supervisor.main.state().header).toEqual({ activity: null, showCompact: false, showNewConversation: false });
-		await supervisor.main.sendFromIm("a".repeat(200000), { ...source, messageId: "below" });
+		await supervisor.main.sendFromIm("a".repeat(100000), { ...source, messageId: "below" });
 		expect(activities).toEqual(new Set(["thinking", "querying", "replying"]));
 		expect(supervisor.main.state().header).toMatchObject({ activity: null, showCompact: false });
-		await supervisor.main.sendFromIm("b".repeat(75000), { ...source, messageId: "near" });
+		await supervisor.main.sendFromIm("b".repeat(175000), { ...source, messageId: "near" });
 		expect(supervisor.main.state().header.showCompact).toBe(true);
 		const compacted = await supervisor.main.reset();
 		expect(compacted, supervisor.main.state().messages.at(-1)?.text).toBe(true);
@@ -592,8 +592,17 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		expect(resumed.main.state().header).toEqual({ activity: null, showCompact: false, showNewConversation: false });
 	});
 
+	it("retains an unread relay when final input preflight rejects an oversized request", async () => {
+		const { supervisor, harness } = await setup();
+		supervisor.relay.notice("PREFLIGHT_PENDING_NOTICE");
+		await supervisor.main.send("x".repeat(600000));
+		await vi.waitFor(() => expect(supervisor.main.state().messages.some(message => message.text.includes("CONTEXT_BUDGET_EXCEEDED"))).toBe(true));
+		expect(harness.faux.state.callCount).toBe(0);
+		expect(supervisor.main.state().inboxPaused).toBe(true);
+		expect(supervisor.events.ofKind("relay_delivered")).toHaveLength(0);
+	});
 	it("rotates after automatic compaction without losing a next-turn relay", async () => {
-		const { harness, paths, supervisor } = await setup(true, 1, undefined, 1);
+		const { harness, paths, supervisor } = await setup(true, 1, undefined, 1, { reserveTokens: 100000 });
 		let summarizing = false;
 		let release!: () => void;
 		const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -609,8 +618,8 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 			},
 		]);
 		try {
-			// Faux derives usage from prompt length; this crosses the real automatic threshold.
-			await supervisor.main.send("x".repeat(480000));
+			// Faux derives usage from prompt length; this crosses the configured automatic threshold while fitting the actual input window.
+			await supervisor.main.send("x".repeat(100000));
 			await vi.waitFor(() => expect(summarizing).toBe(true));
 			expect(supervisor.main.state().header.activity).toBe("compacting");
 			await supervisor.main.sendRelay([{ id: "rotation-fixture", text: "PENDING_DURING_ROTATION" }], "notice");
@@ -1620,7 +1629,8 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		expect(lastUsage.seq).toBeGreaterThan(supervisor.events.ofKind("task_ended").at(-1)!.seq);
 		const call = toolsFor(supervisor);
 		const files = JSON.parse(getMessageText(await call("task_read", { taskId: task.id, view: "files", offset: 2, limit: 2 })));
-		expect(files).toMatchObject({ accesses: access.slice(2, 4), total: 7, offset: 2, nextOffset: 4, changedFiles: [output], coverage: { shell: "unknown", network: expect.stringContaining("attempts, not confirmed traffic") } });
+		expect(files).toMatchObject({ accesses: access.slice(2, 4), total: 7, offset: 2, nextOffset: 4, changedFiles: [], changedFilesPaging: { total: 1, nextOffset: null }, coverage: { shell: "unknown", network: expect.stringContaining("attempts, not confirmed traffic") } });
+		expect(JSON.parse(getMessageText(await call("task_read", { taskId: task.id, view: "files", limit: 1 }))).changedFiles).toEqual([output]);
 		const restored = new TaskStore(new EventLog(paths.eventsFile), paths.workspaceDir, () => {});
 		expect(restored.access(task.id)).toEqual(access);
 		expect(restored.get(task.id)?.usage).toEqual(task.usage);
@@ -1703,7 +1713,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 				return fauxAssistantMessage(fauxToolCall("file_delete", { paths: [target], dryRun: false }), { stopReason: "toolUse" });
 			},
 			(context) => {
-				expect(JSON.parse(getMessageText(context.messages.findLast((message) => message.role === "toolResult")))).toEqual({ deleted: 1, failed: [] });
+				expect(JSON.parse(getMessageText(context.messages.findLast((message) => message.role === "toolResult")))).toEqual({ deleted: 1, failed: [], failedCount: 0 });
 				return fauxAssistantMessage(fauxToolCall("task_report", { state: "ready", summary: "产出清理完成" }), { stopReason: "toolUse" });
 			},
 			fauxAssistantMessage(fauxToolCall("file_delete", { paths: [join(paths.workspaceDir, "README.md")], dryRun: false }), { stopReason: "toolUse" }),
@@ -1745,7 +1755,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 			const last = context.messages.findLast((message) => message.role === "toolResult");
 			if (last?.role === "toolResult") {
 				if (last.toolName === "task_report") return fauxAssistantMessage("完成。");
-				expect(JSON.parse(getMessageText(last))).toEqual({ deleted: 2, failed: [] });
+				expect(JSON.parse(getMessageText(last))).toEqual({ deleted: 2, failed: [], failedCount: 0 });
 				return fauxAssistantMessage(fauxToolCall("task_report", { state: "ready", summary: "两个文件已按批准清理" }), { stopReason: "toolUse" });
 			}
 			return fauxAssistantMessage(fauxToolCall("file_delete", { paths: ["README.md", "obsolete.txt"], dryRun: false }), { stopReason: "toolUse" });

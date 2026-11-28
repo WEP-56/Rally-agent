@@ -94,7 +94,7 @@ describe("Rally controlled deletion (offline temporary files)", () => {
 		expect(task.gates![0].arguments.preview).toHaveLength(50);
 		expect(task.gates![0].arguments.paths).toEqual([folder]);
 		await decide();
-		expect((await deleting).details).toEqual({ deleted: 53, failed: [] });
+		expect((await deleting).details).toEqual({ deleted: 53, failed: [], failedCount: 0 });
 		expect(existsSync(folder)).toBe(false);
 		const access = store.access(task.id); expect(access).toHaveLength(53);
 		expect(new Set(access.map((entry) => entry.toolCallId)).size).toBe(1);
@@ -119,6 +119,28 @@ describe("Rally controlled deletion (offline temporary files)", () => {
 		expect(readFileSync(path, "utf8")).toBe("keep"); expect(store.access(task.id)).toEqual([]);
 	});
 
+	it("keeps large manifests out of task snapshots while retaining evidence and stale-file checks", async () => {
+		const { cwd, call, task, store, paths, decide } = await setup();
+		const folder = join(cwd, "dependencies"); mkdirSync(folder);
+		for (let i = 0; i < 200; i++) writeFileSync(join(folder, `${i}.txt`), "dependency");
+		const deleting = call({ paths: [folder], recursive: true, dryRun: false });
+		await vi.waitFor(() => expect(task.gates).toHaveLength(1), { timeout: 10000 });
+		const gate = task.gates![0];
+		expect(gate.scope).toEqual([folder]);
+		expect(gate.arguments.manifest).toBeUndefined();
+		expect(gate.arguments.manifestCount).toBe(201);
+		expect(Buffer.byteLength(JSON.stringify(gate))).toBeLessThan(64 * 1024);
+		const evidence = JSON.parse(readFileSync(gate.detailsFile!.path, "utf8"));
+		expect(evidence.arguments.manifest).toHaveLength(201);
+		expect(evidence.scope).toHaveLength(201);
+		writeFileSync(join(folder, "new.txt"), "added during approval");
+		await decide();
+		expect(JSON.stringify(await deleting)).toContain("STALE_FILE");
+		expect(existsSync(join(folder, "0.txt"))).toBe(true);
+		expect(store.access(task.id)).toEqual([]);
+		expect(readFileSync(paths.auditFile, "utf8")).toContain(gate.detailsFile!.sha256);
+	});
+
 	it("restricts readonly calls and removes only output junctions, including dangling ones", async () => {
 		const { cwd, task, call } = await setup("readonly");
 		const project = join(cwd, "keep.txt"); const output = join(task.outputDir, "remove.txt");
@@ -130,7 +152,7 @@ describe("Rally controlled deletion (offline temporary files)", () => {
 		const gone = join(cwd, "gone"); mkdirSync(gone);
 		const dangling = join(task.outputDir, "dangling"); symlinkSync(gone, dangling, process.platform === "win32" ? "junction" : "dir");
 		rmSync(gone, { recursive: true });
-		expect((await call({ paths: [output, link, dangling], dryRun: false })).details).toEqual({ deleted: 3, failed: [] });
+		expect((await call({ paths: [output, link, dangling], dryRun: false })).details).toEqual({ deleted: 3, failed: [], failedCount: 0 });
 		expect(readFileSync(project, "utf8")).toBe("keep"); expect(task.gates).toBeUndefined();
 	});
 
@@ -139,7 +161,7 @@ describe("Rally controlled deletion (offline temporary files)", () => {
 		const path = join(cwd, "created.txt"); await write(path, "created");
 		const versions = new FileVersions(SessionManager.open(sessionFile, cwd, cwd));
 		const tool = createFileDeleteTool({ ...host, versions });
-		expect((await tool.execute("delete", { paths: [path], dryRun: false }, undefined, undefined, ctx)).details).toEqual({ deleted: 1, failed: [] });
+		expect((await tool.execute("delete", { paths: [path], dryRun: false }, undefined, undefined, ctx)).details).toEqual({ deleted: 1, failed: [], failedCount: 0 });
 		expect(task.gates).toBeUndefined();
 		const recovered = new FileVersions(SessionManager.open(sessionFile, cwd, cwd));
 		const tools = createVersionedFileTools(cwd, recovered, () => {});

@@ -3,6 +3,8 @@ import type { QuoteRef, Task } from "../../shared/task.ts";
 import type { AuditLog } from "./audit.ts";
 import type { EventLog } from "./event-log.ts";
 import { TaskError, type TaskStore } from "./task-store.ts";
+import { dirname, join } from "node:path";
+import { compactDeleteGate, verifyDeleteGateEvidence } from "./delete-gate.ts";
 
 interface GateOptions {
 	store: TaskStore;
@@ -27,6 +29,19 @@ export class GateService {
 	private disposed = false;
 	constructor(options: GateOptions) {
 		this.options = options;
+		for (const task of options.store.list()) {
+			const gates = task.gates?.map(gate => {
+				try { return compactDeleteGate(gate, this.manifestDirectory()); }
+				catch (error) {
+					// A corrupt historical payload must not prevent startup or authorize a retry.
+					console.error(`Gate ${gate.id} evidence recovery failed`, error);
+					return { ...gate, action: "历史审批证据不可用，请重新申请", scope: [], alternative: "重新申请审批",
+						arguments: { recoveryError: "原始证据保留在事件日志中；此条摘要不能授权执行。" },
+						decision: gate.decision ?? { value: "deny" as const, actor: "system" as const, basis: [], reason: "GATE_EVIDENCE_UNAVAILABLE", at: Date.now() } };
+				}
+			});
+			if (gates?.some((gate, index) => gate !== task.gates![index])) options.store.updateGatePayloads(task.id, gates);
+		}
 		for (const task of options.store.list()) for (const gate of task.gates ?? []) {
 			this.nextId = Math.max(this.nextId, Number(gate.id.slice(2)) + 1 || 1);
 			if (!gate.decision) this.record(task.id, gate, "deny", "system", [], "Rally restarted; approval must be requested again.");
@@ -40,17 +55,18 @@ export class GateService {
 		const fields = gateDescription(description);
 		const now = Date.now();
 		const timeoutMs = userOnly ? 600_000 : 120_000;
-		const gate: TaskGate = { ...fields, id: `G-${this.nextId++}`, runId, toolCallId, tool, cwd: executionCwd,
-			arguments: structuredClone(args), requestedAt: now, expiresAt: now + timeoutMs, ...(userOnly ? { userOnly: true, escalatedAt: now } : {}) };
+		this.options.events.assertWritable();
+		const gate = compactDeleteGate({ ...fields, id: `G-${this.nextId++}`, runId, toolCallId, tool, cwd: executionCwd,
+			arguments: structuredClone(args), requestedAt: now, expiresAt: now + timeoutMs, ...(userOnly ? { userOnly: true, escalatedAt: now } : {}) }, this.manifestDirectory());
 		return new Promise((resolve, reject) => {
 			const aborted = () => this.closeTask(task.id, "Task or tool call was cancelled.");
-			const timer = setTimeout(() => this.timeout(gate.id), timeoutMs);
+			const timer = setTimeout(() => this.timeout(gate.id), gate.expiresAt - now);
 			timer.unref();
 			this.pending.set(gate.id, { taskId: task.id, gate, resolve, timer, unsubscribe: () => signal?.removeEventListener("abort", aborted) });
 			signal?.addEventListener("abort", aborted, { once: true });
 			try {
 				this.options.store.recordGate(task.id, gate, "gate_requested");
-				if (!userOnly) this.options.requested(task, structuredClone(gate));
+				if (!gate.userOnly) this.options.requested(task, structuredClone(gate));
 			} catch (error) {
 				this.remove(gate.id);
 				reject(error);
@@ -135,6 +151,7 @@ export class GateService {
 		}
 	}
 	private finish(waiting: WaitingGate, value: "allow" | "deny", actor: "main" | "user" | "system", basis: string[], reason: string): void {
+		if (value === "allow") verifyDeleteGateEvidence(waiting.gate);
 		const gate = this.record(waiting.taskId, waiting.gate, value, actor, basis, reason);
 		this.remove(gate.id);
 		waiting.resolve(gate.decision!);
@@ -142,10 +159,11 @@ export class GateService {
 	private record(taskId: string, source: TaskGate, value: "allow" | "deny", actor: "main" | "user" | "system", basis: string[], reason: string): TaskGate {
 		const gate = { ...source, decision: { value, actor, basis, reason, at: Date.now() } };
 		this.options.audit.append("gate", { taskId, runId: gate.runId, gateId: gate.id, toolCallId: gate.toolCallId, tool: gate.tool,
-			action: gate.action, cwd: gate.cwd, scope: gate.scope, decision: value, actor, basis, reason });
+			action: gate.action, cwd: gate.cwd, scope: gate.scope, ...(gate.detailsFile ? { detailsFile: gate.detailsFile } : {}), decision: value, actor, basis, reason });
 		this.options.store.recordGate(taskId, gate, "gate_decided");
 		return gate;
 	}
+	private manifestDirectory(): string { return join(dirname(this.options.events.activeFile()), "gate-manifests"); }
 	private remove(id: string): void {
 		const waiting = this.pending.get(id);
 		if (!waiting) return;

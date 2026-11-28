@@ -467,7 +467,18 @@ export class Supervisor {
 		return this.board();
 	}
 
+	private readonly pendingAccessUpdates = new Set<string>();
 	private onStoreChange(task: Task, kind: string): void {
+		if (kind === "access_recorded" || kind === "task_files_changed") {
+			if (!this.pendingAccessUpdates.has(task.id)) {
+				this.pendingAccessUpdates.add(task.id);
+				setTimeout(() => {
+					this.pendingAccessUpdates.delete(task.id);
+					if (!this.disposed && this.store.get(task.id)) this.options.emitTask({ type: "task", task: this.store.view(task) });
+				}, 100).unref();
+			}
+			return;
+		}
 		if (kind === "task_deleted") {
 			this.options.emitTask({ type: "deleted", taskId: task.id, board: this.board() });
 			return;

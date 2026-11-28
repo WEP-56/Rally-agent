@@ -181,7 +181,10 @@ describe("simple worker background switches", () => {
 		const service = new ScheduledTasks(events, store, () => false, () => {}, () => now);
 		cleanups.push(() => service.dispose());
 		const tools = createScheduleTools(() => service, host.quote, sources);
-		const plan = JSON.parse(text(await call(tools, "schedule_create", { ...params, context: 3, memory: 1, timing: { kind: "interval", minutes: 1 } })));
+		const receipt = JSON.parse(text(await call(tools, "schedule_create", { ...params, context: 3, memory: 1, timing: { kind: "interval", minutes: 1 } })));
+		const plan = service.list()[0];
+		expect(receipt.id).toBe(plan.id);
+		expect(receipt.context).not.toEqual(plan.context);
 		expect(plan.context).toEqual(freezeTaskContext({ context: 3, memory: 1 }, sources));
 		expect(service.context()).not.toContain("complete notebook");
 		now += 60000; service.poll();
@@ -195,10 +198,13 @@ describe("simple worker background switches", () => {
 		const service = new ScheduledTasks(events, store, () => false, () => {});
 		cleanups.push(() => service.dispose());
 		const tools = createScheduleTools(() => service, host.quote, sources, host.recentQuoteIds);
-		const plan = JSON.parse(text(await call(tools, "schedule_create", { ...params, note: "初始备注", context: 1, memory: 1, timing: { kind: "interval", minutes: 60 } })));
+		const receipt = JSON.parse(text(await call(tools, "schedule_create", { ...params, note: "初始备注", context: 1, memory: 1, timing: { kind: "interval", minutes: 60 } })));
+		const plan = service.list()[0];
+		expect(receipt.context).not.toEqual(plan.context);
+		expect(receipt.id).toBe(plan.id);
 		const update = { id: plan.id, quotes: params.quotes, title: "Updated project", mode: "write", note: "更新后的项目", memory: 0 };
 		await call(tools, "schedule_update", update);
-		expect(service.list()[0]).toMatchObject({ title: update.title, mode: "write", note: update.note, nextAt: plan.nextAt, revision: 2, context: plan.context.filter((entry: TaskContext) => entry.source === "chat") });
+		expect(service.list()[0]).toMatchObject({ title: update.title, mode: "write", note: update.note, nextAt: plan.nextAt, revision: 2, context: plan.context!.filter((entry: TaskContext) => entry.source === "chat") });
 		await call(tools, "schedule_update", { id: plan.id, quotes: params.quotes, context: 0, memory: 1, note: "" });
 		expect(service.list()[0].context).toEqual(freezeTaskContext({ context: 0, memory: 1 }, sources));
 		expect(service.list()[0].note).toBeUndefined();

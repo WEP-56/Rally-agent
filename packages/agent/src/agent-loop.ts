@@ -401,7 +401,10 @@ async function streamAssistantResponse(
 	}
 
 	// Convert to LLM-compatible messages (AgentMessage[] → Message[])
-	const llmMessages = await config.convertToLlm(messages);
+	let llmMessages = await config.convertToLlm(messages);
+	if (config.prepareModelMessages) {
+		llmMessages = await config.prepareModelMessages(llmMessages, config.model, signal);
+	}
 
 	const llmContext = normalizeContext({ messages: llmMessages });
 

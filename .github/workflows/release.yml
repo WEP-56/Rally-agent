@@ -53,6 +53,13 @@ jobs:
       - run: node --test tests/cloud/profiles.test.mjs
       - run: node --test tests/cloud/cache.test.mjs
       - run: node --test tests/release.test.mjs
+      - name: Verify context, approval and storage regressions offline
+        if: matrix.target != 'android'
+        working-directory: packages/coding-agent
+        run: |
+          node ../../node_modules/vitest/dist/cli.js --run test/suite/rally-context-budgets.test.ts
+          node ../../node_modules/vitest/dist/cli.js --run test/suite/rally-delete-gate.test.ts
+          node ../../node_modules/vitest/dist/cli.js --run test/suite/rally-snapshot.test.ts
       - name: Verify external agent discovery and offline ACP sessions
         if: matrix.target != 'android'
         working-directory: packages/coding-agent

@@ -58,6 +58,19 @@ describe("Rally task snapshots", () => {
 		expect(store.get(task.id)!.changedFiles).toBeUndefined(); cache.flush();
 		expect(recover().store.get(task.id)!.changedFiles).toEqual(["crash.txt"]);
 	});
+	it("preserves changed-file deltas and per-file audit without full task snapshots", async () => {
+		const { cache, store, create, recover, events } = await setup();
+		const task = create();
+		store.recordChangedFiles(task.id, ["external.txt"]);
+		store.recordAccess(task.id, { toolCallId: "delete", runId: "run", tool: "file_delete", at: Date.now(), kind: "fs_delete", target: "deleted.txt" });
+		store.recordChangedFiles(task.id, ["other.txt"]);
+		expect(events.ofKind("task_files_changed").every(event => !event.data.task)).toBe(true);
+		cache.flush();
+		const recovered = recover();
+		expect(recovered.store.get(task.id)!.changedFiles).toEqual(["external.txt", "deleted.txt", "other.txt"]);
+		expect(recovered.store.get(task.id)).toEqual(recovered.full.get(task.id));
+		expect(recovered.store.get(task.id)!.updatedAt).toBe(task.updatedAt);
+	});
 	it("preserves first-seen tool and message ordering when earlier entries finish last", async () => {
 		const { cache, store, create, recover } = await setup(); const task = create();
 		for (const id of ["a", "b", "a", "a"]) {

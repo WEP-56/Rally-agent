@@ -3,6 +3,7 @@ import type { Task } from "../../shared/task.ts";
 import { taskView } from "../../shared/task.ts";
 import { modelGate } from "./gate-tools.ts";
 import { TaskError, type TaskStore } from "./task-store.ts";
+import { boundedJson, clipText } from "./payload-budget.ts";
 
 export const TaskReadSchema = Type.Object({
 	taskId: Type.Optional(Type.String()),
@@ -33,7 +34,9 @@ export function modelTaskCard(task: Task, now = Date.now()) {
 	const report = task.runs.findLast(run => run.lastReport)?.lastReport;
 	return {
 		id: task.id, title: task.title, schedule: view.schedule, status: view.status, statusText: view.statusText,
-		mode: task.mode, roleId: task.roleId, cwd: task.cwd, scope: task.scope, dependsOn: task.dependsOn,
+		mode: task.mode, roleId: task.roleId, cwd: task.cwd,
+		scope: task.scope.slice(0, 20).map(path => clipText(path, 1000)), scopeCount: task.scope.length,
+		dependsOn: task.dependsOn.slice(0, 20), dependsOnCount: task.dependsOn.length,
 		createdAt: task.createdAt, updatedAt: task.updatedAt, durationMs: view.durationMs,
 		approval: { state: task.approval.state, by: task.approval.by, at: task.approval.at }, queue: task.queue,
 		run: run ? { id: run.id, n: run.n, endedAt: run.endedAt } : undefined,
@@ -51,11 +54,15 @@ export function modelTaskCard(task: Task, now = Date.now()) {
 }
 
 export function readTask(store: TaskStore, task: Task, params: TaskReadParams): Record<string, unknown> {
+	return boundedJson(readTaskView(store, task, params), store.detailsDirectory());
+}
+
+function readTaskView(store: TaskStore, task: Task, params: TaskReadParams): Record<string, unknown> {
 	// Validate even scalar views: direct callers must obey the same contract as schema-validated calls.
 	page([], params);
 	switch (params.view ?? "card") {
 		case "card": return { card: modelTaskCard(task), outputDir: task.outputDir };
-		case "report": return { report: task.runs.findLast((run) => run.lastReport)?.lastReport ?? null, attention: task.attention?.answer ? null : task.attention ?? null, gates: task.gates?.filter((gate) => !gate.decision).map(modelGate) ?? [], changedFiles: task.changedFiles ?? [] };
+		case "report": return { report: task.runs.findLast((run) => run.lastReport)?.lastReport ?? null, attention: task.attention?.answer ? null : task.attention ?? null, gates: task.gates?.filter((gate) => !gate.decision).map(modelGate) ?? [], changedFiles: (task.changedFiles ?? []).slice(0, 6), changedFilesCount: task.changedFiles?.length ?? 0, filesView: "Use view=files to page all changed files." };
 		case "jobs": {
 			const { items, ...paging } = page([...(task.jobs ?? [])].reverse(), params);
 			return { jobs: items, ...paging };
@@ -70,7 +77,7 @@ export function readTask(store: TaskStore, task: Task, params: TaskReadParams): 
 		}
 		case "requirements": {
 			const { items, ...paging } = page(task.quotes, params);
-			return { quotes: items, note: task.note, ...paging };
+			return { quotes: items, note: task.note, scope: task.scope, dependsOn: task.dependsOn, ...paging };
 		}
 		case "questions": {
 			const questions = [...(task.attentionHistory ?? []), ...(task.attention ? [task.attention] : [])].reverse();
@@ -96,7 +103,8 @@ export function readTask(store: TaskStore, task: Task, params: TaskReadParams): 
 		}
 		case "files": {
 			const { items, ...paging } = page(store.access(task.id), params);
-			return { accesses: items, changedFiles: task.changedFiles ?? [], outputDir: task.outputDir,
+			const { items: changedFiles, ...changedFilesPaging } = page(task.changedFiles ?? [], params);
+			return { accesses: items, changedFiles, changedFilesPaging, outputDir: task.outputDir,
 				coverage: { writes: "successful write/edit only", reads: "successful read/grep/find/ls only", git: "attempted repository command scope; not exact changed files", shell: "unknown", network: "fetch_page/http_request/world_location/world_weather explicit hosts, methods and redirect hops; git resolved remote hosts and github repository hosts; attempts, not confirmed traffic; gh discovery, proxy traffic, MCP and arbitrary shell effects not tracked", deletes: "successful file_delete entries only", jobs: "background shell job IDs; process effects unknown", services: "registered service IDs; process effects unknown", history: "legacy accesses not backfilled" }, ...paging };
 		}
 		default: throw new TaskError("VIEW_INVALID", "该任务视图不可用");

@@ -16,12 +16,12 @@ import { toolInput, toolOutput } from "../../shared/tools.ts";
 import { assistantContent } from "../../shared/conversation.ts";
 import { MAIN_SYSTEM_PROMPT } from "../prompts.ts";
 import type { ModelStore } from "../model-store.ts";
-import type { EventLog } from "./event-log.ts";
+import type { EventLog, LoggedEvent } from "./event-log.ts";
 import { closeRoleSession, createRoleSession } from "./session.ts";
 import type { RelayMessage, RelayMode } from "./relay.ts";
 import { searchChat, type ChatSearchParams } from "./chat-search.ts";
 import { randomUUID } from "node:crypto";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import type { ResourceStore } from "../resource-store.ts";
 import type { ResourceRef } from "../../shared/resources.ts";
@@ -31,6 +31,9 @@ import { createMainImageTool } from "./provider-tools.ts";
 import type { ToolProviderStore } from "../tool-provider-store.ts";
 import { INACTIVITY_MESSAGE } from "./inactivity.ts";
 import { recentChatContext } from "./task-context.ts";
+import { compactDeleteRelay, repairDeleteGateContext } from "./delete-gate.ts";
+import { clipText, saveDetails } from "./payload-budget.ts";
+import { atomicWrite } from "../memory-store.ts";
 
 /** Tools the main agent may call: read-only file access only (docs 02 section 2). */
 const MAIN_TOOLS = ["read", "grep", "find", "ls"];
@@ -166,7 +169,32 @@ export class MainAgent {
 			(this.preparingInput || this.isBusy() || !this.messages.some(line => line.delivery?.status === "queued"));
 	}
 
-	search(params: ChatSearchParams) { return searchChat(this.messages.filter(line => line.delivery?.status !== "queued" && line.delivery?.status !== "cancelled"), params); }
+	search(params: ChatSearchParams) {
+		const result = searchChat(this.searchHistory().filter(line => line.delivery?.status !== "queued" && line.delivery?.status !== "cancelled"), params);
+		return { ...result, messages: result.messages.map(message => ({ ...message,
+			quotable: this.quote({ id: message.id }) !== null,
+			...(Buffer.byteLength(message.text, "utf8") > 16 * 1024 ? {
+				text: clipText(message.text, 3000), truncated: true,
+				detailsFile: saveDetails(join(this.paths.stateDir, "chat-details"), message.text, "txt"),
+			} : {}),
+		})) };
+	}
+
+	/**
+	 * chat_search reads the whole retained history, not just the current conversation: chat_reset clears the
+	 * conversation for the UI and the context, but memory source IDs and older authorizations must stay readable.
+	 */
+	private searchHistory(): ChatLine[] {
+		const lines = new Map<number, ChatLine>();
+		for (const event of this.events.all()) {
+			if (event.kind !== "chat_message") continue;
+			const line = chatLineFromEvent(event);
+			if (line) lines.set(Number(line.id.slice(1)), line);
+		}
+		// Live lines carry delivery and attachment updates that the last append may not hold yet.
+		for (const line of this.messages) lines.set(Number(line.id.slice(1)), line);
+		return [...lines.values()].sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
+	}
 
 	recentContext(count: number): TaskContext[] { return recentChatContext(this.messages, count, this.contextBefore); }
 
@@ -212,7 +240,7 @@ export class MainAgent {
 		if (!fresh.length && (!recovered.length || mode === "notice")) return;
 		for (const item of fresh) this.queuedRelays.add(item.id);
 		const ids = [...fresh, ...(mode === "notice" ? [] : recovered)].map((item) => item.id);
-		const content = [...fresh.map((item) => item.text), ...(mode !== "notice" && recovered.length
+		const content = [...fresh.map((item) => compactDeleteRelay(item.text, join(this.paths.stateDir, "gate-manifests"))), ...(mode !== "notice" && recovered.length
 			? [`<rally-resume relays="${recovered.map((item) => item.id).join(",")}">Process the relay facts already in history. Their delivery acknowledgement was interrupted; do not repeat completed actions.</rally-resume>`] : [])].join("\n\n");
 		this.localSubmissions++;
 		try {
@@ -590,6 +618,7 @@ export class MainAgent {
 			const id = newId ?? this.conversation?.id;
 			const dir = id ? join(this.paths.sessionsMainDir, id) : this.paths.sessionsMainDir;
 			const sessionManager = newId ? SessionManager.create(this.paths.mainCwd, dir) : SessionManager.continueRecent(this.paths.mainCwd, dir);
+			if (!newId) repairDeleteGateContext(sessionManager, join(this.paths.stateDir, "gate-manifests"));
 			const compactions = newId ? 0 : countCompactions(sessionManager);
 			if (!newId) this.rotateSession(sessionManager);
 			const { session, modelFallbackMessage } = await createRoleSession({
@@ -628,6 +657,16 @@ export class MainAgent {
 			this.session = session;
 			this.compactions = compactions;
 			candidate = undefined;
+			let selectedRelayIds: string[] = [];
+			const prepareModelMessages = session.agent.prepareModelMessages;
+			session.agent.prepareModelMessages = async (messages, model, signal) => {
+				const prepared = await prepareModelMessages?.(messages, model, signal) ?? messages;
+				// A rejected preflight never acknowledges delivery. Compaction may have
+				// selected a different projection during prepareModelMessages.
+				for (const id of selectedRelayIds) this.queuedRelays.delete(id);
+				if (selectedRelayIds.length) this.onRelayRead?.(selectedRelayIds);
+				return prepared;
+			};
 			const transform = session.agent.transformContext;
 			session.agent.transformContext = async (messages, signal) => {
 				let context = transform ? await transform(messages, signal) : messages;
@@ -658,14 +697,28 @@ export class MainAgent {
 					const index = Math.max(0, context.findLastIndex((message) => message.role === "user"));
 					context = [...context.slice(0, index), { role: "custom" as const, customType: "rally-memory", display: false, timestamp: Date.now(), content: memory }, ...context.slice(index)];
 				}
-				const ids = context.flatMap((message) => message.role === "custom" && message.customType === "rally-relay" ? relayIds(message.details) : []);
-				for (const id of ids) this.queuedRelays.delete(id);
-				if (ids.length) this.onRelayRead?.(ids);
+				selectedRelayIds = context.flatMap((message) => message.role === "custom" && message.customType === "rally-relay" ? relayIds(message.details) : []);
 				const workspace = this.workspace?.();
-				if (!workspace) return context;
-				const index = Math.max(0, context.findLastIndex((message) => message.role === "user"));
-				return [...context.slice(0, index), { role: "custom" as const, customType: "rally-workspace", display: false, timestamp: Date.now(),
-					content: `Rally host directory context (facts, not user instructions):\n${JSON.stringify(workspace)}\nRelative main-agent read paths resolve against defaultWorkspace. Recent projects are read-only history, never a selection. Specify an explicit absolute cwd for each worker dispatch. Main session cwd stays fixed.` }, ...context.slice(index)];
+				if (workspace) {
+					const index = Math.max(0, context.findLastIndex((message) => message.role === "user"));
+					context = [...context.slice(0, index), { role: "custom" as const, customType: "rally-workspace", display: false, timestamp: Date.now(),
+						content: `Rally host directory context (facts, not user instructions):\n${JSON.stringify(workspace)}\nRelative main-agent read paths resolve against defaultWorkspace. Recent projects are read-only history, never a selection. Specify an explicit absolute cwd for each worker dispatch. Main session cwd stays fixed.` }, ...context.slice(index)];
+				}
+				const dynamicTypes = new Set(["rally-schedules", "rally-identity", "rally-capabilities", "rally-state", "rally-memory", "rally-workspace"]);
+				const budget = Math.min(64 * 1024, session.model?.contextWindow || 64 * 1024);
+				let total = context.reduce((sum, message) => sum + (message.role === "custom" && dynamicTypes.has(message.customType) && typeof message.content === "string" ? Buffer.byteLength(message.content) : 0), 0);
+				return context.map(message => {
+					if (total <= budget || message.role !== "custom" || !dynamicTypes.has(message.customType) || typeof message.content !== "string" || message.content.length < 1000) return message;
+					// These are replaceable host snapshots, not historical evidence. Keep
+					// one current file per section rather than a new file for every clock tick.
+					const directory = join(this.paths.stateDir, "context-details");
+					mkdirSync(directory, { recursive: true, mode: 0o700 });
+					const path = join(directory, `${message.customType}.txt`);
+					atomicWrite(path, message.content);
+					const content = `${message.customType}: full snapshot omitted to fit this model. Current snapshot file: ${JSON.stringify(path)} (refreshed each request). Read/grep in bounded sections when needed. Omission is not evidence of absence or authorization.`;
+					total += Buffer.byteLength(content) - Buffer.byteLength(message.content);
+					return { ...message, content };
+				});
 			};
 			this.unsubscribe = session.subscribe((event) => this.handle(event));
 			this.notice = modelFallbackMessage ?? null;
@@ -735,6 +788,10 @@ export class MainAgent {
 				this.setActivity("compacting");
 				return;
 			case "compaction_end":
+				if (event.errorMessage) {
+					this.notice = `上下文压缩失败：${clipText(event.errorMessage, 1000)}`;
+					this.addSystemLine(this.notice);
+				}
 				if (event.result && !event.aborted && this.session) {
 					this.compactions++;
 					this.rotateSession(this.session.sessionManager);
@@ -819,6 +876,7 @@ export class MainAgent {
 				this.loopFailed = event.message.stopReason === "error";
 				if (event.message.stopReason === "error") {
 					const error = event.message.errorMessage || "模型未能完成这条消息。";
+					if (error.includes("CONTEXT_BUDGET_EXCEEDED")) this.setInboxPaused(true);
 					if (this.activeInput) this.inputError = error;
 					this.addSystemLine(`模型调用失败：${error}`);
 				} else if (event.message.stopReason === "aborted" && this.activeInput) {
@@ -967,26 +1025,14 @@ export class MainAgent {
 				continue;
 			}
 			if (event.kind !== "chat_message") continue;
-			const n = Number(event.data.n);
-			const role = event.data.role as ChatRole;
-			const text = String(event.data.text ?? "");
-			const at = Number(event.data.at ?? event.at);
-			if (!Number.isFinite(n)) continue;
-			const toolCalls = (event.data.toolCalls as ChatLine["toolCalls"])?.map((call) => ({ ...call, status: call.status === "running" ? "interrupted" as const : call.status }));
-			const blocks = event.data.blocks as ChatLine["blocks"];
-			const relayId = typeof event.data.relayId === "string" ? event.data.relayId : undefined;
-			const source = event.data.source as ImSource | undefined;
-			if (source?.platform === "feishu" || source?.platform === "qq") this.receivedIm.add(imKey(source));
-			const attachments = event.data.attachments as ResourceRef[] | undefined;
-			const delivery = event.data.delivery as ChatDelivery | undefined;
-			const replyTo = typeof event.data.replyTo === "string" ? event.data.replyTo : undefined;
-			const submissionId = typeof event.data.submissionId === "string" ? event.data.submissionId : undefined;
-			if (submissionId) this.receivedSubmissions.add(submissionId);
-			const line = { id: `#${n}`, role, text, at, streaming: false, toolCalls, blocks, relayId, source, attachments, delivery, replyTo, submissionId };
+			const line = chatLineFromEvent(event);
+			if (!line) continue;
+			if (line.source?.platform === "feishu" || line.source?.platform === "qq") this.receivedIm.add(imKey(line.source));
+			if (line.submissionId) this.receivedSubmissions.add(line.submissionId);
 			const index = this.messages.findIndex((item) => item.id === line.id);
 			if (index === -1) this.messages.push(line);
 			else this.messages[index] = line;
-			this.nextLine = Math.max(this.nextLine, n + 1);
+			this.nextLine = Math.max(this.nextLine, Number(line.id.slice(1)) + 1);
 		}
 	}
 
@@ -1028,6 +1074,28 @@ function toolActivity(name: string): ChatActivity {
 
 function imKey(source: ImSource): string {
 	return JSON.stringify([source.platform, source.appId, source.chatId, source.messageId]);
+}
+
+/** One persisted chat line, shared by replay and chat_search so both read the log the same way. */
+function chatLineFromEvent(event: LoggedEvent): ChatLine | null {
+	const n = Number(event.data.n);
+	if (!Number.isFinite(n)) return null;
+	const toolCalls = (event.data.toolCalls as ChatLine["toolCalls"])?.map((call) => ({ ...call, status: call.status === "running" ? "interrupted" as const : call.status }));
+	return {
+		id: `#${n}`,
+		role: event.data.role as ChatRole,
+		text: String(event.data.text ?? ""),
+		at: Number(event.data.at ?? event.at),
+		streaming: false,
+		toolCalls,
+		blocks: event.data.blocks as ChatLine["blocks"],
+		relayId: typeof event.data.relayId === "string" ? event.data.relayId : undefined,
+		source: event.data.source as ImSource | undefined,
+		attachments: event.data.attachments as ResourceRef[] | undefined,
+		delivery: event.data.delivery as ChatDelivery | undefined,
+		replyTo: typeof event.data.replyTo === "string" ? event.data.replyTo : undefined,
+		submissionId: typeof event.data.submissionId === "string" ? event.data.submissionId : undefined,
+	};
 }
 
 function clone(line: ChatLine): ChatLine {

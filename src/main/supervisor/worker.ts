@@ -769,7 +769,7 @@ export class WorkerManager {
 		if (reportedNow && task.attention && !task.attention.answer) return;
 		if (!reportedNow && last?.state === "blocked") return;
 		if (worker.nudged) {
-			this.options.report(task, worker.runId, "blocked", lastText(worker), undefined, undefined);
+			this.options.report(task, worker.runId, "blocked", truncate(lastText(worker), 4000), undefined, undefined);
 			worker.reportedThisTurn = false;
 			return;
 		}
@@ -782,7 +782,7 @@ export class WorkerManager {
 		const message = error instanceof Error ? error.message : String(error);
 		const task = this.options.store.get(worker.taskId);
 		if (!task || task.ended) return;
-		this.options.report(task, worker.runId, "failed", `模型调用失败：${message}`);
+		this.options.report(task, worker.runId, "failed", `模型调用失败：${truncate(message, 4000)}`);
 		this.disposeWorker(worker);
 	}
 

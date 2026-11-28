@@ -160,3 +160,9 @@ Scope and safety:
 ```
 
 - 参数：主 Agent 提示词由 `createRoleSession` 作为 `rolePrompt` 加载；人设、能力目录、任务状态、记忆等按请求注入上下文。Worker 提示词由同一会话入口加载；任务原话、追加要求及项目上下文由 Worker 会话调用方提供。两者没有提示词模板参数。
+
+## 宿主输入预算（0.5.6）
+
+源码：`src/main/supervisor/main-agent.ts`、`rally-state.ts`、`memory-store.ts`、`packages/coding-agent/src/core/agent-session.ts`。人格与主提示词正文不变；动态快照本身设有预算，总计最多 min(64 KiB, 模型 contextWindow 对应的字节预算)。超额快照有明确的详情引用，不能把遗漏当作不存在。rally-state 的每组 omitted 数量提示用 task_read 分页；问题/审批细节按需读取。最终发送检查位于动态转换之后，使用估算 token 数与实际模型窗口，压缩一次仍不满足则停止请求并显示 CONTEXT_BUDGET_EXCEEDED。估算并非供应商精确分词，仍保留供应商超窗后的原有恢复路径。
+
+记忆快照按文件返回 unavailable/path/error，不覆盖外部超预算文件；单个文件失效不隐藏其它健康文件。教练共用该读取边界。

@@ -8,6 +8,8 @@ import type { TaskGate } from "../../shared/gate.ts";
 import type { TaskStore } from "./task-store.ts";
 import type { ResourceRef } from "../../shared/resources.ts";
 import type { CredentialRequest } from "../../shared/credentials.ts";
+import { dirname, join } from "node:path";
+import { boundedRelay, clipText } from "./payload-budget.ts";
 
 export type RelayInput =
 	| { kind: "credential_result"; request: CredentialRequest }
@@ -136,7 +138,7 @@ export class Relay {
 			gateId: input.kind === "gate_request" ? input.gate.id : undefined,
 			questionId: input.kind === "worker_question" ? input.attention.id : undefined };
 		this.persist(item);
-		if (systemLine) this.main.addSystemLine(systemLine, id, item.attachments);
+		if (item.systemLine) this.main.addSystemLine(item.systemLine, id, item.attachments);
 		this.available();
 		return id;
 	}
@@ -203,6 +205,8 @@ export class Relay {
 	}
 
 	private persist(item: RelayRecord): void {
+		item.text = boundedRelay(item.text, join(dirname(this.events.activeFile()), "relay-details"));
+		if (item.systemLine) item.systemLine = clipText(item.systemLine, 2000);
 		this.events.append(item.kind === "notice" ? "notice_enqueued" : "relay_enqueued", { relayId: item.id, kind: item.kind, item });
 		this.pending.set(item.id, item);
 		for (const source of item.sources) this.sources.set(source, item.id);
@@ -219,7 +223,11 @@ export class Relay {
 
 	private flush(mode: RelayMode): void | Promise<void> {
 		if (this.disposed || !this.main.canReceiveRelay()) return;
+		// Only one batch per model turn. Repeated busy notifications must not queue
+		// an unlimited series of individually bounded steer messages.
+		if ([...this.submitted.values()].some(value => (value === "notice") === (mode === "notice"))) return;
 		const items: RelayRecord[] = [];
+		let bytes = 0;
 		for (const item of this.pending.values()) {
 			if ((item.kind === "notice") !== (mode === "notice") || this.submitted.has(item.id)) continue;
 			const task = item.taskId ? this.store.get(item.taskId) : undefined;
@@ -229,7 +237,11 @@ export class Relay {
 				this.pending.delete(item.id);
 				continue;
 			}
-			if (item.systemLine) this.main.addSystemLine(item.systemLine, item.id, item.attachments);
+			item.text = boundedRelay(item.text, join(dirname(this.events.activeFile()), "relay-details"));
+			const size = Buffer.byteLength(item.text, "utf8");
+			if (items.length && bytes + size > 24 * 1024) break;
+			bytes += size;
+			if (item.systemLine) this.main.addSystemLine(clipText(item.systemLine, 2000), item.id, item.attachments);
 			items.push(item);
 		}
 		if (!items.length) return;
