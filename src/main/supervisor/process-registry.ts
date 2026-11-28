@@ -3,6 +3,9 @@ import { randomUUID } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { credentialEnvironment } from "../credential-bindings.ts";
+import { SecretRedactor } from "../secret-redactor.ts";
+import type { WebsiteAccounts } from "../website-accounts.ts";
 import type { ProcessCommand, ProcessCompletion, ProcessStarted } from "./process-host.ts";
 import { processIdentity, stopProcessTree, type ProcessIdentity, type ProcessStopResult } from "./process-identity.ts";
 
@@ -22,6 +25,7 @@ export interface ProcessRunOptions {
 export interface ProcessInput { write(data: string | Uint8Array): Promise<void>; end(): void }
 export interface ManagedProcess { ready: Promise<ProcessInput>; exited: Promise<number>; close(): void }
 export interface ProcessRegistryOptions {
+	credentials?(): WebsiteAccounts;
 	canRun?(owner: ProcessOwner): boolean;
 	assertWritable(): void;
 	onStopped?(entry: OwnedProcess, reason: "recovery" | "completed" | "cancelled" | "error", result: ProcessStopResult): void;
@@ -74,7 +78,11 @@ export class ProcessRegistry {
 		const abort = () => controller.abort();
 		options.signal?.addEventListener("abort", abort, { once: true });
 		if (options.signal?.aborted) controller.abort();
-		const pending = this.execute(command, owner, options, controller.signal);
+		const redactor = new SecretRedactor();
+		const pending = this.execute(command, owner, options, controller.signal, redactor).catch((error: unknown) => {
+			if (!command.credentialEnv) throw error;
+			throw new Error(redactor.redact(error instanceof Error ? error.message : String(error)));
+		});
 		this.running.set(pending, controller);
 		void pending.finally(() => { this.running.delete(pending); options.signal?.removeEventListener("abort", abort); }).catch(() => {});
 		return pending;
@@ -108,7 +116,7 @@ export class ProcessRegistry {
 		return this.disposal;
 	}
 
-	private async execute(command: ProcessCommand, owner: ProcessOwner, options: ProcessRunOptions, signal: AbortSignal): Promise<number> {
+	private async execute(command: ProcessCommand, owner: ProcessOwner, options: ProcessRunOptions, signal: AbortSignal, redactor: SecretRedactor): Promise<number> {
 		await this.recover(); signal.throwIfAborted(); this.options.assertWritable();
 		if (this.options.canRun?.(owner) === false) throw new Error("PROCESS_PAUSED: 闲置保护已暂停活动");
 		const hostPath = this.options.hostPath ?? fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./process-host.ts" : "./process-host.js", import.meta.url));
@@ -141,8 +149,9 @@ export class ProcessRegistry {
 		});
 		child.stdin?.on("error", fail);
 		child.stdout!.setEncoding("utf8"); child.stderr!.setEncoding("utf8");
-		child.stdout!.on("data", (data: string) => { try { options.onStdout(data); } catch (error) { fail(error); } });
-		child.stderr!.on("data", (data: string) => { try { options.onStderr(data); } catch (error) { fail(error); } });
+		const stdout = redactor.stream(options.onStdout), stderr = redactor.stream(options.onStderr);
+		child.stdout!.on("data", (data: string) => { try { stdout.write(data); } catch (error) { fail(error); } });
+		child.stderr!.on("data", (data: string) => { try { stderr.write(data); } catch (error) { fail(error); } });
 		signal.addEventListener("abort", cancel, { once: true });
 		try {
 			if (!child.pid) throw new Error("PROCESS_HOST_START_FAILED");
@@ -154,7 +163,17 @@ export class ProcessRegistry {
 			signal.throwIfAborted(); if (executionError) throw executionError;
 			options.onStarted?.(entry);
 			signal.throwIfAborted();
-			child.send(command, error => { if (error) fail(error); });
+			// Resolve after all startup waits, so deletion/disable while waiting takes effect.
+			const { credentialEnv, ...invocation } = command;
+			const credentials = credentialEnvironment(this.options.credentials?.(), credentialEnv);
+			redactor.add(Object.values(credentials));
+			const commandEnv = { ...command.env };
+			for (const [key, value] of Object.entries(credentials)) {
+				// Windows environment names are case-insensitive; remove an inherited alias.
+				for (const inherited of Object.keys(commandEnv)) if (inherited.toUpperCase() === key.toUpperCase()) delete commandEnv[inherited];
+				Object.defineProperty(commandEnv, key, { value, enumerable: true, configurable: true, writable: true });
+			}
+			child.send({ ...invocation, env: commandEnv }, error => { if (error) fail(error); });
 			const result = await completed;
 			if (result.error) throw new Error(`PROCESS_EXEC_FAILED: ${result.error}`);
 			if (signal.aborted) throw new Error("PROCESS_ABORTED: 调用已取消");
@@ -169,6 +188,7 @@ export class ProcessRegistry {
 					else await stopProcessTree(entry, 0);
 				} else { child.kill("SIGKILL"); }
 				await closed;
+				stdout.end(); stderr.end();
 			} catch (error) { this.failures.push(error); throw error; }
 			if (executionError && outcome) throw executionError;
 		}

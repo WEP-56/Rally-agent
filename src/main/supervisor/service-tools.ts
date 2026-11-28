@@ -2,8 +2,9 @@ import type { ToolDefinition } from "@rally/coding-agent";
 import { Type, type Static } from "typebox";
 import type { Task, TaskRun } from "../../shared/task.ts";
 import type { ServiceManager } from "./services.ts";
+import { CredentialEnvironmentSchema, CREDENTIAL_ENV_DESCRIPTION } from "../credential-bindings.ts";
 
-const startSchema = Type.Object({ name: Type.String({ minLength: 1 }), command: Type.String({ minLength: 1 }), cwd: Type.Optional(Type.String()), port: Type.Optional(Type.Integer({ minimum: 1, maximum: 65535 })), readyPattern: Type.Optional(Type.String({ maxLength: 256 })), env: Type.Optional(Type.Record(Type.String(), Type.String())) });
+const startSchema = Type.Object({ name: Type.String({ minLength: 1 }), command: Type.String({ minLength: 1 }), cwd: Type.Optional(Type.String()), port: Type.Optional(Type.Integer({ minimum: 1, maximum: 65535 })), readyPattern: Type.Optional(Type.String({ maxLength: 256 })), env: Type.Optional(Type.Record(Type.String(), Type.String())), credentialEnv: Type.Optional(CredentialEnvironmentSchema) });
 const stopSchema = Type.Object({ serviceId: Type.String() });
 const statusSchema = Type.Object({ serviceId: Type.String(), tail: Type.Optional(Type.Integer({ minimum: 1, maximum: 2000 })) });
 const result = (details: object) => ({ content: [{ type: "text" as const, text: JSON.stringify(details) }], details });
@@ -11,7 +12,7 @@ const result = (details: object) => ({ content: [{ type: "text" as const, text: 
 export function createServiceTools(services: ServiceManager, task: Task, run: TaskRun): ToolDefinition[] {
 	return [{
 		name: "service_start", label: "启动服务", parameters: startSchema,
-		description: "Start a long-lived service using PowerShell on Windows or Bash elsewhere. cwd defaults to the task cwd. Wait up to 30 seconds for a listening local port or readyPattern; ready=false may still be running. Services survive task completion, do not occupy worker slots and never wake workers. Use jobs for finite commands. Environment values are not saved in service records.",
+		description: "Start a long-lived service using PowerShell on Windows or Bash elsewhere. cwd defaults to the task cwd. Wait up to 30 seconds for a listening local port or readyPattern; ready=false may still be running. Services survive task completion, do not occupy worker slots and never wake workers. Use jobs for finite commands. Environment values are not saved in service records. Disabling a credential prevents new launches; stop an already running service to end its use." + CREDENTIAL_ENV_DESCRIPTION,
 		async execute(_id: string, params: Static<typeof startSchema>, signal?: AbortSignal) { const value = await services.start(task, run, params, signal); return { ...result(value), ...(value.status !== "running" ? { isError: true } : {}) }; },
 	}, {
 		name: "service_stop", label: "停止服务", parameters: stopSchema,

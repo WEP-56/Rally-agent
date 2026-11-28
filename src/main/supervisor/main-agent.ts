@@ -170,6 +170,15 @@ export class MainAgent {
 
 	recentContext(count: number): TaskContext[] { return recentChatContext(this.messages, count, this.contextBefore); }
 
+	recentQuoteIds(): string[] {
+		const ids: string[] = [];
+		for (let index = this.messages.length - 1; index >= 0 && ids.length < 5; index--) {
+			const line = this.messages[index];
+			if (line.role === "user" && line.delivery?.status !== "queued" && line.delivery?.status !== "cancelled") ids.push(line.id);
+		}
+		return ids;
+	}
+
 	/** Freeze a user message (and optionally the confirmed proposal before it) into a Quote. */
 	quote(ref: QuoteRef): Quote | null {
 		const index = this.messages.findIndex((line) => line.id === ref.id);

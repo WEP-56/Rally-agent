@@ -1,4 +1,5 @@
 import { createServer, type Server, type IncomingHttpHeaders } from "node:http";
+import { randomBytes } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -12,6 +13,8 @@ import { NetworkRunner } from "../../../../src/main/supervisor/network-runner.ts
 import { createFetchPageTool, createHttpRequestTool } from "../../../../src/main/supervisor/network-tools.ts";
 import { validateNetworkRequest, type NetworkRequest } from "../../../../src/main/supervisor/network-contract.ts";
 import { Supervisor } from "../../../../src/main/supervisor/index.ts";
+import { WebsiteAccounts } from "../../../../src/main/website-accounts.ts";
+import { cloudVault } from "../../../../src/main/cloud/vault.ts";
 import { defaultModel } from "../../../../src/shared/models.ts";
 import { createHarness, getMessageText, type Harness } from "./harness.ts";
 
@@ -66,6 +69,27 @@ async function setup() {
 }
 
 describe("Rally page and HTTP tools (offline local servers)", () => {
+	it("resolves password-book header/body references, masks echoes and blocks disabled entries before sending", async () => {
+		const { harness, runner, host, url, requests } = await setup();
+		const accounts = new WebsiteAccounts(join(harness.tempDir, "credentials.txt"), cloudVault(randomBytes(32)));
+		accounts.request("token", "Gitee", { kind: "secret" });
+		const secret = "private-network-token-9847601";
+		const saved = accounts.submit({ requestId: "token", website: "Gitee", password: secret });
+		const tool = createHttpRequestTool(runner, host, accounts);
+		const reference = `{{credential:${saved.accountId}:secret}}`;
+		const input = { method: "POST" as const, url: `${url}/echo`, headers: { Authorization: `Bearer ${reference}` }, body: reference };
+		const result = await tool.execute("credential-post", input, undefined, undefined, context);
+		expect(requests.at(-1)).toMatchObject({ headers: { authorization: `Bearer ${secret}` }, body: secret });
+		expect(JSON.stringify(result)).not.toContain(secret); expect(result.details.body).toContain("[REDACTED]");
+		expect(input.body).toBe(reference);
+		await tool.execute("credential-cross", { method: "GET", url: `${url}/cross`, headers: input.headers }, undefined, undefined, context);
+		expect(requests.at(-1)?.headers.authorization).toBeUndefined();
+		const count = requests.length;
+		accounts.update(saved.accountId!, false);
+		await expect(tool.execute("credential-disabled", input, undefined, undefined, context)).rejects.toThrow("已停用");
+		expect(requests).toHaveLength(count);
+		expect(JSON.stringify(host.store.access(host.task.id))).not.toContain(secret);
+	});
 	it("extracts readable Markdown, resolves links, follows redirects, and never runs scripts/subresources", async () => {
 		const { page, url, requests, host, paths } = await setup(); const value = (await page({ url: `${url}/start` })).details;
 		expect(value).toMatchObject({ title: "离线文章", finalUrl: `${url}/page`, status: 200, truncated: false });

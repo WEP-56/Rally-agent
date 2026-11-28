@@ -76,3 +76,35 @@ test('requests expire with time or their associated run and remain idempotent af
     assert.equal(restored.state().accounts.length, 0);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('secret-only entries support named services, replacement, disable and legacy encrypted accounts', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rally-password-book-'));
+  try {
+    const file = join(dir, 'accounts.txt'), vault = cloudVault(randomBytes(32));
+    const legacy = { id: 'old-account', origin: 'https://example.test', enabled: true, createdAt: 1, username: 'old-user', password: 'old-password' };
+    writeFileSync(file, vault.encrypt(JSON.stringify({ version: 1, accounts: [legacy], requests: [] })).toString('base64'));
+    const store = new WebsiteAccounts(file, vault);
+    assert.deepEqual(store.forHost(legacy.id, legacy.origin), { username: legacy.username, password: legacy.password });
+    assert.equal(store.valueForHost({ id: legacy.id, field: 'username' }), legacy.username);
+    const request = store.request('token', 'Gitee 项目维护', { kind: 'secret', label: '工作项目 Token' });
+    const saved = store.submit({ requestId: request.id, website: request.origin, password: '  private-token  ' });
+    const restored = new WebsiteAccounts(file, vault);
+    assert.equal(restored.state().accounts[1].kind, 'secret');
+    assert.equal(restored.valueForHost({ id: saved.accountId }), '  private-token  ');
+    assert.throws(() => restored.valueForHost({ id: saved.accountId, field: 'username' }), /只有密钥/);
+    assert.throws(() => restored.valueForHost({ id: saved.accountId, field: 'unknown' }), /引用无效/);
+    restored.replace(saved.accountId, { password: 'replacement-token' });
+    assert.equal(restored.valueForHost({ id: saved.accountId }), 'replacement-token');
+    assert.equal(restored.state().accounts[1].kind, 'secret');
+    restored.update(saved.accountId, false);
+    assert.throws(() => restored.valueForHost({ id: saved.accountId }), /已停用/);
+    restored.update(saved.accountId, true);
+    restored.remove(saved.accountId);
+    assert.throws(() => restored.valueForHost({ id: saved.accountId }), /不存在/);
+    store.request('convert', 'https://gitee.com', { kind: 'account' });
+    const converted = store.submit({ requestId: 'convert', website: 'https://gitee.com', kind: 'secret', password: 'just-a-token' });
+    assert.deepEqual(store.request('convert', 'https://gitee.com', { kind: 'account' }), converted);
+    assert.throws(() => store.forHost(converted.accountId, 'https://gitee.com'), /没有可用/);
+    assert.ok(!JSON.stringify(store.state()).includes('just-a-token'));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

@@ -1,8 +1,9 @@
 // Separate build entry. No command is launched before the parent durably registers this host.
 import { spawn } from "node:child_process";
 import crossSpawn from "cross-spawn";
+import type { CredentialEnvironment } from "../../shared/credentials.ts";
 
-export interface ProcessCommand { executable: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv; stdin?: string; interactive?: boolean; windowsShim?: boolean; windowsVerbatimArguments?: boolean }
+export interface ProcessCommand { executable: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv; credentialEnv?: CredentialEnvironment; stdin?: string; interactive?: boolean; windowsShim?: boolean; windowsVerbatimArguments?: boolean }
 export interface ProcessCompletion { type: "completed"; exitCode: number; error?: string }
 export interface ProcessStarted { type: "started" }
 

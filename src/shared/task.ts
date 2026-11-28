@@ -110,7 +110,7 @@ export interface TaskAccess {
 
 export interface Task {
 	/** Host-owned origin; each due occurrence is an ordinary worker task. */
-	schedule?: { id: string; dueAt: number; timing?: ScheduleTiming };
+	schedule?: { id: string; dueAt: number; timing?: ScheduleTiming; revision?: number };
 	id: string;
 	roleId?: string;
 	title: string;

@@ -326,6 +326,13 @@ function detectMime(bytes: Buffer, name: string): string {
   if (bytes.toString("ascii", 0, 4) === "OggS") return extname(name).toLowerCase() === ".ogv" ? "video/ogg" : "audio/ogg";
   if (bytes.toString("ascii", 4, 8) === "ftyp") return extname(name).toLowerCase() === ".m4a" ? "audio/mp4" : "video/mp4";
   if (bytes.subarray(0, 4).equals(Buffer.from([26,69,223,163]))) return "video/webm";
+  if (!bytes.includes(0)) {
+    switch (extname(name).toLowerCase()) {
+      case ".html": case ".htm": return "text/html";
+      case ".xhtml": return "application/xhtml+xml";
+      case ".svg": return "image/svg+xml";
+    }
+  }
   if (/\.(txt|md|csv|tsv|json|log|js|ts|tsx|jsx|py|css|yaml|yml|xml|sh|ps1)$/i.test(name) && !bytes.includes(0)) return "text/plain";
   return "application/octet-stream";
 }

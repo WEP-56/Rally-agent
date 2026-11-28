@@ -1,5 +1,6 @@
-import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { createServer } from "node:http";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, getCurrentTools, type FauxResponseStep } from "@rally/ai";
 import { expect, it, vi } from "vitest";
@@ -65,3 +66,70 @@ it("router requests a private form; saving wakes the idle main agent once with m
 		cloud[C.credentialsRemove](state.accounts[0].id); expect(local[C.credentialsState]().accounts).toHaveLength(0);
 	} finally { await supervisor.dispose(); await harness.cleanup(); }
 });
+
+it("a private token is discoverable and usable in CLI and HTTP without reaching model history or logs", async () => {
+	const harness = await createHarness({ provider: "rally-token", models: [{ id: "main" }, { id: "worker" }] });
+	const paths = resolveRallyPaths(join(harness.tempDir, "home")); ensureRallyDirs(paths); mkdirSync(paths.workspaceDir, { recursive: true });
+	const supervisor = new Supervisor(paths, { emitChat: () => {}, emitTask: () => {}, credentialVault: cloudVault(randomBytes(32)) });
+	const token = "gitee-private-fixture-7b68e0f9";
+	const observations: string[] = []; let received = "";
+	const server = createServer((request, response) => {
+		received = request.headers.authorization ?? "";
+		response.setHeader("Content-Type", "application/json"); response.end(JSON.stringify({ authorization: received }));
+	});
+	await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+	const address = server.address(); if (!address || typeof address === "string") throw Error("Missing fixture port");
+	const script = join(paths.workspaceDir, "verify-token.cjs");
+	const hash = createHash("sha256").update(token).digest("hex");
+	writeFileSync(script, `const token = process.env.GITEE_TOKEN; if (!token || require('node:crypto').createHash('sha256').update(token).digest('hex') !== '${hash}') process.exit(9); process.stdout.write('TOKEN_OK ' + token.slice(0, 9)); setTimeout(() => { process.stdout.write(token.slice(9)); process.stderr.write(token); }, 30);`);
+	try {
+		await supervisor.models.save([{ id: "rally-token", name: "Offline", protocol: "messages", baseUrl: "http://localhost:0", apiKey: "faux-key", models: harness.models.map(model => defaultModel(model.id)) }]);
+		const runtime = await supervisor.models.whenReady();
+		runtime!.registerProvider("rally-token", { api: harness.faux.api, apiKey: "faux-key", baseUrl: "http://localhost:0", models: harness.models.map(model => ({ ...model, type: "chat" as const })) });
+		supervisor.models.setActive({ provider: "rally-token", model: "main", thinkingLevel: "off" });
+		await supervisor.models.selectWorker({ provider: "rally-token", model: "worker", thinkingLevel: "off" });
+		let requested = false, step = 0, credentialId = "";
+		const respond: FauxResponseStep = (context, _options, _state, model) => {
+			observations.push(JSON.stringify(context.messages));
+			const names = getCurrentTools(context.messages).map(tool => tool.name);
+			expect(names).toContain("credential_list");
+			const call = (name: string, input: Parameters<typeof fauxToolCall>[1]) => fauxAssistantMessage(fauxToolCall(name, input), { stopReason: "toolUse" });
+			if (model.id === "main") {
+				if (!requested) { requested = true; return call("credential_request", { service: "Gitee", kind: "secret", label: "项目维护" }); }
+				return fauxAssistantMessage("已收到密码本状态。");
+			}
+			if (step++ === 0) return call("credential_list", { service: "Gitee" });
+			const result = JSON.parse(getMessageText(context.messages.findLast(message => message.role === "toolResult")));
+			if (step === 2) {
+				credentialId = result.credentials[0].id;
+				expect(result.credentials[0].kind).toBe("secret");
+				const command = `${process.platform === "win32" ? "& " : ""}"${process.execPath}" "${script}"`;
+				return call(process.platform === "win32" ? "powershell" : "bash", { command, credentialEnv: { GITEE_TOKEN: { id: credentialId } } });
+			}
+			if (step === 3) {
+				expect(result.exitCode).toBe(0); expect(result.output).toContain("TOKEN_OK [REDACTED]");
+				return call("http_request", { method: "GET", url: `http://127.0.0.1:${address.port}`, headers: { Authorization: `Bearer {{credential:${credentialId}:secret}}` } });
+			}
+			if (step === 4) {
+				expect(result.status).toBe(200); expect(result.body).toContain("Bearer [REDACTED]");
+				return call("task_report", { state: "ready", summary: "命令行与 HTTP 的 Token 使用完成。" });
+			}
+			return fauxAssistantMessage("完成。");
+		};
+		harness.setResponses(Array(18).fill(respond));
+		await supervisor.start(); await supervisor.main.send("请使用 Gitee Token 维护项目。");
+		await vi.waitFor(() => { expect(supervisor.websiteAccounts.state().requests).toHaveLength(1); expect(supervisor.main.isBusy()).toBe(false); }, { timeout: 10000 });
+		const handlers = cloudCommands(businessHandlers(paths, supervisor, () => {}));
+		const request = supervisor.websiteAccounts.state().requests[0];
+		handlers[C.credentialsSubmit]({ requestId: request.id, website: request.origin, password: token });
+		const task = supervisor.store.create({ title: "Token 离线验证", quotes: [], cwd: paths.workspaceDir, scope: [], mode: "readonly", dependsOn: [], autoApprove: false }).task;
+		supervisor.approve(task.id);
+		await vi.waitFor(() => expect(task.ended?.outcome).toBe("done"), { timeout: 30000 });
+		expect(received).toBe(`Bearer ${token}`);
+		for (const text of [...observations, JSON.stringify(supervisor.events.all()), JSON.stringify(supervisor.main.state()), readFileSync(join(paths.sessionsTasksDir, `${task.id}.jsonl`), "utf8"), readFileSync(join(paths.jobsDir, "J-1.log"), "utf8")]) expect(text).not.toContain(token);
+		handlers[C.credentialsUpdate](credentialId, false);
+		expect(() => supervisor.websiteAccounts.valueForHost({ id: credentialId })).toThrow("已停用");
+	} finally {
+		await supervisor.dispose(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await harness.cleanup();
+	}
+}, 45000);

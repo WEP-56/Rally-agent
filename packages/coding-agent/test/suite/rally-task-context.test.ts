@@ -1,7 +1,7 @@
 
 import { join } from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { fauxAssistantMessage, fauxToolCall, getCurrentTools } from "@rally/ai";
+import { fauxAssistantMessage, fauxToolCall, getCurrentTools, validateToolArguments } from "@rally/ai";
 import type { FauxResponseStep } from "@rally/ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionToolContext, ToolDefinition } from "../../src/index.ts";
@@ -108,6 +108,7 @@ describe("simple worker background switches", () => {
 		cleanups.push(() => { events.close(); harness.cleanup(); });
 		const host: TaskToolHost = { store, workspaceDir: harness.tempDir, autoApprove: () => false,
 			quote: ref => ref.id === "#4" ? { messageId: "#4", kind: "user", text: history[3].text, at: 400 } : null,
+			recentQuoteIds: () => ["#4"],
 			contextSources: sources, tick: () => {}, deliverSteer: () => "queued_for_worker", deliverAnswer: () => "queued_for_worker", abortWorker: () => {},
 			board: () => store.board(0, 2), roleWorker: () => undefined };
 		const tools = createMainTaskTools(host);
@@ -145,12 +146,35 @@ describe("simple worker background switches", () => {
 		store.report(created.taskId, run.id, "ready", "done");
 		const child = store.create({ ...params, quotes: [], context: freezeTaskContext({ context: 1 }, sources), scope: [], dependsOn: [created.taskId], autoApprove: false, mode: "readonly" }).task;
 		const workerTools = createWorkerTools({ store, taskId: child.id, dependsOn: child.dependsOn, report: () => ({ taskId: child.id, ended: false, notifiedMain: false }) });
-		expect(JSON.parse(text(await call(workerTools, "task_read", { view: "card" }))).context).toHaveLength(3);
-		expect(JSON.parse(text(await call(workerTools, "task_read", { taskId: created.taskId, view: "card" }))).context).toEqual([]);
+		expect(JSON.parse(text(await call(workerTools, "task_read", { view: "card" }))).card.counts.context).toBe(3);
+		expect(JSON.parse(text(await call(workerTools, "task_read", { view: "context" }))).context).toHaveLength(3);
+		expect(JSON.parse(text(await call(workerTools, "task_read", { taskId: created.taskId, view: "card" }))).card.counts.context).toBe(0);
+		expect(text(await call(workerTools, "task_read", { taskId: created.taskId, view: "context" }))).toContain("NOT_VISIBLE");
 		await call(tools, "task_resume", { taskId: created.taskId, quotes: params.quotes, memory: 0 });
 		expect(taskContextSummary(store.get(created.taskId)?.context)).toMatchObject({ turns: 1, memoryFiles: [] });
 	});
 
+	it("accepts intact Unicode notes up to 2000 characters and explains invalid quote references", async () => {
+		const { store, tools, params } = await storeFixture();
+		const invalid = await call(tools, "task_dispatch", { ...params, quotes: [...params.quotes, { id: "#missing" }] });
+		expect(invalid.isError).toBe(true);
+		expect(text(invalid)).toContain('quotes[1].id="#missing"');
+		expect(text(invalid)).toContain("最近可引用的用户消息 ID：#4");
+		expect(text(invalid)).toContain("chat_search");
+		const note = "好😀".repeat(1000);
+		const tool = tools.find(item => item.name === "task_dispatch")!;
+		expect(() => validateToolArguments(tool, fauxToolCall("task_dispatch", { ...params, note }))).not.toThrow();
+		const created = JSON.parse(text(await call(tools, "task_dispatch", { ...params, note })));
+		expect(store.get(created.taskId)?.note).toBe(note);
+		const overflow = await call(tools, "task_update", { taskId: created.taskId, quotes: params.quotes, note: note + "多" });
+		expect(overflow.isError).toBe(true);
+		expect(text(overflow)).toContain("2001 字符");
+		expect(text(overflow)).toContain("不会自动截断");
+		expect(store.get(created.taskId)?.note).toBe(note);
+		const longerEnglish = "reference ".repeat(100).trim();
+		expect((await call(tools, "task_update", { taskId: created.taskId, quotes: params.quotes, note: longerEnglish })).isError).not.toBe(true);
+		expect(store.get(created.taskId)?.note).toBe(longerEnglish);
+	});
 	it("freezes a schedule's numeric selection and copies its background to occurrences", async () => {
 		const { events, store, host, params } = await storeFixture();
 		let now = Date.now();
@@ -165,6 +189,26 @@ describe("simple worker background switches", () => {
 		const restored = new ScheduledTasks(events, store, () => false, () => {}, () => now);
 		cleanups.push(() => restored.dispose());
 		expect(restored.list()[0].context).toEqual(plan.context);
+	});
+	it("updates schedule work and independently refreshes or clears its background through the tool", async () => {
+		const { events, store, host, params } = await storeFixture();
+		const service = new ScheduledTasks(events, store, () => false, () => {});
+		cleanups.push(() => service.dispose());
+		const tools = createScheduleTools(() => service, host.quote, sources, host.recentQuoteIds);
+		const plan = JSON.parse(text(await call(tools, "schedule_create", { ...params, note: "初始备注", context: 1, memory: 1, timing: { kind: "interval", minutes: 60 } })));
+		const update = { id: plan.id, quotes: params.quotes, title: "Updated project", mode: "write", note: "更新后的项目", memory: 0 };
+		await call(tools, "schedule_update", update);
+		expect(service.list()[0]).toMatchObject({ title: update.title, mode: "write", note: update.note, nextAt: plan.nextAt, revision: 2, context: plan.context.filter((entry: TaskContext) => entry.source === "chat") });
+		await call(tools, "schedule_update", { id: plan.id, quotes: params.quotes, context: 0, memory: 1, note: "" });
+		expect(service.list()[0].context).toEqual(freezeTaskContext({ context: 0, memory: 1 }, sources));
+		expect(service.list()[0].note).toBeUndefined();
+		const before = service.list();
+		await expect(call(tools, "schedule_update", { ...update, quotes: [{ id: "#missing" }] })).rejects.toThrow('quotes[0].id="#missing"');
+		await expect(call(tools, "schedule_update", { ...update, context: 31 })).rejects.toThrow("0–30");
+		await expect(call(tools, "schedule_update", { id: plan.id, quotes: params.quotes, enabled: null, memory: 0 })).rejects.toThrow("不能同时");
+		expect(service.list()).toEqual(before);
+		await call(tools, "schedule_update", { id: plan.id, quotes: params.quotes });
+		expect(service.list()).toEqual(before);
 	});
 
 	it.each([

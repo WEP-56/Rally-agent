@@ -2,6 +2,7 @@ import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, rea
 import { createConnection } from "node:net";
 import { isAbsolute, join, resolve } from "node:path";
 import type { ServiceRecord, ServicesState } from "../../shared/services.ts";
+import type { CredentialEnvironment } from "../../shared/credentials.ts";
 import type { Task, TaskRun } from "../../shared/task.ts";
 import type { AuditLog } from "./audit.ts";
 import type { EventLog } from "./event-log.ts";
@@ -12,7 +13,7 @@ import type { TaskStore } from "./task-store.ts";
 import { ReadyPattern } from "./ready-pattern.ts";
 
 export interface ServiceStart {
-	name: string; command: string; cwd?: string; port?: number; readyPattern?: string; env?: Record<string, string>;
+	name: string; command: string; cwd?: string; port?: number; readyPattern?: string; env?: Record<string, string>; credentialEnv?: CredentialEnvironment;
 }
 interface LiveService {
 	record: ServiceRecord; controller: AbortController; done: Promise<void>; fd: number; output: string;
@@ -62,6 +63,7 @@ export class ServiceManager {
 		this.assertStart(task, run, signal);
 		const command = invocation ?? shellCommand(process.platform === "win32" ? "powershell" : "bash", params.command, { ...task, cwd });
 		command.env = { ...command.env, ...params.env };
+		command.credentialEnv = params.credentialEnv;
 		const record: ServiceRecord = { id: `S-${++this.sequence}`, taskId: task.id, runId: run.id, name: params.name, command: params.command, cwd, status: "running", ready: false, startedAt: Date.now(),
 			...(params.port ? { port: params.port, url: `http://localhost:${params.port}` } : {}) };
 		mkdirSync(this.options.directory, { recursive: true });

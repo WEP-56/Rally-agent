@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ToolDefinition } from "@rally/coding-agent";
+import { Type } from "typebox";
+import { CredentialEnvironmentSchema, CREDENTIAL_ENV_DESCRIPTION } from "../credential-bindings.ts";
 import type { Task, TaskRun } from "../../shared/task.ts";
 import type { AuditLog } from "./audit.ts";
 import { GithubReadSchema, GithubSchema, planGithub, resolveGithubRepository } from "./github-plan.ts";
@@ -8,6 +10,7 @@ import type { TaskStore } from "./task-store.ts";
 
 const usage = "Use repo as OWNER/REPO (github.com) or HOST/OWNER/REPO; omit to resolve from cwd. Uses the user's existing gh login. list supports state/search/limit (default 30, max 100); view/comment require number. Returns exitCode/output, with a full log path for long output.";
 interface GithubHost { task: Task; run: TaskRun; store: TaskStore; audit: AuditLog; isActive(): boolean }
+const workerSchema = Type.Object({ ...GithubSchema.properties, credentialEnv: Type.Optional(CredentialEnvironmentSchema) }, { additionalProperties: false });
 
 export function createGithubReadTool(base: () => string, outputDir: string, runner: GithubRunner): Pick<ToolDefinition<typeof GithubReadSchema, GithubResult>, "name" | "label" | "description" | "parameters" | "execute"> {
 	return {
@@ -24,18 +27,18 @@ export function createGithubReadTool(base: () => string, outputDir: string, runn
 	};
 }
 
-export function createGithubTool(host: GithubHost, runner: GithubRunner): Pick<ToolDefinition<typeof GithubSchema, GithubResult>, "name" | "label" | "description" | "parameters" | "execute"> {
+export function createGithubTool(host: GithubHost, runner: GithubRunner): Pick<ToolDefinition<typeof workerSchema, GithubResult>, "name" | "label" | "description" | "parameters" | "execute"> {
 	return {
-		name: "github", label: "操作 GitHub", parameters: GithubSchema,
-		description: `GitHub issue/PR list/view/create/comment in this task's cwd. Creation/comments are external actions: announced and audited without a gate. Only send when the user's quoted words explicitly authorize it. create requires title and explicit body; pr_create also requires an already pushed head (branch or owner:branch), with optional base/draft. Comment requires nonempty body. Body is literal stdin, not a filename. Nonzero/aborted writes may have succeeded remotely; inspect before retrying. ${usage}`,
+		name: "github", label: "操作 GitHub", parameters: workerSchema,
+		description: `GitHub issue/PR list/view/create/comment in this task's cwd. Creation/comments are external actions: announced and audited without a gate. Only send when the user's quoted words explicitly authorize it. create requires title and explicit body; pr_create also requires an already pushed head (branch or owner:branch), with optional base/draft. Comment requires nonempty body. Body is literal stdin, not a filename. Nonzero/aborted writes may have succeeded remotely; inspect before retrying. ${usage} To use a saved token, bind GH_TOKEN with credentialEnv.${CREDENTIAL_ENV_DESCRIPTION}`,
 		execute: async (id, input, signal) => {
 			const active = () => {
 				signal?.throwIfAborted();
 				if (!host.isActive() || host.task.ended || host.run.endedAt) throw new Error("TASK_ENDED: 任务或运行已结束");
 			};
 			active();
-			const request = structuredClone(input); const plan = planGithub(request, false);
-			const options = { signal, outputDir: host.task.outputDir };
+			const { credentialEnv, ...request } = structuredClone(input); const plan = planGithub(request, false);
+			const options = { signal, outputDir: host.task.outputDir, credentialEnv };
 			const repository = await resolveGithubRepository(host.task.cwd, request.repo, options, runner);
 			active();
 			const audit = { taskId: host.task.id, runId: host.run.id, toolCallId: id, tool: "github", action: plan.action, repo: repository.repo, number: request.number, title: request.title, head: request.head, base: request.base, draft: request.draft, riskTier: "external",

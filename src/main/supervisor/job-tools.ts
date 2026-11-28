@@ -3,8 +3,9 @@ import { Type, type Static } from "typebox";
 import type { Task, TaskRun } from "../../shared/task.ts";
 import type { JobManager } from "./jobs.ts";
 import type { ProcessCommand } from "./process-host.ts";
+import { CredentialEnvironmentSchema, CREDENTIAL_ENV_DESCRIPTION } from "../credential-bindings.ts";
 
-const shellSchema = Type.Object({ command: Type.String({ minLength: 1 }), timeout: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 2147483 })) });
+const shellSchema = Type.Object({ command: Type.String({ minLength: 1 }), timeout: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 2147483 })), credentialEnv: Type.Optional(CredentialEnvironmentSchema) });
 const outputSchema = Type.Object({ jobId: Type.String(), tail: Type.Optional(Type.Integer({ minimum: 1, maximum: 2000 })) });
 const killSchema = Type.Object({ jobId: Type.String() });
 
@@ -20,9 +21,10 @@ export function shellCommand(shell: "bash" | "powershell", command: string, task
 export function createJobTools(jobs: JobManager, task: Task, run: TaskRun): ToolDefinition[] {
 	const shells: ToolDefinition[] = (["bash", "powershell"] as const).filter(shell => shell === "bash" || process.platform === "win32").map(shell => ({
 		name: shell, label: shell === "bash" ? "执行 Bash" : "执行 PowerShell", parameters: shellSchema,
-		description: "Run a command in the task cwd. Commands exceeding the foreground window become background jobs; completion automatically wakes or steers you. timeout is seconds (default unlimited). Do not sleep or poll; continue other work or end this turn while a job runs. Full output is logged; tool output is bounded.",
+		description: "Run a command in the task cwd. Commands exceeding the foreground window become background jobs; completion automatically wakes or steers you. timeout is seconds (default unlimited). Do not sleep or poll; continue other work or end this turn while a job runs. Full output is logged; tool output is bounded." + CREDENTIAL_ENV_DESCRIPTION,
 		async execute(_id: string, params: Static<typeof shellSchema>, signal?: AbortSignal) {
-			const result = await jobs.execute(task, run, shell, params.command, shellCommand(shell, params.command, task), params.timeout, signal);
+			const invocation = { ...shellCommand(shell, params.command, task), credentialEnv: params.credentialEnv };
+			const result = await jobs.execute(task, run, shell, params.command, invocation, params.timeout, signal);
 			return { content: [{ type: "text", text: JSON.stringify(result) }], details: result, ...("exitCode" in result && result.exitCode !== 0 ? { isError: true } : {}) };
 		},
 	}));

@@ -54,3 +54,21 @@ test('image thumbnails are bounded derivatives and inherit original authorizatio
     assert.throws(() => store.get(original.id), /不存在/); assert.throws(() => store.get(thumbnail.id), /不存在/);
   } finally { await store.close(); await rm(dir, { recursive: true, force: true }); }
 });
+
+test('markup responses use the detected MIME while retaining preview sandboxing', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'rally-markup-'));
+  const store = new ResourceStore(dir); const host = new ResourcePreviewHost(store);
+  try {
+    for (const [name, content, mime] of [
+      ['report.html', '<!doctype html><meta charset="utf-8"><p>中文</p>', 'text/html'],
+      ['diagram.svg', '<svg xmlns="http://www.w3.org/2000/svg"/>', 'image/svg+xml'],
+    ]) {
+      const resource = await store.importBytes('desktop', name, Buffer.from(content));
+      const response = await fetch(await host.url(resource.id));
+      assert.equal(response.headers.get('content-type'), mime);
+      assert.match(response.headers.get('content-security-policy'), /sandbox/);
+      assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+      assert.equal(await response.text(), content);
+    }
+  } finally { await host.close(); await store.close(); await rm(dir, { recursive: true, force: true }); }
+});

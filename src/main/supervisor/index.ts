@@ -50,7 +50,7 @@ import { createWebSearchTool } from "./provider-tools.ts";
 import { ToolProviderStore } from "../tool-provider-store.ts";
 import { WebsiteAccounts } from "../website-accounts.ts";
 import { AgentBrowserService } from "../agent-browser/service.ts";
-import { createCredentialRequestTool } from "./credential-tools.ts";
+import { createCredentialListTool, createCredentialRequestTool } from "./credential-tools.ts";
 import { ProcessRegistry } from "./process-registry.ts";
 import { JobManager } from "./jobs.ts";
 import { ServiceManager } from "./services.ts";
@@ -139,6 +139,7 @@ export class Supervisor {
 			});
 			this.processes = new ProcessRegistry(paths.stateDir, {
 				canRun: owner => owner.kind === "config" || this.inactivity.canRun(),
+				credentials: () => this.websiteAccounts,
 				assertWritable: () => this.events.assertWritable(),
 				onStopped: (entry, reason, result) => this.events.append("process_stopped", { ...entry, reason, result }),
 			});
@@ -196,7 +197,7 @@ export class Supervisor {
 				taskState: () => rallyState(this.store, this.workers.streamingCount(), this.scheduler.limit, this.autoApprove),
 				scheduleState: () => this.schedules.context(),
 				capabilities,
-				customTools: [createCredentialRequestTool(this.websiteAccounts, this.store), ...createScheduleTools(() => this.schedules, ref => this.main.quote(ref), { recentTurns: count => this.main.recentContext(count), memory: file => this.memory.read(file) }), createChatSearchTool((params) => this.main.search(params)), ...createMemoryTools(this.memory, () => !this.disposed), ...createRouterReadTools(() => this.workspace.base(), this.processes, () => catalog.skillPaths), createGitInspectTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGitRunner(this.processes)), createGithubReadTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGithubRunner(this.processes)), createFetchPageTool(this.network), ...createWorldTools(this.network), createWebSearchTool(this.toolProviders), ...createMainTaskTools(this.host()), ...createGateTools(this.gates, this.store)],
+				customTools: [createCredentialListTool(this.websiteAccounts), createCredentialRequestTool(this.websiteAccounts, this.store), ...createScheduleTools(() => this.schedules, ref => this.main.quote(ref), { recentTurns: count => this.main.recentContext(count), memory: file => this.memory.read(file) }, () => this.main.recentQuoteIds()), createChatSearchTool((params) => this.main.search(params)), ...createMemoryTools(this.memory, () => !this.disposed), ...createRouterReadTools(() => this.workspace.base(), this.processes, () => catalog.skillPaths), createGitInspectTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGitRunner(this.processes)), createGithubReadTool(() => this.workspace.base(), join(paths.stateDir, "tool-output", "main"), managedGithubRunner(this.processes)), createFetchPageTool(this.network), ...createWorldTools(this.network), createWebSearchTool(this.toolProviders), ...createMainTaskTools(this.host()), ...createGateTools(this.gates, this.store)],
 				memory: () => this.memory.context(),
 				identity: () => this.identity.context(),
 				workspace: () => this.workspace.state(),
@@ -223,6 +224,7 @@ export class Supervisor {
 			this.workers = new WorkerManager({
 				canRun: () => this.inactivity.canRun(),
 				agentBrowser: this.agentBrowser,
+				credentials: this.websiteAccounts,
 				resources: () => this.resources,
 				network: this.network,
 				toolProviders: this.toolProviders,
@@ -517,6 +519,7 @@ export class Supervisor {
 			get workspaceDir() { return workspace.state().defaultWorkspace; },
 			autoApprove: () => this.autoApprove,
 			quote: (ref: QuoteRef) => this.main.quote(ref),
+			recentQuoteIds: () => this.main.recentQuoteIds(),
 			contextSources: { recentTurns: count => this.main.recentContext(count), memory: file => this.memory.read(file) },
 			tick: () => this.scheduler.tick(),
 			deliverSteer: (taskId: string, text: string) => {

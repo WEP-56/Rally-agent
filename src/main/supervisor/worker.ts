@@ -4,6 +4,8 @@
 import { existsSync } from "node:fs";
 import type { AgentBrowserService } from "../agent-browser/service.ts";
 import { createBrowserTools } from "./browser-tools.ts";
+import { createCredentialListTool } from "./credential-tools.ts";
+import type { WebsiteAccounts } from "../website-accounts.ts";
 import { join } from "node:path";
 import {
 	type AgentSession,
@@ -67,6 +69,7 @@ export interface ReportResult {
 }
 
 export interface WorkerManagerOptions {
+	credentials?: WebsiteAccounts;
 	agentBrowser?: AgentBrowserService;
 	resources?(): ResourceStore;
 	paths: RallyPaths;
@@ -238,6 +241,7 @@ export class WorkerManager {
 			extensionTools: [...mcp.extensionTools, ...(this.options.resources ? ["resource_publish"] : [])],
 			tools: [],
 			customTools: [...this.options.createTools(task), ...buildTools(task, versions, (path) => this.assertWritable(task, run, path), this.options.processes),
+				...(this.options.credentials ? [createCredentialListTool(this.options.credentials)] : []),
 				...(this.options.agentBrowser ? createBrowserTools(this.options.agentBrowser, task, run, this.options.gates, browserFiles) : []),
 				...createQqMailTools(this.options.qqMail, { task, run, gates: this.options.gates, audit: this.options.audit, store, permissions: new McpStore(paths.agentDir) }),
 				...createJobTools(this.options.jobs, task, run),
@@ -247,7 +251,7 @@ export class WorkerManager {
 				createGithubTool({ task, run, store, audit: this.options.audit, isActive: networkHost.isActive }, managedGithubRunner(this.options.processes, task.id)),
 				createFetchPageTool(this.options.network, networkHost),
 				...createWorldTools(this.options.network, networkHost),
-				createHttpRequestTool(this.options.network, networkHost),
+				createHttpRequestTool(this.options.network, networkHost, this.options.credentials),
 				...(providers ? [createWebSearchTool(providers, networkHost)] : []),
 				...(providers && resources ? [createWorkerImageTool({ providers, store: resources, owner: `task:${task.id}`,
 					active: networkHost.isActive, publish: (id, refs) => this.publish(task, run, id, refs) }, networkHost)] : []),

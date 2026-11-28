@@ -1,5 +1,6 @@
 import type { ToolDefinition } from "@rally/coding-agent";
 import { Type } from "typebox";
+import { CredentialEnvironmentSchema, CREDENTIAL_ENV_DESCRIPTION } from "../credential-bindings.ts";
 import type { Task, TaskRun } from "../../shared/task.ts";
 import type { AuditLog } from "./audit.ts";
 import type { GateService } from "./gates.ts";
@@ -9,15 +10,15 @@ import { gitToolResult } from "./git-inspect.ts";
 import { planGit, type GitPlan } from "./git-plan.ts";
 import { runGit, type GitResult, type GitRunner } from "./git-runner.ts";
 
-const schema = Type.Object({ args: Type.Array(Type.String(), { minItems: 1 }), cwd: Type.Optional(Type.String({ minLength: 1 })) });
+const schema = Type.Object({ args: Type.Array(Type.String(), { minItems: 1 }), cwd: Type.Optional(Type.String({ minLength: 1 })), credentialEnv: Type.Optional(CredentialEnvironmentSchema) });
 interface GitHost { task: Task; run: TaskRun; store: TaskStore; gates: GateService; audit: AuditLog; isActive(): boolean }
 
 export function createGitTool(host: GitHost, runner: GitRunner = runGit): Pick<ToolDefinition<typeof schema, GitResult>, "name" | "label" | "description" | "parameters" | "execute"> {
 	return {
 		name: "git", label: "执行 Git", parameters: schema,
-		description: "Execute a built-in Git subcommand using literal args (no shell or global flags); cwd defaults to this task's directory. Destructive forms wait for an approval gate; ordinary push is announced and audited. Return exitCode/output and a full log path for long output. Use full option names for controlled commands.",
+		description: "Execute a built-in Git subcommand using literal args (no shell or global flags); cwd defaults to this task's directory. Destructive forms wait for an approval gate; ordinary push is announced and audited. Return exitCode/output and a full log path for long output. Use full option names for controlled commands. Git authentication requires a credential helper that reads the injected variable; an arbitrary token variable alone does not authenticate Git." + CREDENTIAL_ENV_DESCRIPTION,
 		execute: async (id, input, signal) => {
-			const request = structuredClone(input);
+			const { credentialEnv, ...request } = structuredClone(input);
 			const active = () => {
 				signal?.throwIfAborted();
 				if (!host.isActive() || host.task.ended || host.run.endedAt) throw new Error("TASK_ENDED: 任务或运行已结束");
@@ -51,7 +52,7 @@ export function createGitTool(host: GitHost, runner: GitRunner = runGit): Pick<T
 			for (const target of plan.network) host.store.recordAccess(host.task.id, { toolCallId: `${host.run.id}:${id}`, runId: host.run.id, tool: "git", at: Date.now(), kind: "net", target, command: plan.command, coverage: "command_scope", outcome: "attempt" });
 			active();
 			try {
-				const result = await runner(plan.cwd, plan.args, { ...options, readonly: plan.readonly });
+				const result = await runner(plan.cwd, plan.args, { ...options, readonly: plan.readonly, credentialEnv });
 				if (plan.tier !== "reversible") host.audit.append(plan.tier === "external" ? "external" : "gate", { ...audit, result: "finished", exitCode: result.exitCode });
 				return gitToolResult(result);
 			} catch (error) {

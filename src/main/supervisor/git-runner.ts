@@ -3,9 +3,10 @@ import { randomUUID } from "node:crypto";
 import { closeSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ProcessRegistry } from "./process-registry.ts";
+import type { CredentialEnvironment } from "../../shared/credentials.ts";
 
 export interface GitResult { exitCode: number; output: string; fullOutputPath?: string }
-export interface GitRunOptions { signal?: AbortSignal; outputDir: string; readonly?: boolean; metadata?: boolean; processes?: ProcessRegistry; taskId?: string }
+export interface GitRunOptions { signal?: AbortSignal; outputDir: string; readonly?: boolean; metadata?: boolean; processes?: ProcessRegistry; taskId?: string; credentialEnv?: CredentialEnvironment }
 export type GitRunner = (cwd: string, args: readonly string[], options: GitRunOptions) => Promise<GitResult>;
 
 export function managedGitRunner(processes: ProcessRegistry, taskId?: string): GitRunner {
@@ -15,6 +16,7 @@ export function managedGitRunner(processes: ProcessRegistry, taskId?: string): G
 /** Noninteractive argv execution; hooks remain enabled for worker mutations. */
 export const runGit: GitRunner = async (cwd, args, options) => {
 	options.signal?.throwIfAborted();
+	if (options.credentialEnv && !options.processes) throw new Error("凭据仅支持受 Rally 管理的 Git 进程");
 	const env = { ...process.env };
 	// The explicit cwd is authoritative, including in linked worktrees.
 	for (const name of Object.keys(env)) {
@@ -68,7 +70,7 @@ export const runGit: GitRunner = async (cwd, args, options) => {
 		let exitCode: number;
 		try {
 			exitCode = options.processes
-				? await options.processes.run({ executable: "git", args: [...prefix, ...args], cwd, env }, { kind: "git", taskId: options.taskId }, { signal: controller.signal, onStdout: output, onStderr: options.metadata ? () => {} : output })
+				? await options.processes.run({ executable: "git", args: [...prefix, ...args], cwd, env, credentialEnv: options.credentialEnv }, { kind: "git", taskId: options.taskId }, { signal: controller.signal, onStdout: output, onStderr: options.metadata ? () => {} : output })
 				: await new Promise<number>((resolve, reject) => {
 					child!.once("error", reject);
 					child!.once("close", (code, signal) => resolve(code ?? (signal ? 130 : 1)));

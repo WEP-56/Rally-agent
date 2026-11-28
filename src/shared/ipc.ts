@@ -19,7 +19,7 @@ import type { CoachSettings } from "./coach.ts";
 import type { MemoryFileKey, MemoryState } from "./memory.ts";
 import type { ServicesState } from "./services.ts";
 import type { BrowserState, BrowserLayout, BrowserAction, BrowserEvent } from "./browser.ts";
-import type { CredentialState, CredentialSubmission } from "./credentials.ts";
+import type { CredentialInput, CredentialState, CredentialSubmission } from "./credentials.ts";
 import type { AgentBrowserWindow, BrowserFrame, BrowserUserInput } from "./agent-browser.ts";
 import type { TerminalSize, TerminalState, TerminalEvent } from "./terminal.ts";
 import type { ExternalAgentModel, RoleWorkerDraft, RoleWorkerExecutor, RoleWorkerProfile } from "./role-workers.ts";
@@ -349,7 +349,7 @@ export interface RallyApi {
 		cancel(id: string): Promise<CredentialState>;
 		update(id: string, enabled: boolean): Promise<CredentialState>;
 		remove(id: string): Promise<CredentialState>;
-		replace(id: string, input: { username: string; password: string }): Promise<CredentialState>;
+		replace(id: string, input: CredentialInput): Promise<CredentialState>;
 		clearLogin(): Promise<void>;
 	};
 	resources: ResourceApi;

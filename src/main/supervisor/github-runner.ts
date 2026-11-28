@@ -3,9 +3,10 @@ import { closeSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getShellEnv } from "@rally/coding-agent";
 import type { ProcessRegistry } from "./process-registry.ts";
+import type { CredentialEnvironment } from "../../shared/credentials.ts";
 
 export interface GithubResult { exitCode: number; output: string; fullOutputPath?: string }
-export interface GithubRunOptions { signal?: AbortSignal; outputDir: string; stdin?: string; metadata?: boolean }
+export interface GithubRunOptions { signal?: AbortSignal; outputDir: string; stdin?: string; metadata?: boolean; credentialEnv?: CredentialEnvironment }
 export type GithubRunner = (cwd: string, args: readonly string[], options: GithubRunOptions) => Promise<GithubResult>;
 
 /** Always owned by the application; no shell and no detached unregistered CLI path. */
@@ -41,7 +42,7 @@ export function managedGithubRunner(processes: ProcessRegistry, taskId?: string)
 			} catch (error) { storageError = error; controller.abort(); }
 		};
 		try {
-			const exitCode = await processes.run({ executable: "gh", args: [...args], cwd, env, stdin: options.stdin }, { kind: "github", taskId }, { signal, onStdout: chunk => output(chunk), onStderr: chunk => output(chunk, true) });
+			const exitCode = await processes.run({ executable: "gh", args: [...args], cwd, env, stdin: options.stdin, credentialEnv: options.credentialEnv }, { kind: "github", taskId }, { signal, onStdout: chunk => output(chunk), onStderr: chunk => output(chunk, true) });
 			if (storageError) throw storageError;
 			options.signal?.throwIfAborted();
 			return { exitCode, output: options.metadata && exitCode !== 0 ? stderr || head : fullOutputPath ? `${head}\n…（输出已截断；用 read 读取完整日志：${fullOutputPath}）…\n${tail}` : head, ...(fullOutputPath ? { fullOutputPath } : {}) };

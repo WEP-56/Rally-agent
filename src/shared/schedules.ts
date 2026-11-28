@@ -20,6 +20,9 @@ export interface ScheduledTask {
 	mode: TaskMode;
 	quotes: Quote[];
 	context?: TaskContext[];
+	note?: string;
+	/** Configuration version; old saved plans default to 1. Dispatch checkpoints do not increment it. */
+	revision?: number;
 	timing: ScheduleTiming;
 	enabled: boolean;
 	nextAt: number;

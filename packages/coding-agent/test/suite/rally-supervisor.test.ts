@@ -347,11 +347,24 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		expect(supervisor.schedules.list(), JSON.stringify(supervisor.main.state().messages)).toHaveLength(1);
 		const plan = supervisor.schedules.list()[0]; expect(plan.quotes[0].text).toBe("一小时后读取工作区的 README 并汇报");
 		expect(supervisor.store.list()).toHaveLength(0);
+		const amendment = "这个计划以后只汇报 README 中的标题，时间不变";
+		harness.setResponses([
+			context => {
+				const id = /User message (#\d+)/.exec(lastUser(context))![1];
+				return fauxAssistantMessage(fauxToolCall("schedule_update", { id: plan.id, quotes: [{ id }] }), { stopReason: "toolUse" });
+			}, fauxAssistantMessage("工作要求已更新"),
+		]);
+		await supervisor.main.send(amendment);
+		await vi.waitFor(() => expect(supervisor.main.state().messages.some(m => m.text === "工作要求已更新") && !supervisor.main.isBusy()).toBe(true));
+		expect(supervisor.schedules.list()).toHaveLength(1);
+		expect(supervisor.schedules.list()[0]).toMatchObject({ id: plan.id, nextAt: plan.nextAt, revision: 2 });
 		supervisor.schedules.dispose();
 		const due = new ScheduledTasks(supervisor.events, supervisor.store, () => false, () => supervisor.scheduler.tick(), () => plan.nextAt);
 		due.poll(); const task = supervisor.store.list()[0]; expect(task.approval.state).toBe("pending"); expect(task.runs).toHaveLength(0);
+		expect(task.quotes.map(quote => quote.text)).toEqual([plan.quotes[0].text, amendment]);
+		expect(task.schedule?.revision).toBe(2);
 		harness.setResponses([
-			context => { expect(toolNames(context)).not.toContain("schedule_create"); expect(JSON.stringify(context.messages)).toContain("Host schedule occurrence:"); expect(JSON.stringify(context.messages)).toContain(plan.id); expect(JSON.stringify(context.messages)).not.toContain("Rally scheduling context (host facts"); return fauxAssistantMessage(fauxToolCall("read", { path: "README.md" }), { stopReason: "toolUse" }); },
+			context => { expect(toolNames(context)).not.toContain("schedule_create"); expect(JSON.stringify(context.messages)).toContain("Host schedule occurrence:"); expect(JSON.stringify(context.messages)).toContain(plan.id); expect(JSON.stringify(context.messages)).toContain(amendment); expect(JSON.stringify(context.messages)).toContain("later user amendments supersede"); expect(JSON.stringify(context.messages)).not.toContain("Rally scheduling context (host facts"); return fauxAssistantMessage(fauxToolCall("read", { path: "README.md" }), { stopReason: "toolUse" }); },
 			fauxAssistantMessage(fauxToolCall("task_report", { state: "ready", summary: "定时读笔记完成" }), { stopReason: "toolUse" }),
 			fauxAssistantMessage("定时任务已完成"),
 		]);
@@ -1375,7 +1388,7 @@ describe("Rally production supervisor integration (offline faux provider)", () =
 		const { supervisor, paths } = await setup();
 		const call = toolsFor(supervisor);
 		const base = { title: "valid", quotes: [{ id: "#fixture" }], mode: "readonly", cwd: paths.workspaceDir };
-		for (const [patch, error] of [[{ quotes: [{ id: "#missing" }] }, "QUOTE_INVALID"], [{ note: "word ".repeat(31) }, "NOTE_TOO_LONG"], [{ cwd: join(paths.workspaceDir, "README.md") }, "CWD_NOT_FOUND"]] as const) {
+		for (const [patch, error] of [[{ quotes: [{ id: "#missing" }] }, "QUOTE_INVALID"], [{ note: "备注".repeat(1001) }, "NOTE_TOO_LONG"], [{ cwd: join(paths.workspaceDir, "README.md") }, "CWD_NOT_FOUND"]] as const) {
 			const response = await call("task_dispatch", { ...base, ...patch });
 			expect(response.isError).toBe(true);
 			expect(getMessageText(response)).toContain(error);

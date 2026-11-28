@@ -24,7 +24,7 @@ describe("local scheduled workers", () => {
 	it("dispatches original quotes using current approval, blocks overlap and coalesces missed occurrences", async () => {
 		const t = await setup(); const plan = t.create(); t.service.poll(); expect(t.store.list()).toHaveLength(0);
 		t.advance(60000); t.service.poll(); const task = t.store.list()[0]; expect(task.quotes).toEqual(plan.quotes); expect(task.approval.state).toBe("pending");
-		expect(t.store.board(0, 2).tasks[0].schedule).toEqual({ id: plan.id, dueAt: plan.nextAt, timing: plan.timing });
+		expect(t.store.board(0, 2).tasks[0].schedule).toEqual({ id: plan.id, dueAt: plan.nextAt, timing: plan.timing, revision: 1 });
 		t.advance(3600000); t.service.poll(); expect(t.store.list()).toHaveLength(1);
 		t.store.cancel(task.id, "system"); t.approve(); t.service.poll(); expect(t.store.list()).toHaveLength(2); expect(t.store.list().find(x => x.id !== task.id)?.approval.state).toBe("approved");
 		t.service.poll(); expect(t.store.list()).toHaveLength(2); expect(t.ticks()).toBe(2);
@@ -67,7 +67,7 @@ describe("local scheduled workers", () => {
 		const store = new TaskStore(events, harness.tempDir, () => {});
 		const recovered = new ScheduledTasks(events, store, () => true, () => {}, () => plan.nextAt + 86400000); services.push(recovered);
 		recovered.poll(); expect(store.list()).toHaveLength(1); expect(recovered.list()[0].lastTaskId).toBe(store.list()[0].id);
-		expect(store.board(0, 2).tasks[0].schedule).toEqual({ id: plan.id, dueAt: plan.nextAt, timing: plan.timing });
+		expect(store.board(0, 2).tasks[0].schedule).toEqual({ id: plan.id, dueAt: plan.nextAt, timing: plan.timing, revision: 1 });
 	});
 	it("does not catch up at night and coalesces late recovery within the next window", async () => {
 		const t = await setup(); const template = t.create(); t.service.update(template.id, null);
@@ -109,6 +109,84 @@ describe("local scheduled workers", () => {
 		t.service.update(plan.id, undefined, { actor: "main", quotes: [change] }, { kind: "daily", time: "08:00", timezone: "UTC" });
 		expect(t.make().list()[0].enabled).toBe(false);
 		expect(() => t.service.update(plan.id, null, { actor: "user" }, timing)).toThrow();
+	});
+	it("amends work in place across restart without changing dispatched workers or the next due time", async () => {
+		const t = await setup();
+		const plan = t.create();
+		t.advance(60000); t.service.poll();
+		const first = t.store.list()[0];
+		const frozen = structuredClone(first);
+		const nextAt = t.service.list()[0].nextAt;
+		const change = { messageId: "#2", kind: "user" as const, at: nextAt - 30000, text: "以后整理完成后，还要把摘要写到项目中的日报文件" };
+		t.advance(30000);
+		t.service.update(plan.id, undefined, { actor: "main", quotes: [change] });
+		expect(t.service.list()[0]).toMatchObject({ id: plan.id, revision: 2, nextAt, lastTaskId: first.id, quotes: [...plan.quotes, change] });
+		expect(first).toEqual(frozen);
+		const count = t.events.ofKind("schedule_changed").length;
+		t.service.update(plan.id, undefined, { actor: "main", quotes: [change] });
+		expect(t.events.ofKind("schedule_changed")).toHaveLength(count);
+		expect(t.events.ofKind("schedule_changed").at(-1)?.data.source).toEqual({ actor: "main", quotes: [change] });
+		t.service.dispose();
+		const restored = t.make();
+		t.advance(30000); restored.poll();
+		expect(t.store.list()).toHaveLength(1);
+		t.store.cancel(first.id, "system"); restored.poll();
+		const second = t.store.list().find(task => task.id !== first.id)!;
+		expect(second.quotes).toEqual([...plan.quotes, change]);
+		expect(second.schedule).toEqual({ id: plan.id, dueAt: nextAt, timing: plan.timing, revision: 2 });
+		expect(second.note).toContain("later user amendments supersede");
+		expect(first.quotes).toEqual(plan.quotes);
+		expect(first.schedule?.revision).toBe(1);
+		expect(restored.list()[0].revision).toBe(2);
+	});
+	it("updates work fields on a paused plan and freezes them into its next occurrence", async () => {
+		const t = await setup();
+		const plan = t.create();
+		const cwd = join(plan.cwd, "new-project"); mkdirSync(cwd);
+		t.service.update(plan.id, false);
+		t.advance(30000);
+		const change = { messageId: "#2", kind: "user" as const, at: plan.nextAt - 30000, text: "改为整理新项目并写日报，先保持暂停" };
+		const context = [{ source: "memory" as const, file: "USER" as const, text: "User background" }];
+		const patch = { title: "新项目日报", cwd, mode: "write" as const, note: "新项目指用户刚选择的目录", context };
+		t.service.update(plan.id, undefined, { actor: "main", quotes: [change] }, undefined, patch);
+		const updated = t.service.list()[0];
+		expect(updated).toMatchObject({ ...patch, id: plan.id, revision: 3, nextAt: plan.nextAt, enabled: false });
+		t.advance(60000); t.service.poll();
+		expect(t.store.list()).toHaveLength(0);
+		const resume = { messageId: "#3", kind: "user" as const, at: plan.nextAt + 30000, text: "恢复计划，另外在日报中添加笔记数量" };
+		t.service.update(plan.id, true, { actor: "main", quotes: [resume] });
+		t.advance(60000); t.service.poll();
+		const task = t.store.list()[0];
+		expect(task).toMatchObject({ title: patch.title, cwd, mode: "write", context, quotes: [...plan.quotes, change, resume], schedule: { id: plan.id, revision: 4 } });
+		expect(task.note).toContain(patch.note);
+		context[0].text = "mutated later";
+		expect(task.context?.[0].text).toBe("User background");
+	});
+	it("rejects invalid work edits and mixed deletion atomically", async () => {
+		const t = await setup();
+		const plan = t.create();
+		const source = { actor: "main" as const, quotes: plan.quotes };
+		const before = t.service.list();
+		const count = t.events.ofKind("schedule_changed").length;
+		expect(() => t.service.update(plan.id, undefined)).toThrow("用户原话");
+		for (const patch of [{ title: " " }, { title: "长".repeat(41) }, { cwd: "relative/path" }, { note: "长".repeat(2001) }]) {
+			expect(() => t.service.update(plan.id, undefined, source, undefined, patch)).toThrow();
+		}
+		expect(() => t.service.update(plan.id, null, source, undefined, { context: [] })).toThrow("不能同时");
+		expect(t.service.list()).toEqual(before);
+		expect(t.events.ofKind("schedule_changed")).toHaveLength(count);
+	});
+	it("restores legacy plans as revision one without rewriting them for an identical update", async () => {
+		const t = await setup();
+		const plan = t.create();
+		t.events.append("schedule_changed", { schedule: { ...plan, revision: undefined } });
+		const restored = t.make();
+		const count = t.events.ofKind("schedule_changed").length;
+		expect(restored.list()[0].revision).toBe(1);
+		restored.update(plan.id, true);
+		expect(t.events.ofKind("schedule_changed")).toHaveLength(count);
+		restored.update(plan.id, undefined, { actor: "main", quotes: plan.quotes }, undefined, { title: "新的标题" });
+		expect(restored.list()[0]).toMatchObject({ id: plan.id, revision: 2 });
 	});
 	it("deduplicates equivalent weekday lists but keeps different weekday rules distinct", async () => {
 		const t = await setup(); const template = t.create(); t.service.update(template.id, null);

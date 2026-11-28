@@ -55,7 +55,7 @@ const SETTING_GROUPS = [
   {
     id: "work", label: "工作与账号", sections: [
       { id: "workspace", label: "项目与工作区", icon: FolderInput, desc: "默认工作区、最近项目与项目信任" },
-      { id: "website-accounts", label: "网站账号", icon: UserRound, desc: "管理 Agent 可使用的加密账号" },
+      { id: "website-accounts", label: "密码本", icon: UserRound, desc: "管理任务可使用的账号、密码和密钥" },
       { id: "archive", label: "归档", icon: Archive, desc: "查看、撤销归档或彻底删除任务" },
     ],
   },

@@ -88,6 +88,31 @@ test('upload bounds, cancellation, missing resources and directory boundaries ar
   assert.equal(store.get(resource.id, 'another-device').state, 'missing', 'missing published files remain identifiable');
 }));
 
+test('markup imports preserve their MIME and bytes across restart with binary magic taking precedence', () => fixture(async ({ directory, make }) => {
+  const store = make();
+  const png = await readFile(new URL('../../src/renderer/src/assets/rally-mark.png', import.meta.url));
+  const cases = [
+    ['report.html', Buffer.from('<!doctype html><meta charset="utf-8"><p>中文报告</p>'), 'text/html'],
+    ['report.HTM', Buffer.from('<html><body>Report</body></html>'), 'text/html'],
+    ['report.xhtml', Buffer.from('<html xmlns="http://www.w3.org/1999/xhtml"/>'), 'application/xhtml+xml'],
+    ['diagram.SVG', Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'), 'image/svg+xml'],
+    ['binary.html', Buffer.from([65, 0, 66]), 'application/octet-stream'],
+    ['image.html', png, 'image/png'],
+    ['report.unknown', Buffer.from('<html/>'), 'application/octet-stream'],
+  ];
+  const saved = [];
+  for (const [name, bytes, mime] of cases) {
+    const path = join(directory, name); await writeFile(path, bytes);
+    const resource = await store.importFile('agent', path, [directory], 'generated');
+    assert.equal(resource.mime, mime, name);
+    assert.deepEqual(await readFile(store.path(resource.id)), bytes);
+    saved.push([resource.id, mime]);
+  }
+  await store.close();
+  const restored = make();
+  for (const [id, mime] of saved) assert.equal(restored.get(id).mime, mime);
+}));
+
 test('crash bytes beyond committed offset are discarded before resuming', () => fixture(async ({ directory, make }) => {
   const store = make();
   const upload = store.begin('a', { name: 'resume.txt', size: 6 });

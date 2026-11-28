@@ -6,10 +6,19 @@ import { taskView, type Quote } from "../../shared/task.ts";
 import type { EventLog } from "./event-log.ts";
 import { isScheduleTimeAllowed, nextOccurrence, normalizeTiming } from "./schedule-timing.ts";
 import { ensureDir, type TaskStore } from "./task-store.ts";
+import { checkTaskNote } from "./task-note.ts";
 
 export { nextOccurrence } from "./schedule-timing.ts";
 
 type ScheduleSource = { actor: "user" | "main" | "system"; quotes?: Quote[] };
+export type ScheduleWorkPatch = Partial<Pick<ScheduledTask, "title" | "cwd" | "mode" | "note" | "context">>;
+
+function validateWork(input: ScheduleWorkPatch): void {
+	if (input.title !== undefined && (typeof input.title !== "string" || !input.title.trim() || [...input.title.trim()].length > 40)) throw new Error("需要标题（最多40字）");
+	if (input.mode !== undefined && input.mode !== "write" && input.mode !== "readonly") throw new Error("无效任务模式");
+	if (input.cwd !== undefined && (typeof input.cwd !== "string" || !isAbsolute(input.cwd) || !statSync(input.cwd).isDirectory())) throw new Error("需要有效的绝对工作目录");
+	checkTaskNote(input.note);
+}
 
 export class ScheduledTasks {
 	private records = new Map<string, ScheduledTask>();
@@ -20,7 +29,7 @@ export class ScheduledTasks {
 		this.events = privateEvents; this.store = privateStore; this.approval = approval; this.tick = tick; this.now = now;
 		for (const event of privateEvents.ofKind("schedule_changed")) {
 			if (event.data.deleted) this.records.delete(String(event.data.id));
-			else { const item = event.data.schedule as ScheduledTask; this.records.set(item.id, structuredClone(item)); }
+			else { const item = event.data.schedule as ScheduledTask; this.records.set(item.id, { ...structuredClone(item), revision: item.revision ?? 1 }); }
 		}
 	}
 	private readonly events: EventLog;
@@ -53,40 +62,51 @@ export class ScheduledTasks {
 		this.events.append("schedule_changed", { schedule: item, source });
 		this.records.set(item.id, structuredClone(item));
 	}
-	create(input: Pick<ScheduledTask, "title" | "cwd" | "mode" | "timing" | "context">, quotes: Quote[]): ScheduledTask {
+	create(input: Pick<ScheduledTask, "title" | "cwd" | "mode" | "timing" | "context" | "note">, quotes: Quote[]): ScheduledTask {
 		if (this.closed) throw new Error("定时任务服务已关闭");
-		if (!input.title?.trim() || [...input.title].length > 40 || !quotes.length) throw new Error("需要标题（最多40字）与用户原话");
-		if (input.mode !== "write" && input.mode !== "readonly") throw new Error("无效任务模式");
-		if (!isAbsolute(input.cwd) || !statSync(input.cwd).isDirectory()) throw new Error("需要有效的绝对工作目录");
+		if (!input.title || !quotes.length) throw new Error("需要标题（最多40字）与用户原话");
+		if (input.mode === undefined || input.cwd === undefined) throw new Error("需要任务模式与绝对工作目录");
+		validateWork(input);
 		const title = input.title.trim();
+		const note = input.note?.trim() || undefined;
 		const timing = normalizeTiming(input.timing);
 		const sameTiming = (other: ScheduleTiming) => JSON.stringify(normalizeTiming(other)) === JSON.stringify(timing);
-		const duplicate = this.list().find(item => item.title === title && item.cwd === input.cwd && item.mode === input.mode && sameTiming(item.timing) && JSON.stringify(item.quotes) === JSON.stringify(quotes) && JSON.stringify(item.context ?? []) === JSON.stringify(input.context ?? []));
+		const duplicate = this.list().find(item => item.title === title && item.cwd === input.cwd && item.mode === input.mode && item.note === note && sameTiming(item.timing) && JSON.stringify(item.quotes) === JSON.stringify(quotes) && JSON.stringify(item.context ?? []) === JSON.stringify(input.context ?? []));
 		if (duplicate) return duplicate;
-		const item: ScheduledTask = { title, cwd: input.cwd, mode: input.mode, timing, quotes, context: input.context && structuredClone(input.context), id: `S-${randomUUID()}`, enabled: true, nextAt: nextOccurrence(timing, this.now()) };
+		const item: ScheduledTask = { title, cwd: input.cwd, mode: input.mode, note, timing, quotes: structuredClone(quotes), context: input.context && structuredClone(input.context), revision: 1, id: `S-${randomUUID()}`, enabled: true, nextAt: nextOccurrence(timing, this.now()) };
 		this.save(item, { actor: "main", quotes }); return structuredClone(item);
 	}
-	update(id: string, enabled: boolean | null | undefined, source: ScheduleSource = { actor: "user" }, replacementTiming?: ScheduleTiming): ScheduledTask[] {
+	update(id: string, enabled: boolean | null | undefined, source: ScheduleSource = { actor: "user" }, replacementTiming?: ScheduleTiming, work: ScheduleWorkPatch = {}): ScheduledTask[] {
 		if (this.closed) throw new Error("定时任务服务已关闭");
 		const item = this.records.get(id); if (!item) throw new Error("定时任务不存在");
+		const hasWork = Object.values(work).some(value => value !== undefined);
 		if (enabled === null) {
-			if (replacementTiming !== undefined) throw new Error("删除计划时不能同时修改时间");
+			if (replacementTiming !== undefined || hasWork) throw new Error("删除计划时不能同时修改时间或工作内容");
 			this.events.append("schedule_changed", { id, deleted: true, source }); this.records.delete(id);
 		} else {
 			if (enabled !== undefined && typeof enabled !== "boolean") throw new Error("无效启停值");
-			if (enabled === undefined && replacementTiming === undefined) throw new Error("需要启停值或新的时间规则");
+			if ((hasWork || (enabled === undefined && replacementTiming === undefined)) && !source.quotes?.length) throw new Error("修改工作内容需要引用用户原话");
+			validateWork(work);
 			const timing = replacementTiming === undefined ? item.timing : normalizeTiming(replacementTiming);
 			const changedTiming = JSON.stringify(normalizeTiming(item.timing)) !== JSON.stringify(normalizeTiming(timing));
 			const nextEnabled = enabled ?? item.enabled;
-			if (changedTiming || nextEnabled !== item.enabled) {
-				const nextAt = changedTiming || nextEnabled ? nextOccurrence(timing, this.now()) : item.nextAt;
-				const quotes = [...item.quotes];
-				if (changedTiming) {
-					for (const quote of source.quotes ?? []) {
-						if (!quotes.some(existing => existing.messageId === quote.messageId && existing.kind === quote.kind)) quotes.push(quote);
-					}
-				}
-				this.save({ ...item, timing, enabled: nextEnabled, quotes, error: undefined, nextAt }, source);
+			const quotes = [...item.quotes];
+			// A user can amend the work and enable/pause/change timing in the same message.
+			// Retain every new quoted instruction, including when other fields also change.
+			for (const quote of source.quotes ?? []) {
+				if (!quotes.some(existing => existing.messageId === quote.messageId && existing.kind === quote.kind)) quotes.push(structuredClone(quote));
+			}
+			const next: ScheduledTask = {
+				...item, timing, enabled: nextEnabled, quotes,
+				title: work.title?.trim() ?? item.title,
+				cwd: work.cwd ?? item.cwd,
+				mode: work.mode ?? item.mode,
+				note: work.note === undefined ? item.note : work.note.trim() || undefined,
+				context: work.context === undefined ? item.context : structuredClone(work.context),
+			};
+			if (JSON.stringify(next) !== JSON.stringify(item)) {
+				const nextAt = changedTiming || (!item.enabled && nextEnabled) ? nextOccurrence(timing, this.now()) : item.nextAt;
+				this.save({ ...next, revision: (item.revision ?? 1) + 1, error: undefined, nextAt }, source);
 			}
 		}
 		return this.list();
@@ -108,7 +128,8 @@ export class ScheduledTasks {
 						continue;
 					}
 					if (!statSync(current.cwd).isDirectory()) throw new Error("工作目录不存在");
-					task = this.store.create({ title: current.title, cwd: current.cwd, mode: current.mode, quotes: current.quotes, context: current.context, note: "This is one due occurrence of a local schedule. Perform the requested work once; the host manages future repetitions.", scope: [], dependsOn: [], autoApprove: this.approval(), dispatchKey: key, schedule: { id: current.id, dueAt: current.nextAt, timing: current.timing } }).task;
+					const note = "This is one due occurrence of a local schedule. Perform the requested work once; the host manages timing, pause/enable state and future repetitions. Scheduling controls in historical quotes have already been applied by the host; use this occurrence's frozen timing. Quoted later user amendments supersede conflicting older work requirements; preserve all other constraints.";
+					task = this.store.create({ title: current.title, cwd: current.cwd, mode: current.mode, quotes: current.quotes, context: current.context, note: current.note ? `${note}\nRouting note: ${current.note}` : note, scope: [], dependsOn: [], autoApprove: this.approval(), dispatchKey: key, schedule: { id: current.id, dueAt: current.nextAt, timing: current.timing, revision: current.revision ?? 1 } }).task;
 				}
 				ensureDir(task.outputDir);
 				const now = this.now();

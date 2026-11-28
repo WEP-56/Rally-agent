@@ -72,7 +72,7 @@ export class AgentBrowserService {
 	}
 	accountsFor(id: string) {
 		const window = this.require(id);
-		return this.accounts.state().accounts.filter(account => account.enabled && account.origin === window.view.origin);
+		return this.accounts.state().accounts.filter(account => account.enabled && account.kind !== "secret" && account.origin === window.view.origin);
 	}
 
 	constructor(profile: string, accounts: WebsiteAccounts, processes?: ProcessRegistry) {

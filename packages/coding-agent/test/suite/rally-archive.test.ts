@@ -165,7 +165,7 @@ describe("task archiving and deletion (offline)", () => {
 			now += 60000; schedules.poll(); const first = supervisor.store.list()[0]; archive(first.id); await supervisor.deleteArchived(first.id);
 			expect(schedules.list()[0]).toMatchObject({ lastTaskDeleted: true, enabled: true });
 			now += 60000; schedules.poll(); const next = supervisor.store.list()[0]; expect(next.id).not.toBe(first.id);
-			expect(supervisor.board().tasks[0].schedule).toEqual({ id: plan.id, dueAt: now, timing: { kind: "interval", minutes: 1 } });
+			expect(supervisor.board().tasks[0].schedule).toEqual({ id: plan.id, dueAt: now, timing: { kind: "interval", minutes: 1 }, revision: 1 });
 			expect(schedules.list()[0].lastTaskDeleted).toBe(false);
 		} finally { schedules.dispose(); }
 	});
