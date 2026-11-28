@@ -48,7 +48,7 @@ List enabled credentials usable across Rally tasks. Optional service filters the
 - 提示词原文：
 
 ```text
-Search main-chat history when you need an older fact or original user authorization. Choose one mode: {id:"#123"} reads one full message and must be used alone; {query:"keyword",limit:20} searches; {aroundId:"#123",limit:10} reads neighbours. Never combine id with query, aroundId, times or cursor. Search is literal and case-insensitive; before/after are exclusive Unix-millisecond bounds. Results are newest first, with 200-character previews, limit 1–100. Continue with cursor=next and identical filters. Queued and withdrawn user messages are excluded. Only user IDs authorize actions. Worker background needs no search: use task_dispatch context:0–30 and memory:0/1.
+Search main-chat history when you need an older fact or original user authorization; earlier conversations stay searchable after a new conversation or restart. Choose one mode: {id:"#123"} reads one full message and must be used alone; {query:"keyword",limit:20} searches; {aroundId:"#123",limit:10} reads neighbours. Never combine id with query, aroundId, times or cursor. Search is literal and case-insensitive; before/after are exclusive Unix-millisecond bounds. Results are newest first, with 200-character previews, limit 1–100. Continue with cursor=next and identical filters. Queued and withdrawn user messages are excluded. Only user IDs authorize actions. Worker background needs no search: use task_dispatch context:0–30 and memory:0/1.
 ```
 - 参数：
 

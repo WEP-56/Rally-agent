@@ -16,7 +16,7 @@ import { toolInput, toolOutput } from "../../shared/tools.ts";
 import { assistantContent } from "../../shared/conversation.ts";
 import { MAIN_SYSTEM_PROMPT } from "../prompts.ts";
 import type { ModelStore } from "../model-store.ts";
-import type { EventLog } from "./event-log.ts";
+import type { EventLog, LoggedEvent } from "./event-log.ts";
 import { closeRoleSession, createRoleSession } from "./session.ts";
 import type { RelayMessage, RelayMode } from "./relay.ts";
 import { searchChat, type ChatSearchParams } from "./chat-search.ts";
@@ -166,7 +166,23 @@ export class MainAgent {
 			(this.preparingInput || this.isBusy() || !this.messages.some(line => line.delivery?.status === "queued"));
 	}
 
-	search(params: ChatSearchParams) { return searchChat(this.messages.filter(line => line.delivery?.status !== "queued" && line.delivery?.status !== "cancelled"), params); }
+	search(params: ChatSearchParams) { return searchChat(this.searchHistory().filter(line => line.delivery?.status !== "queued" && line.delivery?.status !== "cancelled"), params); }
+
+	/**
+	 * chat_search reads the whole retained history, not just the current conversation: chat_reset clears the
+	 * conversation for the UI and the context, but memory source IDs and older authorizations must stay readable.
+	 */
+	private searchHistory(): ChatLine[] {
+		const lines = new Map<number, ChatLine>();
+		for (const event of this.events.all()) {
+			if (event.kind !== "chat_message") continue;
+			const line = chatLineFromEvent(event);
+			if (line) lines.set(Number(line.id.slice(1)), line);
+		}
+		// Live lines carry delivery and attachment updates that the last append may not hold yet.
+		for (const line of this.messages) lines.set(Number(line.id.slice(1)), line);
+		return [...lines.values()].sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
+	}
 
 	recentContext(count: number): TaskContext[] { return recentChatContext(this.messages, count, this.contextBefore); }
 
@@ -967,26 +983,14 @@ export class MainAgent {
 				continue;
 			}
 			if (event.kind !== "chat_message") continue;
-			const n = Number(event.data.n);
-			const role = event.data.role as ChatRole;
-			const text = String(event.data.text ?? "");
-			const at = Number(event.data.at ?? event.at);
-			if (!Number.isFinite(n)) continue;
-			const toolCalls = (event.data.toolCalls as ChatLine["toolCalls"])?.map((call) => ({ ...call, status: call.status === "running" ? "interrupted" as const : call.status }));
-			const blocks = event.data.blocks as ChatLine["blocks"];
-			const relayId = typeof event.data.relayId === "string" ? event.data.relayId : undefined;
-			const source = event.data.source as ImSource | undefined;
-			if (source?.platform === "feishu" || source?.platform === "qq") this.receivedIm.add(imKey(source));
-			const attachments = event.data.attachments as ResourceRef[] | undefined;
-			const delivery = event.data.delivery as ChatDelivery | undefined;
-			const replyTo = typeof event.data.replyTo === "string" ? event.data.replyTo : undefined;
-			const submissionId = typeof event.data.submissionId === "string" ? event.data.submissionId : undefined;
-			if (submissionId) this.receivedSubmissions.add(submissionId);
-			const line = { id: `#${n}`, role, text, at, streaming: false, toolCalls, blocks, relayId, source, attachments, delivery, replyTo, submissionId };
+			const line = chatLineFromEvent(event);
+			if (!line) continue;
+			if (line.source?.platform === "feishu" || line.source?.platform === "qq") this.receivedIm.add(imKey(line.source));
+			if (line.submissionId) this.receivedSubmissions.add(line.submissionId);
 			const index = this.messages.findIndex((item) => item.id === line.id);
 			if (index === -1) this.messages.push(line);
 			else this.messages[index] = line;
-			this.nextLine = Math.max(this.nextLine, n + 1);
+			this.nextLine = Math.max(this.nextLine, Number(line.id.slice(1)) + 1);
 		}
 	}
 
@@ -1028,6 +1032,28 @@ function toolActivity(name: string): ChatActivity {
 
 function imKey(source: ImSource): string {
 	return JSON.stringify([source.platform, source.appId, source.chatId, source.messageId]);
+}
+
+/** One persisted chat line, shared by replay and chat_search so both read the log the same way. */
+function chatLineFromEvent(event: LoggedEvent): ChatLine | null {
+	const n = Number(event.data.n);
+	if (!Number.isFinite(n)) return null;
+	const toolCalls = (event.data.toolCalls as ChatLine["toolCalls"])?.map((call) => ({ ...call, status: call.status === "running" ? "interrupted" as const : call.status }));
+	return {
+		id: `#${n}`,
+		role: event.data.role as ChatRole,
+		text: String(event.data.text ?? ""),
+		at: Number(event.data.at ?? event.at),
+		streaming: false,
+		toolCalls,
+		blocks: event.data.blocks as ChatLine["blocks"],
+		relayId: typeof event.data.relayId === "string" ? event.data.relayId : undefined,
+		source: event.data.source as ImSource | undefined,
+		attachments: event.data.attachments as ResourceRef[] | undefined,
+		delivery: event.data.delivery as ChatDelivery | undefined,
+		replyTo: typeof event.data.replyTo === "string" ? event.data.replyTo : undefined,
+		submissionId: typeof event.data.submissionId === "string" ? event.data.submissionId : undefined,
+	};
 }
 
 function clone(line: ChatLine): ChatLine {
