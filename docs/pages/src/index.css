@@ -1,0 +1,257 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ─────────────────────────────────────────────────────────────
+   Rally 官网 · 延续 Rally 客户端的微调版 MD3 token
+   种子色：雾霭蓝 #33658E（与客户端默认一致）
+   运行时由 @material/material-color-utilities 重新生成并覆盖
+   ───────────────────────────────────────────────────────────── */
+:root {
+  --md-sys-color-primary: #144d75;
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: #33658e;
+  --md-sys-color-on-primary-container: #c3e0ff;
+  --md-sys-color-primary-fixed: #cee5ff;
+  --md-sys-color-primary-fixed-dim: #9ccbf9;
+  --md-sys-color-on-primary-fixed: #001d32;
+  --md-sys-color-secondary: #4f6072;
+  --md-sys-color-on-secondary: #ffffff;
+  --md-sys-color-secondary-container: #d2e4f9;
+  --md-sys-color-on-secondary-container: #36485a;
+  --md-sys-color-tertiary: #654300;
+  --md-sys-color-on-tertiary: #ffffff;
+  --md-sys-color-tertiary-container: #ffd79f;
+  --md-sys-color-on-tertiary-container: #513400;
+  --md-sys-color-error: #ba1a1a;
+  --md-sys-color-on-error: #ffffff;
+  --md-sys-color-error-container: #ffdad6;
+  --md-sys-color-on-error-container: #93000a;
+  --md-sys-color-surface: #f9f9fd;
+  --md-sys-color-surface-dim: #d9dadd;
+  --md-sys-color-surface-bright: #f9f9fd;
+  --md-sys-color-surface-container-lowest: #ffffff;
+  --md-sys-color-surface-container-low: #f3f3f7;
+  --md-sys-color-surface-container: #edeef1;
+  --md-sys-color-surface-container-high: #e7e8ec;
+  --md-sys-color-surface-container-highest: #e2e2e6;
+  --md-sys-color-on-surface: #191c1f;
+  --md-sys-color-on-surface-variant: #41474e;
+  --md-sys-color-outline: #72787f;
+  --md-sys-color-outline-variant: #c1c7cf;
+  --md-sys-color-inverse-surface: #2e3134;
+  --md-sys-color-inverse-on-surface: #f0f0f4;
+  --md-sys-color-inverse-primary: #9ccbf9;
+  --rally-color-ok: #006b5d;
+  --rally-color-ok-container: #b7f1e4;
+  --rally-color-on-ok-container: #002e27;
+  --rally-color-warn: #99460d;
+  --rally-color-warn-container: #ffdfd0;
+  --rally-color-on-warn-container: #471b00;
+
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-md-primary: var(--md-sys-color-primary);
+  --color-md-on-primary: var(--md-sys-color-on-primary);
+  --color-md-primary-container: var(--md-sys-color-primary-container);
+  --color-md-on-primary-container: var(--md-sys-color-on-primary-container);
+  --color-md-primary-fixed: var(--md-sys-color-primary-fixed);
+  --color-md-primary-fixed-dim: var(--md-sys-color-primary-fixed-dim);
+  --color-md-on-primary-fixed: var(--md-sys-color-on-primary-fixed);
+  --color-md-secondary: var(--md-sys-color-secondary);
+  --color-md-on-secondary: var(--md-sys-color-on-secondary);
+  --color-md-secondary-container: var(--md-sys-color-secondary-container);
+  --color-md-on-secondary-container: var(--md-sys-color-on-secondary-container);
+  --color-md-tertiary: var(--md-sys-color-tertiary);
+  --color-md-on-tertiary: var(--md-sys-color-on-tertiary);
+  --color-md-tertiary-container: var(--md-sys-color-tertiary-container);
+  --color-md-on-tertiary-container: var(--md-sys-color-on-tertiary-container);
+  --color-md-error: var(--md-sys-color-error);
+  --color-md-error-container: var(--md-sys-color-error-container);
+  --color-md-on-error-container: var(--md-sys-color-on-error-container);
+  --color-md-surface: var(--md-sys-color-surface);
+  --color-md-surface-dim: var(--md-sys-color-surface-dim);
+  --color-md-surface-bright: var(--md-sys-color-surface-bright);
+  --color-md-surface-lowest: var(--md-sys-color-surface-container-lowest);
+  --color-md-surface-low: var(--md-sys-color-surface-container-low);
+  --color-md-surface-container: var(--md-sys-color-surface-container);
+  --color-md-surface-high: var(--md-sys-color-surface-container-high);
+  --color-md-surface-highest: var(--md-sys-color-surface-container-highest);
+  --color-md-on-surface: var(--md-sys-color-on-surface);
+  --color-md-on-surface-variant: var(--md-sys-color-on-surface-variant);
+  --color-md-outline: var(--md-sys-color-outline);
+  --color-md-outline-variant: var(--md-sys-color-outline-variant);
+  --color-md-inverse-surface: var(--md-sys-color-inverse-surface);
+  --color-md-inverse-on-surface: var(--md-sys-color-inverse-on-surface);
+  --color-md-inverse-primary: var(--md-sys-color-inverse-primary);
+  --color-rally-ok: var(--rally-color-ok);
+  --color-rally-ok-container: var(--rally-color-ok-container);
+  --color-rally-on-ok-container: var(--rally-color-on-ok-container);
+  --color-rally-warn: var(--rally-color-warn);
+  --color-rally-warn-container: var(--rally-color-warn-container);
+  --color-rally-on-warn-container: var(--rally-color-on-warn-container);
+
+  /* Mochi 吉祥物固定色板（吉祥物不随主题变色） */
+  --color-mochi-coral: #fa9e8e;
+  --color-mochi-coral-deep: #e07a68;
+  --color-mochi-gold: #fdcb58;
+  --color-mochi-violet: #8871e3;
+  --color-mochi-violet-deep: #634fb8;
+  --color-mochi-lilac: #b4a4f6;
+  --color-mochi-lilac-soft: #dacafd;
+  --color-mochi-cream: #fffdf9;
+
+  --font-display: "Baloo 2", "HarmonyOS Sans SC", "PingFang SC", "MiSans", "Microsoft YaHei", sans-serif;
+  --font-sans: "Nunito", -apple-system, BlinkMacSystemFont, "HarmonyOS Sans SC", "PingFang SC", "MiSans", "Microsoft YaHei UI", sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas, ui-monospace, monospace;
+
+  --shadow-card: 0 1px 2px rgb(25 28 31 / 0.04), 0 4px 14px rgb(25 28 31 / 0.05);
+  --shadow-float: 0 6px 22px rgb(0 0 0 / 0.08);
+  --shadow-pop: 0 14px 44px rgb(0 0 0 / 0.16);
+  --shadow-jelly: 0 10px 30px -8px color-mix(in srgb, var(--md-sys-color-primary) 45%, transparent);
+  --shadow-soft: 0 2px 10px rgb(25 28 31 / 0.06);
+  /* 终端底色：与客户端工具输出的 bg-term 一致 */
+  --color-term: #14141f;
+
+  /* Rally 的 MD3 Expressive 缓动 */
+  --ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --ease-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-spring-fast: cubic-bezier(0.32, 1.42, 0.58, 1);
+  --ease-spring-jelly: cubic-bezier(0.2, 0.9, 0.3, 1.15);
+
+  --animate-fade: fade 0.24s ease-out both;
+  --animate-pop: pop 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.15) both;
+  --animate-rise: rise 0.5s cubic-bezier(0.05, 0.7, 0.1, 1) both;
+  --animate-blink: blink 1s steps(1) infinite;
+  --animate-floaty: floaty 5s ease-in-out infinite;
+  --animate-breathe: breathe 2.4s ease-in-out infinite;
+  --animate-twinkle: twinkle 3.2s ease-in-out infinite;
+  --animate-marquee: marquee 36s linear infinite;
+  --animate-dashflow: dashflow 1.4s linear infinite;
+  --animate-bob: bob 2.6s ease-in-out infinite;
+  --animate-wiggle: wiggle 3.4s ease-in-out infinite;
+}
+
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pop { from { opacity: 0; transform: scale(0.92) translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+@keyframes blink { 50% { opacity: 0; } }
+@keyframes floaty { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+@keyframes breathe { 0%, 100% { opacity: 0.45; transform: scale(1); } 50% { opacity: 1; transform: scale(1.25); } }
+@keyframes twinkle {
+  0%, 100% { opacity: 0.25; transform: scale(0.8) rotate(0deg); }
+  50% { opacity: 1; transform: scale(1.15) rotate(20deg); }
+}
+@keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@keyframes dashflow { to { stroke-dashoffset: -24; } }
+@keyframes bob { 0%, 100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-6px) rotate(3deg); } }
+@keyframes wiggle { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(5deg); } }
+@keyframes sweep { from { transform: translateX(-120%); } to { transform: translateX(320%); } }
+@keyframes typing-dot { 0%, 60%, 100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-4px); opacity: 1; } }
+
+html { scroll-behavior: smooth; }
+html, body { margin: 0; }
+
+body {
+  background: var(--md-sys-color-surface-container);
+  color: var(--md-sys-color-on-surface);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  transition: background-color 340ms var(--ease-emphasized), color 340ms var(--ease-emphasized);
+  overflow-x: hidden;
+}
+
+::selection { background: color-mix(in srgb, var(--md-sys-color-primary) 26%, transparent); }
+section[id] { scroll-margin-top: 84px; }
+
+.font-display { font-family: var(--font-display); letter-spacing: -0.01em; }
+
+/* ── 数字工位：与客户端 md3/styles.css 的面板底色一致 ── */
+.bubble-user { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
+.panel-chat {
+  background-color: var(--md-sys-color-surface);
+  background-image: radial-gradient(55% 32% at 50% -8%, color-mix(in srgb, var(--md-sys-color-primary-container) 24%, transparent) 0%, transparent 75%);
+}
+.panel-stage {
+  background-color: var(--md-sys-color-surface-container-low);
+  background-image: radial-gradient(68% 48% at 18% 0%, color-mix(in srgb, var(--md-sys-color-primary-container) 40%, transparent) 0%, transparent 72%);
+}
+
+/* ── MD3 state layer：hover/press 时浮起的 tonal 膜 ── */
+.state-layer { position: relative; isolation: isolate; }
+.state-layer::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0;
+  transition: opacity 160ms var(--ease-emphasized);
+  pointer-events: none;
+  z-index: 0;
+}
+.state-layer:hover::before { opacity: 0.07; }
+.state-layer:active::before { opacity: 0.12; }
+.state-layer > * { position: relative; z-index: 1; }
+
+/* ── 环境背景 ── */
+.dotgrid {
+  background-image: radial-gradient(color-mix(in srgb, var(--md-sys-color-on-surface) 9%, transparent) 1.2px, transparent 1.2px);
+  background-size: 22px 22px;
+}
+.tint-hero {
+  background:
+    radial-gradient(560px 380px at 12% 8%, color-mix(in srgb, var(--md-sys-color-primary-container) 26%, transparent), transparent 70%),
+    radial-gradient(480px 360px at 88% 18%, color-mix(in srgb, var(--md-sys-color-tertiary-container) 34%, transparent), transparent 70%),
+    radial-gradient(620px 420px at 70% 92%, color-mix(in srgb, #b4a4f6 22%, transparent), transparent 72%);
+}
+.dark .tint-hero {
+  background:
+    radial-gradient(560px 380px at 12% 8%, color-mix(in srgb, var(--md-sys-color-primary-container) 42%, transparent), transparent 70%),
+    radial-gradient(480px 360px at 88% 18%, color-mix(in srgb, #fdcb58 12%, transparent), transparent 70%),
+    radial-gradient(620px 420px at 70% 92%, color-mix(in srgb, #8871e3 16%, transparent), transparent 72%);
+}
+
+/* ── 聊天滚动条（模拟窗口内） ── */
+.chat-scroll { scrollbar-width: thin; scrollbar-color: var(--md-sys-color-outline-variant) transparent; }
+.chat-scroll::-webkit-scrollbar { width: 6px; }
+.chat-scroll::-webkit-scrollbar-thumb { background: var(--md-sys-color-outline-variant); border-radius: 99px; }
+.chat-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* ── 工具步骤的 shimmer 进度 ── */
+.shimmer { position: relative; overflow: hidden; }
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--md-sys-color-primary) 14%, transparent), transparent);
+  animation: sweep 1.5s ease-in-out infinite;
+}
+
+.typing-dot { animation: typing-dot 1.1s ease-in-out infinite; }
+
+/* 吉祥物柔和投影 */
+.rally-glow { filter: drop-shadow(0 10px 22px color-mix(in srgb, var(--md-sys-color-primary) 22%, transparent)); }
+.dark .rally-glow { filter: drop-shadow(0 10px 22px rgb(0 0 0 / 0.5)); }
+
+/* 虚线流动连接线 */
+.flowline { stroke-dasharray: 7 7; animation: dashflow 1.4s linear infinite; }
+
+/* 代码块 */
+.codeblock {
+  font-family: var(--font-mono);
+  background: var(--md-sys-color-inverse-surface);
+  color: var(--md-sys-color-inverse-on-surface);
+}
+.codeblock .cmt { color: color-mix(in srgb, var(--md-sys-color-inverse-on-surface) 55%, transparent); }
+.codeblock .cmd { color: #9ccbf9; }
+.dark .codeblock .cmd { color: #144d75; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
