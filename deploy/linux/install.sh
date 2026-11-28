@@ -21,7 +21,7 @@ for entry in admin:rally-control vault:rally-runtime; do
 done
 umask 022
 ./bin/node node_modules/playwright/cli.js install-deps chromium
-install -d "$target"; cp -a bin lib src browser skills node_modules packages package.json VERSION LICENSE THIRD_PARTY_NOTICES "$target/"; chown -R root:root "$target"; chmod -R go-w "$target"
+install -d "$target"; cp -a bin lib src browser skills external-agents node_modules packages package.json VERSION LICENSE THIRD_PARTY_NOTICES "$target/"; chown -R root:root "$target"; chmod -R go-w "$target"
 previous=$(readlink -f /opt/rally/current || true)
 if [[ -L /opt/rally/current ]]; then
  systemctl stop rally-control rally-runtime

@@ -4,7 +4,7 @@
 
 ## 从 GitHub Release 安装
 
-从 0.4.1 起，基础包不携带 Claude Code、Codex 或它们的 ACP 适配器。需要时可让 Rally 使用内置自管理 Skill，复用服务运行账号已有的 CLI 或按需安装到 `$RALLY_CODING_AGENT_DIR/external-agents/`；路径覆盖保存在同目录下的 `external-agents.json`。服务账号的程序和登录环境独立于客户端。安装器会复制 `skills/` 到正式版本目录，升级不覆盖用户目录中的外部程序。
+0.5.5 内置 Claude Code / Codex 的 ACP JavaScript 连接层，安装器将 `external-agents/` 与 `skills/` 一起复制到正式版本目录。Claude Code、Codex CLI 本身仍需在服务运行账号下安装和登录；Rally 会发现已有程序，也可通过内置自我管理 Skill 设置路径。服务账号的程序和登录环境独立于客户端，升级不覆盖用户目录中的外部程序。
 
 从项目 Releases 下载同版的 `rally-server-X.Y.Z-linux-x64.tar.gz` 与 `SHA256SUMS`。先检查摘要，再解包和安装：
 
