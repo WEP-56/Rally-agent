@@ -1,4 +1,5 @@
 import type { ScheduledTask } from "./schedules.ts";
+import type { SshServer, SshServerInput, SshVerification } from "./ssh.ts";
 import type { ToolProviderState, ToolProviderUpdate } from "./tool-providers.ts";
 import type { ResourceApi, ResourceRef } from "./resources.ts";
 import type { CloseBehavior, DesktopSettings } from "./desktop.ts";
@@ -67,6 +68,11 @@ export interface RallyPaths {
 
 /** Invoke channels (renderer -> main, request/response). */
 export const IpcChannel = {
+	sshState: "ssh:state",
+	sshSave: "ssh:save",
+	sshVerify: "ssh:verify",
+	sshUpdate: "ssh:update",
+	sshRemove: "ssh:remove",
 	agentBrowserState: "agent-browser:state",
 	agentBrowserFrame: "agent-browser:frame",
 	agentBrowserTake: "agent-browser:take",
@@ -356,6 +362,13 @@ export interface RallyApi {
 	connectorTools: {
 		getState(connector: ConnectorId): Promise<ConnectorToolSettings[]>;
 		setTier(connector: ConnectorId, name: string, tier: McpRiskTier): Promise<ConnectorToolSettings[]>;
+	};
+	ssh: {
+		getState(): Promise<SshServer[]>;
+		save(input: SshServerInput): Promise<SshServer[]>;
+		verify(id: string, fingerprint?: string): Promise<SshVerification>;
+		update(id: string, enabled: boolean): Promise<SshServer[]>;
+		remove(id: string): Promise<SshServer[]>;
 	};
 	qqMail: {
 		getState(): Promise<QqMailState>;

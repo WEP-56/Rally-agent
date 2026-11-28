@@ -3,7 +3,8 @@ export interface JobRecord {
 	id: string;
 	taskId: string;
 	runId: string;
-	shell: "bash" | "powershell";
+	shell: "bash" | "powershell" | "ssh";
+	ssh?: { serverId: string; status: "running" | "exited" | "disconnected" | "closed"; exitSignal?: string; observed?: boolean };
 	command: string;
 	cwd: string;
 	status: "running" | "exited" | "killed";

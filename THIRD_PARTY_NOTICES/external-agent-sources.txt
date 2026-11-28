@@ -1,0 +1,29 @@
+Rally bundles the JavaScript ACP connection layer and reuses the host's existing
+Codex / Claude Code executable and authentication. Native agent CLIs are excluded.
+
+Runtime sources (exact dependency tree and integrity hashes are in
+scripts/external-agents/package-lock.json):
+
+- @agentclientprotocol/codex-acp 2.10.0
+  https://github.com/agentclientprotocol/codex-acp
+  Apache License 2.0; copyright JetBrains s.r.o.
+- @agentclientprotocol/claude-agent-acp 0.110.1
+  https://github.com/agentclientprotocol/claude-agent-acp
+  Apache License 2.0
+- @anthropic-ai/claude-agent-sdk 0.3.330 (JavaScript transport only)
+  https://github.com/anthropics/claude-agent-sdk-typescript
+  Copyright Anthropic PBC. Use is subject to the upstream Legal Agreements:
+  https://code.claude.com/docs/en/legal-and-compliance
+
+Unmodified upstream license/notice files for these packages and their locked
+dependencies are distributed under external-agents/licenses. The SDK's own
+LICENSE.md is also retained beside its JavaScript modules. The runtime includes
+dependency-lock.json for provenance. Rally's MIT license does not replace these
+upstream terms.
+
+Implementation reference (not copied into the distributed application):
+- https://github.com/spacering-net/codeg
+  Commit: 20e5e27749000b899ea72f53fbe5677abfcb5a69 (Apache License 2.0)
+  Reviewed src-tauri/src/acp/{connection,codex_runtime,npm_package}.rs and
+  src-tauri/src/commands/acp.rs for launch paths, protocol and mode compatibility.
+  Rally does not reuse codeg's runtime installer or duplicate CLI downloads.

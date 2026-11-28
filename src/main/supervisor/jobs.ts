@@ -50,6 +50,7 @@ export class JobManager {
 	/** Call only after the registry has finished orphan cleanup, before scheduling. */
 	recover(): void {
 		for (const task of this.options.store.list()) for (const job of task.jobs ?? []) {
+			if (job.shell === "ssh") continue;
 			if (job.status === "running") this.options.store.recordJob({ ...job, status: "killed", endedAt: Date.now(), reason: "interrupted" }, "job_exited");
 			else if (job.backgroundedAt && job.reason !== "task_ended" && job.reason !== "shutdown" && job.reason !== "interrupted") this.options.store.jobDone(job, this.completionText(job));
 		}
@@ -174,6 +175,7 @@ export class JobManager {
 
 	private require(taskId: string, jobId: string): JobRecord {
 		const job = this.options.store.get(taskId)?.jobs?.find(item => item.id === jobId);
+		if (job?.shell === "ssh") throw new Error("SSH 作业使用 ssh_write_stdin 读取输出或输入；停止整个任务可关闭连接。");
 		if (!job || !/^J-\d+$/.test(jobId)) throw new Error("JOB_NOT_FOUND: 作业不存在或不属于本任务");
 		return job;
 	}

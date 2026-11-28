@@ -1,4 +1,4 @@
-> **Rally 开发说明**：本包是 Rally 内嵌的 Pi SDK。下面保留上游介绍供 SDK/CLI 参考，不代表 Rally 桌面端已实现的能力。Rally 产品与开发现状见 [仓库 README](../../README.md)、[开发实施 TODO](../../docs/开发实施TODO.md) 和 [问答记录](../../docs/superagent/00-问答记录.md)。本仓库未搬入上游 docs/examples，相关链接指向基准版本的在线源码。
+> **Rally 开发说明**：本包是 Rally 内嵌的 Pi SDK。下面保留上游介绍供 SDK/CLI 参考，不代表 Rally 桌面端已实现的能力。Rally 产品与开发现状见 [仓库 README](../../README.md)、[开发实施 TODO](../../docs/开发实施TODO.md) 和 [开发交接](../../docs/HANDOFF.md)。本仓库未搬入上游 docs/examples，相关链接指向基准版本的在线源码。
 
 <p align="center">
   <a href="https://pi.dev">

@@ -7,6 +7,7 @@ import type { ImBotState } from "../../../shared/connections";
 import type { RallyApi } from "../../../shared/ipc";
 import { cn } from "../utils/cn";
 import { QqMailCard } from "./QqMailCard";
+import { SshCard } from "./SshCard";
 import { ConnectorTools } from "./ConnectorTools";
 import { timeAgo } from "./status";
 import { Button, Input, Toggle } from "./ui";
@@ -122,6 +123,7 @@ export function ConnectionsView({ visible }: { visible: boolean }) {
         <BotCard visible={visible} name="飞书" mark="飞" color="#3370ff" summary="机器人单聊、云文档与多维表格" portal="https://open.feishu.cn/app" appIdHint="cli_…"
           api={window.rally.feishu} instructions="创建企业自建应用并启用机器人。选择使用长连接接收事件，添加「接收消息」事件，开通单聊收消息和机器人发消息权限后发布。平台要求先建长连接时，可以先在这里保存，再回平台完成订阅。" />
         <QqMailCard visible={visible} />
+        <SshCard visible={visible} />
         <div className="mt-3"><BotCard visible={visible} name="QQ" mark="QQ" color="#3799ff" summary="官方机器人单聊" portal="https://q.qq.com/" appIdHint="机器人 AppID"
           api={window.rally.qqBot} instructions="创建机器人并获取 AppID 和 AppSecret。新版管理端支持机器人管理员直接测试私聊；其他体验账号可在「开发设置」添加。Rally 使用长连接接收私聊消息。" /></div>
       </motion.div>

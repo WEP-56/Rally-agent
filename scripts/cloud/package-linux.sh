@@ -13,9 +13,11 @@ for pkg in packages/*; do
  if [[ -f $pkg/LICENSE ]]; then cp "$pkg/LICENSE" "$dest/"; fi
 done
 (cd "$bundle" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
-node scripts/verify-external-agent-packaging.mjs "$bundle"
 (cd "$bundle" && PLAYWRIGHT_BROWSERS_PATH="$bundle/browser" node node_modules/playwright/cli.js install chromium --only-shell)
 cp -a out/server/src "$bundle/"
+cp -a out/server/external-agents "$bundle/"
+node scripts/verify-external-agent-packaging.mjs "$bundle"
+RALLY_TEST_SERVER="$bundle" node --test tests/external-agent-adapters.test.mjs
 cp -a skills "$bundle/skills"
 test -f "$bundle/skills/SKILL.md"
 for reference in identity.md coach.md model-provider.md media-search.md mcp.md skills.md roles.md external-agents.md; do

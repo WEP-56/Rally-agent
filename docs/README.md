@@ -15,11 +15,10 @@
 | [定时任务](定时任务.md) | 时间规则、运行时段、修改计划与中断恢复行为 |
 | [Worker 背景说明](Prompt/worker-context.md) | 任务消息中选定背景的提示词与来源字段 |
 | [Worker 闲置恢复说明](Prompt/worker-inactivity.md) | 暂停任务接续时的一次性提示词 |
+| [自我管理 Skill 描述](Prompt/self-management.md) | 配置请求的路由摘要与外部执行器复用说明 |
 | [发布指南](发布指南.md) | 构建、签名与发布 |
-| [0.5.1 发布说明](发布说明-0.5.1.md) | 吉祥物、状态动效、引导体验与桌面细节 |
-| [0.5.0 发布说明](发布说明-0.5.0.md) | MD3 界面、新品牌图标、交互修复与云端管理页统计 |
 | [其它提供商](其它提供商.md) | 图像生成与网络搜索配置 |
 | [密码本](密码本.md) | 跨场景账号与密钥保存、取用、停用及加密兼容 |
-| [Connector](Connector/README.md) | 连接器工具与权限统一约定；飞书、QQ 机器人、QQ 邮箱 |
+| [SSH 连接](Connector/SSH连接.md) | 配置服务器、工具使用与运行边界 |
+| [Connector](Connector/README.md) | 连接器工具与权限统一约定；飞书、QQ 机器人、QQ 邮箱、SSH |
 | [Prompt](Prompt/) | 当前系统提示词、教练提示词与[工具描述分类](Prompt/tools-Description/rally-tools.md) |
-| [产品问答记录](superagent/00-问答记录.md) | 产品决策依据；以最新追加为准 |

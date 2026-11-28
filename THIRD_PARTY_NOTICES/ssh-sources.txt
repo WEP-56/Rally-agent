@@ -1,0 +1,7 @@
+SSH 连接器开源来源（2026-11-28）
+
+- ssh2 1.17.0：直接依赖，用于 SSH 客户端连接、exec channel、PTY 和主机公钥校验。MIT 许可原文见 ssh2-LICENSE.txt，原包随应用保留。来源：https://github.com/mscdex/ssh2
+- @types/ssh2 1.15.6：开发时类型定义，不作为运行时组件。
+- 调研过 tufantunc/ssh-mcp 与 zw-awa/ssh-session-mcp 的会话实现。本次没有复制这些项目的源码，也没有引入其 MCP 服务、终端 UI 或 SFTP 子系统；Rally 的配置、权限、任务和日志沿用自身实现。
+
+安装使用 --ignore-scripts；ssh2 的可选原生加速未构建。定向测试使用其 JavaScript 实现完成实际 SSH 协议通信。

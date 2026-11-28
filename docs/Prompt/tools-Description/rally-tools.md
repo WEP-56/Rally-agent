@@ -14,3 +14,4 @@
 | [Git 与 GitHub](git-github.md) | `git_inspect`、`git`、`github_read`、`github` |
 | [生图与附件](media.md) | `image_gen`、`resource_publish` |
 | [连接器与 MCP](connectors.md) | `qqmail_search`、`qqmail_read`、`qqmail_save_attachment`、`qqmail_send`、动态 MCP 工具 |
+| [SSH](ssh.md) | `ssh_list`、`ssh_exec`、`ssh_write_stdin` |

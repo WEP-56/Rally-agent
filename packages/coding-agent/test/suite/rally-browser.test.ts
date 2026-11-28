@@ -31,7 +31,7 @@ class Contents extends EventEmitter {
 	move(delta: number) { this.index += delta; this.complete(this.history[this.index]); }
 	reload() { this.reloads++; this.loading = true; this.emit("did-start-loading"); this.complete(this.url); }
 	stop() { this.loading = false; this.emit("did-stop-loading"); }
-	close(options: object) { this.closeOptions = options; this.destroyed = true; this.emit("destroyed"); }
+	close(options: object) { this.closeOptions = options; this.destroyed = true; this.emit("destroyed", { preventDefault() {} }); }
 }
 class View {
 	webContents = new Contents(); visible = false; bounds?: { x: number; y: number; width: number; height: number }; radius = 0; options: { webPreferences: WebPreferences };
@@ -154,11 +154,32 @@ describe("Rally native browser boundary (Electron substitutes, no UI/network)", 
 		manager.create(owner(window), "c"); const c = lastView(); window.webContents.emit("render-process-gone", {}, {}); expect(c.webContents.destroyed).toBe(true);
 		manager.create(owner(window), "d"); const d = lastView(); await manager.dispose(); expect(d.webContents.destroyed).toBe(true); expect(() => manager.create(owner(window), "e")).toThrow("BROWSER_CLOSED");
 	});
+	it("ignores late layout updates for a closed tab without hiding the newly active tab", async () => {
+		const { manager, window } = await setup();
+		manager.create(owner(window), "old", "https://old.test");
+		const old = lastView();
+		manager.layout(owner(window), shown("old"));
+		manager.create(owner(window), "next", "https://next.test");
+		const next = lastView();
+		vi.spyOn(old.webContents, "close").mockImplementation(() => {});
+		const closing = manager.close(owner(window), "old");
+		try {
+			manager.layout(owner(window), shown("next"));
+			expect(() => manager.layout(owner(window), shown("old"))).not.toThrow();
+			expect(() => manager.layout(owner(window), { ...shown("old"), visible: false })).not.toThrow();
+			expect(next.visible).toBe(true);
+			expect(old.visible).toBe(false);
+		} finally { old.webContents.destroyed = true; old.webContents.emit("destroyed", { preventDefault() {} }); }
+		expect(await closing).toBeUndefined();
+		expect(() => manager.layout(owner(window), { ...shown("old"), visible: false })).not.toThrow();
+		expect(next.visible).toBe(true);
+		expect(() => manager.navigate(owner(window), "old", "https://old.test")).toThrow("BROWSER_NOT_FOUND");
+	});
 	it("wires declared browser IPC to the owner and drains child closure during production IPC shutdown", async () => {
 		const harness = await createHarness(); harnesses.push(harness);
 		const paths = resolveRallyPaths(join(harness.tempDir, "home")); ensureRallyDirs(paths);
 		const supervisor = new Supervisor(paths, { emitChat: () => {}, emitTask: () => {} }); const stop = registerIpc(paths, supervisor);
-		const window = new Window(); const invoke = (channel: string, ...args: unknown[]) => Promise.resolve(transport.handlers.get(channel)!(event(window), ...args));
+		const window = new Window(); const invoke = async (channel: string, ...args: unknown[]) => structuredClone(await transport.handlers.get(channel)!(event(window), ...args));
 		try {
 			expect(await invoke(IpcChannel.browserCreate, "a")).toMatchObject({ id: "a", url: BROWSER_START });
 			expect(await invoke(IpcChannel.browserNavigate, "a", "http://localhost:5173")).toMatchObject({ url: "http://localhost:5173/" });
@@ -166,19 +187,24 @@ describe("Rally native browser boundary (Electron substitutes, no UI/network)", 
 			await invoke(IpcChannel.browserAction, "a", "external"); expect(native.external).toHaveBeenCalledWith("http://localhost:5173/");
 			const guest = { sender: lastView().webContents, senderFrame: lastView().webContents.mainFrame };
 			await expect(transport.handlers.get(IpcChannel.browserCreate)!(guest, "guest")).rejects.toThrow("BROWSER_NOT_ALLOWED");
-			await invoke(IpcChannel.browserClose, "a"); expect(lastView().webContents.destroyed).toBe(true);
+			expect(await invoke(IpcChannel.browserClose, "a")).toBeUndefined(); expect(lastView().webContents.destroyed).toBe(true);
+			expect(await invoke(IpcChannel.browserClose, "a")).toBeUndefined();
+			await invoke(IpcChannel.browserLayout, { ...shown("a"), visible: false });
 			await invoke(IpcChannel.browserCreate, "b"); const child = lastView().webContents;
 			await stop(); expect(child.destroyed).toBe(true); expect(transport.handlers.size).toBe(0); expect(transport.listeners.size).toBe(0);
 		} finally { await stop(); await supervisor.dispose(); }
 	});
 	it("registers a cloud client's reading browser without a Supervisor", async () => {
 		const stop = registerClientBrowser(); const window = new Window();
-		const invoke = (channel: string, ...args: unknown[]) => transport.handlers.get(channel)!(event(window), ...args);
+		const invoke = async (channel: string, ...args: unknown[]) => structuredClone(await transport.handlers.get(channel)!(event(window), ...args));
 		try {
 			expect(await invoke(IpcChannel.browserCreate, "cloud", "https://example.test")).toMatchObject({ id: "cloud" });
 			await invoke(IpcChannel.browserNavigate, "cloud", "https://example.test/next");
 			await invoke(IpcChannel.browserLayout, shown("cloud")); expect(lastView().visible).toBe(true);
 			await invoke(IpcChannel.browserAction, "cloud", "reload");
+			expect(await invoke(IpcChannel.browserClose, "cloud")).toBeUndefined();
+			await invoke(IpcChannel.browserLayout, { ...shown("cloud"), visible: false });
+			await invoke(IpcChannel.browserCreate, "remaining");
 			const child = lastView().webContents;
 			await stop(); expect(child.destroyed).toBe(true); expect(transport.handlers.size).toBe(0);
 		} finally { await stop(); }

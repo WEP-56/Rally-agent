@@ -46,6 +46,8 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run hydrate:model-data
       - run: npm run build:packages
+      - if: matrix.target != 'android'
+        run: npm run build:adapters && node --test tests/external-agent-adapters.test.mjs
       - run: node node_modules/typescript/bin/tsc --noEmit -p tsconfig.node.json
       - run: node node_modules/typescript/bin/tsc --noEmit -p tsconfig.web.json
       - run: node --test tests/cloud/profiles.test.mjs

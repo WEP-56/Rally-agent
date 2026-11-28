@@ -1,10 +1,10 @@
-import { type ChatEvent, IpcChannel, IpcEvent, type RallyApi, type TaskEvent } from "./ipc";
-import type { WorkspaceState } from "./workspace";
-import type { ServicesState } from "./services";
-import type { BrowserEvent } from "./browser";
-import type { TerminalEvent } from "./terminal";
-import type { IdentityState } from "./identity";
-import type { ResourceSaveProgress } from "./resources";
+import { type ChatEvent, IpcChannel, IpcEvent, type RallyApi, type TaskEvent } from "./ipc.ts";
+import type { WorkspaceState } from "./workspace.ts";
+import type { ServicesState } from "./services.ts";
+import type { BrowserEvent } from "./browser.ts";
+import type { TerminalEvent } from "./terminal.ts";
+import type { IdentityState } from "./identity.ts";
+import type { ResourceSaveProgress } from "./resources.ts";
 
 export interface ClientTransport {
 	invoke<T>(channel: string, ...args: unknown[]): Promise<T>;
@@ -51,6 +51,13 @@ export function createApi(ipcRenderer: ClientTransport): RallyApi {
 		connectorTools: {
 			getState: connector => ipcRenderer.invoke(IpcChannel.connectorToolsState, connector),
 			setTier: (connector, name, tier) => ipcRenderer.invoke(IpcChannel.connectorToolsTier, connector, name, tier),
+		},
+		ssh: {
+			getState: () => ipcRenderer.invoke(IpcChannel.sshState),
+			save: input => ipcRenderer.invoke(IpcChannel.sshSave, input),
+			verify: (id, fingerprint) => fingerprint === undefined ? ipcRenderer.invoke(IpcChannel.sshVerify, id) : ipcRenderer.invoke(IpcChannel.sshVerify, id, fingerprint),
+			update: (id, enabled) => ipcRenderer.invoke(IpcChannel.sshUpdate, id, enabled),
+			remove: id => ipcRenderer.invoke(IpcChannel.sshRemove, id),
 		},
 		qqMail: {
 			getState: () => ipcRenderer.invoke(IpcChannel.qqMailState),

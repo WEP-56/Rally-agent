@@ -10,6 +10,7 @@ import type { RoleWorkerExecutor } from "../shared/role-workers.ts";
 import type { McpExposure, McpRiskTier } from "../shared/mcp.ts";
 import type { ConnectorId, FeishuCredentials, ImBotCredentials, QqMailCredentials } from "../shared/connections.ts";
 import type { IdentityState } from "../shared/identity.ts";
+import type { SshServerInput } from "../shared/ssh.ts";
 
 export function businessHandlers(
 	paths: RallyPaths,
@@ -32,6 +33,11 @@ export function businessHandlers(
 	const trustState = () =>
 		projectTrustState(paths.agentDir, [supervisor.workspace.base(), ...supervisor.workspace.state().recentProjects]);
 	return {
+		[IpcChannel.sshState]: () => supervisor.ssh.state(),
+		[IpcChannel.sshSave]: (input: SshServerInput) => supervisor.ssh.save(input),
+		[IpcChannel.sshVerify]: (id: string, fingerprint?: string) => supervisor.ssh.verify(id, fingerprint),
+		[IpcChannel.sshUpdate]: (id: string, enabled: boolean) => supervisor.ssh.update(id, enabled),
+		[IpcChannel.sshRemove]: (id: string) => supervisor.ssh.remove(id),
 		[IpcChannel.credentialsState]: () => supervisor.websiteAccounts.state(),
 		[IpcChannel.credentialsSubmit]: (input: unknown) => {
 			const result = supervisor.websiteAccounts.submit(input);

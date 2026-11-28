@@ -80,7 +80,10 @@ export class BrowserManager {
 	}
 	layout(owner: BrowserWindow, value: BrowserLayout): void {
 		if (!value || typeof value.visible !== "boolean" || ![value.x, value.y, value.width, value.height].every(n => Number.isFinite(n) && Math.abs(n) <= 100000)) throw new Error("BROWSER_BOUNDS_INVALID");
-		const tab = this.require(owner, value.id);
+		this.validId(value.id);
+		const tab = this.owners.get(owner.id)?.tabs.get(value.id);
+		// Unmount/resize messages can arrive after close has removed the native tab.
+		if (this.disposed || !tab || tab.closing) return;
 		if (value.visible) for (const other of this.owners.get(owner.id)!.tabs.values()) if (other !== tab) { if (other.layout) other.layout.visible = false; other.view.setVisible(false); }
 		// Renderer rectangles use CSS pixels; the native view expects device-independent pixels.
 		const zoom = owner.webContents.getZoomFactor(); const [width, height] = owner.getContentSize();
@@ -107,7 +110,11 @@ export class BrowserManager {
 		const contents = tab.view.webContents;
 		let resolve!: () => void; const pending = new Promise<void>(done => { resolve = done; });
 		tab.closing = pending; this.closing.add(pending); void pending.then(() => this.closing.delete(pending));
-		if (contents.isDestroyed()) resolve(); else { contents.once("destroyed", resolve); contents.close({ waitForBeforeUnload: false }); }
+		if (contents.isDestroyed()) resolve(); else {
+			// Never return the native event object as the result of browser:close.
+			contents.once("destroyed", () => resolve());
+			contents.close({ waitForBeforeUnload: false });
+		}
 		return pending;
 	}
 	private bind(tab: Tab): void {

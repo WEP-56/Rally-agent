@@ -15,6 +15,7 @@
 	"scripts": {
 		"dev": "npm run icons && electron-vite dev",
 		"build:packages": "npm run build -w @rally/telemetry && npm run build -w @rally/schema && npm run build -w @rally/tui && npm run build -w @rally/codemode && npm run build -w @rally/mcp && npm run build:offline -w @rally/ai && npm run build -w @rally/agent-core && npm run build:unbundled -w @rally/coding-agent",
+		"build:adapters": "node scripts/prepare-external-agents.mjs",
 		"build": "npm run icons && npm run build:packages && electron-vite build",
 		"preview": "electron-vite preview",
 		"typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
@@ -44,6 +45,7 @@
 		"node-pty": "1.1.0",
 		"nodemailer": "10.6.1",
 		"playwright": "1.65.1",
+		"ssh2": "1.17.0",
 		"turndown": "7.2.5"
 	},
 	"devDependencies": {
@@ -56,6 +58,7 @@
 		"@types/nodemailer": "8.0.2",
 		"@types/react": "19.3.0",
 		"@types/react-dom": "19.3.0",
+		"@types/ssh2": "1.15.6",
 		"@types/turndown": "5.0.6",
 		"@vitejs/plugin-react": "6.2.1",
 		"@xterm/addon-fit": "0.11.0",

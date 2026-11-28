@@ -30,6 +30,9 @@ import { WORKER_SYSTEM_PROMPT } from "../prompts.ts";
 import type { ModelStore } from "../model-store.ts";
 import { closeRoleSession, createRoleSession } from "./session.ts";
 import { createQqMailTools } from "./qqmail-tools.ts";
+import { createSshTools } from "./ssh-tools.ts";
+import type { SshConnections } from "../ssh-connection.ts";
+import type { SshSessions } from "./ssh-sessions.ts";
 import { McpStore } from "../mcp-store.ts";
 import type { QqMailConnection } from "../qqmail-connection.ts";
 import type { FeishuConnection } from "../feishu-connection.ts";
@@ -85,6 +88,8 @@ export interface WorkerManagerOptions {
 	services: ServiceManager;
 	feishu?: FeishuConnection;
 	qqMail?: QqMailConnection;
+	ssh?: SshConnections;
+	sshSessions?: SshSessions;
 	/** Injectable monotonic clock for inactivity tests; real thresholds remain ten minutes. */
 	watchdogNow?: () => number;
 	canRun?(): boolean;
@@ -244,6 +249,7 @@ export class WorkerManager {
 				...(this.options.credentials ? [createCredentialListTool(this.options.credentials)] : []),
 				...(this.options.agentBrowser ? createBrowserTools(this.options.agentBrowser, task, run, this.options.gates, browserFiles) : []),
 				...createQqMailTools(this.options.qqMail, { task, run, gates: this.options.gates, audit: this.options.audit, store, permissions: new McpStore(paths.agentDir) }),
+				...(this.options.ssh && this.options.sshSessions ? createSshTools(this.options.ssh, this.options.sshSessions, { task, run, gates: this.options.gates, audit: this.options.audit, store, permissions: new McpStore(paths.agentDir) }) : []),
 				...createJobTools(this.options.jobs, task, run),
 				...createServiceTools(this.options.services, task, run),
 				headless(createFileDeleteTool({ task, run, store, versions, gates: this.options.gates, isActive: networkHost.isActive })),

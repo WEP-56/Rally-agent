@@ -1,7 +1,9 @@
 import { build } from "vite";
 import { cpSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import '../prepare-external-agents.mjs';
 const dest='out/server'; mkdirSync(dest,{recursive:true});
+cpSync('build/external-agents', `${dest}/external-agents`, { recursive: true });
 // Preserve the module layout: worker_threads and process hosts resolve their siblings by URL.
 for(const dir of ['shared','main/supervisor','main/cloud','main/agent-browser'])cpSync(`src/${dir}`,`${dest}/src/${dir}`,{recursive:true});
 for(const file of readdirSync('src/main'))if(file.endsWith('.ts')&&!/^(application-shutdown|branding|browser|connection-host|desktop-.*|identity-avatar|index|ipc|notifications|shutdown-guard.*|smoke|terminal.*)\.ts$/.test(file))cpSync(`src/main/${file}`,join(dest,'src/main',file));

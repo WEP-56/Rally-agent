@@ -4,9 +4,16 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "electron-vite";
 import { resolve } from "node:path";
+import { execFileSync } from "node:child_process";
 
 export default defineConfig({
 	main: {
+		plugins: [{
+			name: "rally-agent-adapters",
+			buildStart() {
+				execFileSync(process.execPath, [resolve("scripts/prepare-external-agents.mjs")], { stdio: "inherit", windowsHide: true });
+			},
+		}],
 		// @rally/* stay external: at runtime they load each package's dist through the workspace links.
 		build: { externalizeDeps: true, rolldownOptions: { input: { index: resolve("src/main/index.ts"), "browser-host": resolve("src/main/agent-browser/browser-host.ts"), "process-host": resolve("src/main/supervisor/process-host.ts"), "terminal-host": resolve("src/main/terminal-host.ts"), "search-tool-host": resolve("src/main/supervisor/search-tool-host.ts"), "shutdown-guard-host": resolve("src/main/shutdown-guard-host.ts"), "external-worker-windows-preload": resolve("src/main/external-worker-windows-preload.ts"), "network-host": resolve("src/main/supervisor/network-host.ts") } } },
 	},

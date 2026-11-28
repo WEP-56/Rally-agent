@@ -15,11 +15,11 @@ Above all, be thorough in producing high-quality, correct code that completely f
 
 ## for this project
 
-用中文交流，默认情况下用简单易懂的方式（ELI5）与用户沟通，如果用户要求，再深入讲解。设计决策以 [问答记录](docs/superagent/00-问答记录.md) 为准；旧设计分册与其冲突时以问答记录为准。
+用中文交流，默认情况下用简单易懂的方式（ELI5）与用户沟通，如果用户要求，再深入讲解。设计以用户当前明确要求及现行功能文档为准；开发状态和后续工作见 [HANDOFF](docs/HANDOFF.md)。
 
 ### 产品边界
 
-- 界面的样子来自 `example/rally-ai-agent-ui-design`，已搬到 `src/renderer/src`。功能和字段按问答记录定，不从原型反推。
+- 界面的样子来自 `example/rally-ai-agent-ui-design`，已搬到 `src/renderer/src`。功能和字段按已确认需求及现行功能文档定，不从原型反推。
 - 用户在意这套设计：改界面时保持原型的视觉风格和 token，不要另起一套。
 - 连接器提供的所有工具（无论是否通过 MCP 实现）统一在「连接」页对应连接器内展示和设置权限；MCP 页管理用户配置的 MCP 服务。新增连接器工具时同步登记工具清单、默认风险档并接入执行时校验，不能只有界面配置。具体约定见 [Connector](docs/Connector/README.md)。
 
@@ -59,5 +59,7 @@ Above all, be thorough in producing high-quality, correct code that completely f
 - 新会话先读 [HANDOFF](docs/HANDOFF.md)。用户提到上下文太长、要开启新会话或更新 handoff 时，删除过时描述，写明下个会话的任务；任务不明确时询问用户。
 
 ### 一个重要的提醒
+开发 AI Agent 应用时，请站在实际使用工具的 LLM 角度设计：假如你离开当前的 Codex / Claude 环境，进入这个 Agent，仅凭它提供的提示词、工具描述、参数和返回结果，还能理解怎么做、顺手地完成任务吗？以此检查所有 LLM 会接触的工具，优先让它们简单、好用、少占上下文。
+
 不要假定Rally内的agent了解你所知道的。尤其是对修改或新增系统提示词、工具描述、skills时。
 否则这会让Rally非常困惑，因为它确实没有你的上下文！

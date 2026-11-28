@@ -22,6 +22,9 @@ const paths = resolveRallyPaths();
 // Pi resolves ~/.rally/agent from piConfig; the env var pins it even for code paths that read it directly.
 process.env.RALLY_CODING_AGENT_DIR = paths.agentDir;
 process.env.RALLY_BUILTIN_SKILLS_DIR = join(app.isPackaged ? process.resourcesPath : app.getAppPath(), "skills");
+process.env.RALLY_EXTERNAL_AGENTS_DIR = app.isPackaged
+	? join(process.resourcesPath, "external-agents")
+	: join(app.getAppPath(), "build", "external-agents");
 if (app.isPackaged) process.env.RALLY_BROWSER_PATH = join(process.resourcesPath, "browser");
 
 if (process.env.RALLY_SMOKE === "1") {

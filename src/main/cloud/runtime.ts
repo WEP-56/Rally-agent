@@ -18,6 +18,7 @@ process.umask(0o077);
 const paths = resolveRallyPaths();
 process.env.RALLY_CODING_AGENT_DIR = paths.agentDir;
 process.env.RALLY_BUILTIN_SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../../skills");
+process.env.RALLY_EXTERNAL_AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../../external-agents");
 const secrets = process.env.RALLY_CREDENTIALS_DIR || "/etc/rally";
 const vault = cloudVault(Buffer.from(readFileSync(join(secrets, "vault.key"), "utf8").trim(), "base64url"));
 const epoch = randomUUID();
@@ -117,7 +118,7 @@ const server = createServer(async (req, res) => {
 		try {
 			const result = await call;
 			if (
-				/^(coach|tool-providers|models|mcp|memory|skills|trust|feishu|qqmail|qqbot|connector-tools|schedules):/.test(channel) &&
+				/^(coach|tool-providers|models|mcp|memory|skills|trust|feishu|qqmail|qqbot|ssh|connector-tools|schedules):/.test(channel) &&
 				!channel.endsWith(":state") &&
 				channel !== IpcChannel.modelsFetch
 			)

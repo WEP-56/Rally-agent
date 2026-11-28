@@ -14,6 +14,11 @@ export const FEISHU_TOOLS = [
 
 /** Connector-owned tools are listed before first use, regardless of their transport. */
 export const CONNECTOR_TOOLS: Record<ConnectorId, { name: string; label: string; defaultTier: McpRiskTier }[]> = {
+	ssh: [
+		{ name: "ssh_list", label: "查看 SSH 服务器", defaultTier: "reversible" },
+		{ name: "ssh_exec", label: "执行 SSH 命令", defaultTier: "irreversible" },
+		{ name: "ssh_write_stdin", label: "继续 SSH 会话（读取免审批，输入按权限）", defaultTier: "irreversible" },
+	],
 	feishu: FEISHU_TOOLS.map(({ tool, label }) => ({ name: createMcpToolName(FEISHU_SERVER_NAME, tool.name), label, defaultTier: "reversible" })),
 	qqmail: [
 		{ name: "qqmail_search", label: "检索 QQ 邮件", defaultTier: "reversible" },

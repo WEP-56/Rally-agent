@@ -13,6 +13,8 @@ import { FeishuConnection } from "../feishu-connection.ts";
 import { QqBotConnection, type QqBotFactory } from "../qqbot-connection.ts";
 import type { CredentialVault } from "../credential-vault.ts";
 import { QqMailConnection } from "../qqmail-connection.ts";
+import { SshConnections } from "../ssh-connection.ts";
+import { SshSessions } from "./ssh-sessions.ts";
 import type { QqMailTransport } from "../qqmail-transport.ts";
 import { IdentityStore } from "../identity-store.ts";
 import { RoleWorkerStore } from "../role-worker-store.ts";
@@ -108,6 +110,8 @@ export class Supervisor {
 	readonly feishu: FeishuConnection;
 	readonly qqBot: QqBotConnection;
 	readonly qqMail: QqMailConnection;
+	readonly ssh: SshConnections;
+	readonly sshSessions: SshSessions;
 	readonly gates: GateService;
 	readonly audit: AuditLog;
 	readonly processes: ProcessRegistry;
@@ -151,6 +155,7 @@ export class Supervisor {
 			this.feishu = new FeishuConnection(paths.home, options.credentialVault, (text, source) => this.main.receiveFromIm(text, source));
 			this.qqBot = new QqBotConnection(paths.home, options.credentialVault, (text, source) => this.main.receiveFromIm(text, source), options.qqBotFactory);
 			this.qqMail = new QqMailConnection(paths.home, options.credentialVault, options.qqMailTransport);
+			this.ssh = new SshConnections(paths.home, options.credentialVault);
 			const catalog = new CapabilityCatalog(paths.agentDir, () => [paths.mainCwd, this.workspace.base(), ...this.workspace.state().recentProjects]);
 			const approval = this.events.ofKind("approval_mode").at(-1);
 			this.autoApprove = approval?.data.enabled === true;
@@ -177,12 +182,20 @@ export class Supervisor {
 				return !!task && !task.ended && (!runId || (run?.id === runId && !run.endedAt));
 			});
 			this.agentBrowser = new AgentBrowserService(join(paths.agentDir, "browser-profile"), this.websiteAccounts, this.processes);
+			this.sshSessions = new SshSessions({ connections: this.ssh, credentials: this.websiteAccounts, store: this.store, directory: paths.jobsDir,
+				onDone: (job, text) => {
+					const input = this.store.jobDone(job, text);
+					if (input && !this.disposed) this.workers?.deliver(job.taskId, text, input.id);
+				},
+				onBusyChange: () => { if (!this.disposed) { this.workers?.jobsChanged(); this.scheduler?.tick(); } },
+				onActivity: taskId => this.workers?.noteActivity(taskId),
+			});
 			this.models = new ModelStore(paths.modelsFile, managedModelConfigValue(this.processes, paths.agentDir));
 			this.gates = new GateService({ store: this.store, audit: this.audit, events: this.events,
 				quote: (ref) => this.main.quote(ref), requested: () => this.relay.captureSources(),
 				notice: () => this.relay.captureSources() });
 			this.schedules = new ScheduledTasks(this.events, this.store, () => this.autoApprove, () => this.scheduler.tick(), options.inactivityNow, () => this.inactivity.canRun());
-			const capabilities = async () => (await catalog.context()) + this.roleWorkers.context() + (this.feishu.toolsEnabled() ? "\nFeishu worker MCP (rally_feishu): read shared documents and wiki nodes, search shared Bitable records. Only workers may call it." : "") + (this.qqMail.available() ? "\nQQ Mail worker tools: search/read the inbox, save attachments, and send/reply. Rally enforces per-tool permissions configured in Connections; sending requires user confirmation by default. Only workers may call them." : "");
+			const capabilities = async () => (await catalog.context()) + this.roleWorkers.context() + (this.feishu.toolsEnabled() ? "\nFeishu worker MCP (rally_feishu): read shared documents and wiki nodes, search shared Bitable records. Only workers may call it." : "") + (this.qqMail.available() ? "\nQQ Mail worker tools: search/read the inbox, save attachments, and send/reply. Rally enforces per-tool permissions configured in Connections; sending requires user confirmation by default. Only workers may call them." : "") + (this.ssh.state().some(server => server.enabled) ? "\nSSH worker tools: discover configured servers with ssh_list, run remote commands with ssh_exec, and continue reading or sending input with ssh_write_stdin. Only built-in workers may call them. Use Connections > SSH for missing configuration or host-key confirmation. Never ask for passwords or private keys in ordinary chat. A disconnect does not prove the remote action failed." : "");
 			this.main = new MainAgent(paths, this.events, options.emitChat, {
 				canReply: source => source.platform === "feishu" ? this.feishu.canReply(source) : this.qqBot.canReply(source),
 				reply: (source, text) => source.platform === "feishu" ? this.feishu.reply(source, text) : this.qqBot.reply(source, text),
@@ -239,6 +252,8 @@ export class Supervisor {
 				services: this.services,
 				feishu: this.feishu,
 				qqMail: this.qqMail,
+				ssh: this.ssh,
+				sshSessions: this.sshSessions,
 				watchdogNow: options.watchdogNow,
 				createTools: (task) => createWorkerTools(this.workerHost(task)),
 				report: (task, runId, state, summary, question, answers) =>
@@ -274,6 +289,7 @@ export class Supervisor {
 			await this.agentBrowser.recover();
 			if (this.disposed) return;
 			this.jobs.recover();
+			this.sshSessions.recover();
 			this.services.recover();
 			await this.main.start();
 			if (this.disposed) return;
@@ -321,6 +337,7 @@ export class Supervisor {
 		}
 		// allSettled prevents an early rejection from releasing the lock while another session still closes.
 		const results = await Promise.allSettled([
+			Promise.resolve().then(() => { this.sshSessions.dispose(); this.ssh.dispose(); }),
 			this.inactivity.dispose(),
 			Promise.resolve().then(() => this.agentBrowser.dispose()),
 			pendingRequests,
@@ -354,6 +371,7 @@ export class Supervisor {
 		for (const task of tasks) this.store.setInactivityPause(task.id, this.inactivity.state().pausedAt);
 		// Set reasons before aborting the sessions so job/service cancellation remains explainable.
 		const stopping = [
+			...tasks.map(task => this.sshSessions.killTask(task.id, "inactivity")),
 			...tasks.map(task => this.jobs.killTask(task.id, "inactivity")),
 			...this.services.state().services.filter(service => service.status === "running").map(service => this.services.stop(service.id, "inactivity")),
 			this.main.pause(),
@@ -398,6 +416,7 @@ export class Supervisor {
 		try {
 			await this.workers.closeTask(taskId);
 			await this.jobs.killTask(taskId);
+			this.sshSessions.deleteTask(taskId);
 			for (const service of task.services ?? []) await this.services.stop(service.id, "user");
 			this.events.assertWritable();
 			// Only app-owned files with host-generated names. Never traverse task cwd/outputDir.
@@ -460,6 +479,7 @@ export class Supervisor {
 		if (["task_report", "gate_requested", "task_queued", "task_approved", "attention_answered", "gate_decided"].includes(kind)) this.relay?.captureSources();
 		if (kind === "task_ended") this.gates?.closeTask(task.id, "Task ended.");
 		if (kind === "task_ended") void this.jobs?.killTask(task.id).catch(error => console.error("Task job cleanup failed", error));
+		if (kind === "task_ended") this.sshSessions?.killTask(task.id);
 		if (kind === "run_started") {
 			try { const state = this.workspace.recordProject(task.cwd); this.options.emitWorkspace?.(state); }
 			catch (error) { this.main.addSystemLine(`最近项目记录失败：${String(error)}`); }
@@ -531,7 +551,10 @@ export class Supervisor {
 			abortWorker: (taskId: string) => {
 				return this.workers.abort(taskId);
 			},
-			killJobs: taskId => this.jobs.killTask(taskId),
+			killJobs: async taskId => {
+				const sshCount = this.sshSessions.killTask(taskId);
+				return sshCount + await this.jobs.killTask(taskId);
+			},
 			board: () => this.board(),
 			roleWorker: id => { const role = this.roleWorkers.get(id); return role && { id: role.id, name: role.name, summary: role.summary }; },
 		};

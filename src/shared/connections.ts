@@ -1,6 +1,6 @@
 import type { McpRiskTier } from "./mcp.ts";
 
-export type ConnectorId = "feishu" | "qqmail";
+export type ConnectorId = "feishu" | "qqmail" | "ssh";
 export interface ConnectorToolSettings {
 	name: string;
 	label: string;

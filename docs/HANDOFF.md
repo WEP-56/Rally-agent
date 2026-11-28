@@ -1,48 +1,42 @@
-# Rally 开发交接（2026-11-26）
+# Rally 开发交接（2026-11-28）
 
-入口：[文档索引](README.md) · [发布指南](发布指南.md) · [0.5.0 发布说明](发布说明-0.5.0.md) · [产品问答](superagent/00-问答记录.md) · [Prompt](Prompt/system-prompt.md)。
+入口：[文档索引](README.md) · [实施清单](开发实施TODO.md) · [连接器约定](Connector/README.md) · [Prompt](Prompt/system-prompt.md) · [发布指南](发布指南.md)。
 
-## 品牌吉祥物接入（2026-11-26）
+## 下一阶段
 
-用户提供的设计案例位于本机 `example/dynamic-md3-agent-mascot/`，原目录处于 Git 忽略范围。核心骨骼化 SVG 与性能探测已移入 `src/renderer/src/mascot/`，移植时去掉演示用场景/指标类型，只保留实际可用的状态与弹簧物理。
+用户已确认本轮工作，要求提交并推送到 GitHub。后续是持续迭代：补充连接器、补充外部 Agent，并根据真实使用体验和 Rally 内 LLM 的反馈优化。尚未指定下一个接入对象或具体缺陷；下一会话以用户带来的需求、日志和反馈为切入点，不预设整套扩展框架。
 
-默认头像由 `IdentityState.avatar === null` 决定，与名称、性格和工作方式无关。默认显示 Mochi；用户选择 PNG 头像后沿用原头像。聊天顶部和工位顶部显示动态吉祥物，小尺寸身份头像显示静态紧凑图，避免每条消息都启动独立动画。聊天活动只从主 Agent 的 `ChatHeaderState` 读取，不混入 worker 任务状态；活动映射到待机、思考、查询、任务编排、工具调用、回复和整理。主 Agent 的完成/错误结果短暂驱动庆祝/错误姿态，中止不标记为完成。设置-外观新增“减少动效”；系统减弱动态效果也会停用连续吉祥物动画。移动/低性能环境降帧、跳过滤镜和装饰动画，隐藏或滚出视口时暂停循环。
+每次先确认实际任务、运行主机、工具参数与返回结果，复现卡点，再做最小必要改动。尤其检查 LLM 能否只凭系统提示词、工具描述、参数和结果顺畅完成任务；优先改善可理解性、交互连续性和上下文体积，避免堆工具、重复配置及防御性流程。Rally 内的 LLM 没有本开发会话的上下文。
 
-验证：`npm run typecheck`、`node node_modules/vitest/vitest.mjs --run src/renderer/src/mascot/state.test.ts src/renderer/src/components/AssistantContent.test.ts`、`npx electron-vite build` 均通过。用户已确认界面现在能看到吉祥物。随后按反馈移除吉祥物状态解析对 worker 任务列表的依赖，只由主 Agent `ChatHeaderState` 驱动态；新增 `state.test.ts` 覆盖查询、派发、回复、完成和中止。首次引导第 2 步的身份设置上方新增动态精灵与“使用默认头像，我就能一直陪着你哦”气泡，仅当前步骤运行；用户已确认效果。聊天助手消息气泡已移除重复头像并收回左侧缩进，顶部身份徽标和空状态欢迎头像保留。
+## 本轮已完成
 
-## 本轮完成并获用户验收
+- SSH 已加入「连接」页：支持多服务器、密码或私钥、指纹确认、验证和启停。本地与云端共用配置业务接口；内置 Worker 使用 `ssh_list`、`ssh_exec`、`ssh_write_stdin`，主助手仅查询轻量服务器信息。工具风险档在连接器里管理并实际参与执行校验。保持可选 PTY、增量有界输出和已有作业通知，不扩展终端模拟器、SFTP 或断线自动重放。契约见 [SSH 连接](Connector/SSH连接.md) 和 [工具描述](Prompt/tools-Description/ssh.md)。
+- SSH 续读时空 `chars`／空 `credential.id` 按省略处理，纯读取不误走输入校验或审批；有效输入仍按权限执行。用户已验证相关修复。
+- Windows 本地浏览器标签关闭不再通过 IPC 返回原生事件对象；关闭后迟到的布局消息被忽略，避免对象无法克隆及 `BROWSER_NOT_FOUND`。用户已验证。
+- 外部 Claude Code／Codex Worker 复用任务运行主机已有的 CLI、登录与模型配置。自动发现 PATH、常见用户安装目录、npm 安装，并支持可选 `executablePath`；旧私有 CLI 与高级 `adapterPath` 只保留兼容，不创建第二份程序。
+- ACP 连接层由 Rally 构建并随包发布，用户无需补装 adapter、SDK、Node 或 npm。Codex ACP 2.10.0、Claude ACP 0.110.1、Claude JS SDK 0.3.330 的依赖锁位于 `scripts/external-agents/`；只分发 JavaScript 和许可证，约 8.7 MiB，不包含原生 CLI。开发启动及桌面／服务端构建自动准备，应用运行时不安装依赖。
+- Windows ACP 资源位于 ASAR 外；SDK 必须保留单独的 `extraResources` 映射，默认复制器会跳过资源根 `node_modules`。Linux 位于服务根目录 `external-agents/`。发布检查和独立目录加载回归已覆盖。实现入口为 `external-worker-runtime.ts`、`external-worker-session.ts` 与 `scripts/prepare-external-agents.mjs`。
+- 角色页、自我管理 Skill 和 [Prompt 描述](Prompt/self-management.md) 已同步“内置连接层，复用已有 CLI”。缺 CLI、登录失败和 Rally 内置组件缺失分别处理；内置组件缺失应修复 Rally 安装。自我管理仍只有一个 Skill，按领域读取 `skills/references/`；外部执行器说明见 [参考文档](../skills/references/external-agents.md)。
 
-- Android 聊天顶部改成左搜索、中央身份徽标、右设置，保证徽标真正居中。
-- 新增 `appearance.ts`，复用在主界面与连接页；通过 `ConnectionBridge.setAppearance` 同步 Android 状态栏、导航栏背景及图标明暗。原生壳保存上次外观，启动页也使用对应颜色。
-- 修复 Gecko 顶部玻璃：CSS 优化器会按声明顺序合并前缀，必须将标准 `backdrop-filter` 放在 `-webkit-backdrop-filter` 后面。构建产物回归检查覆盖标准属性保留。
-- 禁用移动端页面双指缩放；MCP 操作栏允许换行，设置页防止横向溢出；外观页窄屏采用上下布局，大字号不再将说明文字挤成竖排。
-- 用 `AccentPicker.tsx` 替代原生颜色对话框，保留预设颜色，支持 HCT 滑杆与十六进制输入，复用现有主题算法和 token。
-- 聊天、设置、右侧栏外层上下铺满，去掉桌面式留白和外层圆角；输入框、卡片自身圆角保留。规则严格限定 `[data-platform="android"]`，Windows 外层布局不受影响。
-- 账号状态响应为空或结构错误时保留上次有效状态并报告错误，防止聊天页崩溃。
+用户要求删除旧问答记录及相关索引，现行约定保留在根 `AGENTS.md` 和对应功能文档，不再维护集中式对话流水账。
 
-调试期间曾临时切到本地测试服务；因其遗漏账号状态导致 `credentials.state is null`，不是 VPS 故障。已恢复用户原有 VPS 配对并停掉测试服务及 ADB 转发。用户明确要求以后直接使用已配好的 VPS 做外观验证，不再搭建或切换本地模拟服务，也不要为视觉测试发送模型消息。
+## 验证与边界
 
-## 验证与安装
+- 本轮代码已通过 `npm run typecheck`、桌面构建、服务端构建与 Skill 校验；SSH、浏览器、外部执行器及角色／Skill 使用定向离线回归，不跑全量 Vitest。
+- SSH 12 项、浏览器 13 项、外部执行器 21 项、角色／Skill 子集 5 项、发布检查 2 项及独立目录加载检查 1 项通过；Unix 原生 adapter 的 1 项用例在 Windows 跳过。
+- 本机内置连接层复用已有 Codex 读到 4 个模型、Claude 读到 6 个模型，均完成选模型、只读模式及关闭。Windows 实际目录包也用包内 Rally 运行时完成模型目录检查，组件共 9,088,793 字节，无原生 CLI。没有发送推理任务，不将目录检查当作完整真实任务验收。
+- Linux 服务端构建通过，完整 Linux 打包仍由相应平台 CI 验证。视觉与真实使用继续按项目约定由用户负责。
+- 本次按用户要求提交和推送代码，版本保持 `0.5.1`，不打 tag、不发 Release、不部署 VPS。推送 master 不会触发仅监听版本 tag／手动派发的发布流水线。
 
-- `npm run typecheck` 通过；前期完整 `npm run build`、最终 `npx electron-vite build` 通过。
-- 定向执行 `node --experimental-vm-modules --test tests/attachments/client-bridge.test.mjs tests/cloud/renderer.test.mjs`，6 项通过；最后的贴边布局调整后再次运行 renderer 文件，4 项通过。
-- 使用 JDK 17，`node scripts/cloud/build-android.mjs --debug --offline` 完成三个 ABI 构建、内容及签名检查。
-- x86_64 调试包已覆盖安装并启动于 ADB `127.0.0.1:5555`，应用 ID `dev.rally.mobile`，VPS 配对保留。用户亲自完成视觉验收。
-- 调试包在 `release/Rally-0.5.0-android-<ABI>-debug.apk`；调试签名保存在忽略的 `.artifacts/android-debug.p12`，后续覆盖安装需保留此签名，不能卸载清除配对数据。
-- 本轮不提升版本、不打 tag、不发布；修复跟随下一版本。当前用户仅要求 Git 提交，未要求将本轮推送到远端。
+## 后续保持的约定
 
-## 已有发布与部署状态
+- 连接器提供的所有工具在「连接」页对应连接器内展示和设置权限；MCP 页只管理用户配置的 MCP。新增工具同时登记清单、默认风险档和执行校验，维护 [Connector](Connector/README.md) 与 `docs/Prompt/`。
+- 外部 Agent 扩展优先复用成熟适配器与宿主已有程序。客户端与云端任务主机的路径、登录相互独立；不桥接 Rally 的 MCP、浏览器或内部工具，不静默改模型或执行器。
+- 维持已有 MD3 风格和 token，不从原型反推功能。视觉默认由用户验收，开发侧执行必要的类型检查、构建和定向测试，不为验收调用付费模型。
+- 按根 `AGENTS.md` 执行依赖、代码和 Git 约定。提交明确路径，不提交私密配置、依赖、生成物或本地参考仓库；发版／部署另需明确要求。
+- Android 使用既有 VPS 配对；没有明确要求时，不切换到本地模拟服务，不清除配对或签名。连接信息及签名只在私有 `.signing/`，不写入文档或日志。
 
-0.5.0 已完成 MD3 界面与新图标发布。`v0.5.0` 指向 `9f0c4af`，发布检查修复为 `b1b5449`，流水线 `45781860358` 已成功。新品牌图标源为 `docs/icon.png`，由 `scripts/generate-icons.mjs` 生成各平台资源；保留透明圆角。README 已改为简短温暖风格，Linux DO 社区认可信息需保留。
+## 本地参考与产物
 
-VPS 已按用户要求从 0.4.1 更新到正式 0.5.0，未创建备份，原配置与业务数据保留，两个 Rally 服务及健康检查正常。实际为受限普通账号运行的 systemd 部署，并非 Docker；用户已决定暂不调整部署方式或权限。连接信息仅在私有 `.signing/` 中，不复制到文档或日志。另有与 Rally 无关的 `mistral-proxy` 启动失败，之前已告知用户，未修改。
-
-## 保持的约定
-
-- 当前 UI 风格以 `example/rally-md3-design` 及已迁移组件为准；功能字段按产品问答，不从演示反推。新吉祥物案例作为下一项设计依据。
-- 用中文、简单易懂地沟通。视觉默认由用户验收；未明确要求时不启动浏览器、截图或 Electron 验收。本轮后半程用户已要求自己验证。
-- 修改代码后跑类型检查；不跑全量 Vitest，不触发真实模型 API。只执行必要的指定文件测试。
-- 用户要求时才提交，只暂存明确路径，不重置、不清理用户文件、不强推、不跳过 hook。
-- 主进程与 renderer 经 `src/shared/ipc.ts` 声明通道通信；Android 原生连接能力经 `src/shared/connection.ts` 的既有桥接。
-- 外部 Claude/Codex 执行器仍按需安装，用户目录中的工具与认证不随升级覆盖；不要把庞大 CLI 依赖重新打入基础包。
-- Rally 内的 Agent 没有本开发会话上下文，修改提示词、工具说明或 Skill 时必须给出完整可理解的信息。
+- `example/codeg` 已克隆，参考提交 `20e5e27749000b899ea72f53fbe5677abfcb5a69`，可继续参考外部 Agent 的进程、协议和模式兼容处理；整个 `example/` 受 Git 忽略，不随代码推送。来源和许可记录在 `THIRD_PARTY_NOTICES/external-agent-sources.txt`。
+- `.artifacts/external-agent-package` 是本轮 Windows 临时验证目录；清理曾被自动审批拒绝，暂留且不入库。无需继续重试删除或再次打包，除非后续改动需要验证。

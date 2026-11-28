@@ -13,6 +13,11 @@ files:
   - LICENSE
   - THIRD_PARTY_NOTICES/**/*
 extraResources:
+  - from: build/external-agents
+    to: external-agents
+  # The resource copier excludes a root node_modules directory; copy the JS SDK explicitly.
+  - from: build/external-agents/node_modules
+    to: external-agents/node_modules
   - from: build/agent-browser
     to: browser
   - from: build/icon.ico

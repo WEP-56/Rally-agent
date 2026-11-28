@@ -18,8 +18,11 @@
 
 ## 各连接器说明
 
+SSH 的执行和实际输入默认进入既有内门；`ssh_write_stdin` 的纯读取分支不审批，输入分支按当前风险档执行。配置和权限仍在连接器内管理。
+
 - [飞书连接](飞书连接.md)
 - [QQ 机器人连接](QQ机器人连接.md)
 - [QQ 邮箱连接](QQ邮箱连接.md)
+- [SSH 连接](SSH连接.md)
 - [GitHub CLI 与云端登录](../../deploy/linux/README.md#github-cli-与用户工具)
-- [Claude Code / Codex 按需安装与复用](../../skills/references/external-agents.md)（Rally 自我管理 Skill 的外部执行器参考）
+- [Claude Code / Codex 发现与复用](../../skills/references/external-agents.md)（Rally 内置 ACP 连接层，自我管理 Skill 复用任务主机已有 CLI、登录与模型配置）

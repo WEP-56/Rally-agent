@@ -95,10 +95,11 @@ export class ExternalWorkerSession {
 			env.INITIAL_AGENT_MODE = options.mode === "write" ? "workspace-write" : "read-only";
 		}
 		if (options.executor === "codex" && process.platform === "win32") {
-			const preloadUrl = new URL("./external-worker-windows-preload.js", import.meta.url).href;
+			const preloadUrl = new URL(import.meta.url.endsWith(".ts") ? "../external-worker-windows-preload.ts" : "./external-worker-windows-preload.js", import.meta.url).href;
 			env.NODE_OPTIONS = [env.NODE_OPTIONS, `--import=${preloadUrl}`].filter(Boolean).join(" ");
 		}
-		const child = spawn(process.execPath, [entry], {
+		const adapterIsScript = /\.[cm]?js$/iu.test(entry);
+		const child = spawn(adapterIsScript ? process.execPath : entry, adapterIsScript ? [entry] : [], {
 			cwd: options.cwd, env, windowsHide: true, detached: process.platform !== "win32", stdio: ["pipe", "pipe", "pipe"],
 		});
 		const pid = child.pid;
@@ -157,8 +158,13 @@ export class ExternalWorkerSession {
 			}, { cancellationSignal: signal, stopWaitingOnCancel: true });
 			if (initialized.protocolVersion !== PROTOCOL_VERSION) throw new Error("ACP 协议版本不匹配");
 			if (options.executor === "codex") {
-				const auth = await connection.agent.request<{ state: string }>("auth/status", {}, { cancellationSignal: signal, stopWaitingOnCancel: true });
-				if (auth.state === "unauthenticated") throw new Error("请先在当前主机登录 Codex");
+				try {
+					const auth = await connection.agent.request<{ state: string }>("auth/status", {}, { cancellationSignal: signal, stopWaitingOnCancel: true });
+					if (auth.state === "unauthenticated") throw new Error("请先在当前主机登录 Codex");
+				} catch (error) {
+					// Older host adapters check authentication in session/new without this optional method.
+					if (!(error instanceof Error && "code" in error && error.code === -32601)) throw error;
+				}
 			}
 			const additionalRoots = options.outputDir ? [options.outputDir] : [];
 			const claude = options.executor === "claude-code";
